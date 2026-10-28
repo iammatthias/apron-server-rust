@@ -5,6 +5,7 @@
 mod account_id_test;
 mod email_test;
 mod ext_test;
+mod guest_posting_test;
 mod helpers;
 mod invite_bot_test;
 mod invite_device_test;

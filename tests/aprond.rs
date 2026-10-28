@@ -92,8 +92,8 @@ fn without_times(log: &[u8]) -> String {
         .join("\n")
 }
 
-/// Drops the groups of extensions Go lacks, `--apple.app-id` and
-/// `--unfurl.enable`, which come last in `--help` and `--print-config`.
+/// Drops the groups of extensions Go lacks, from `--apple.app-id` on, which
+/// come last in `--help` and `--print-config`.
 fn without_extensions(out: &[u8]) -> String {
     let out = String::from_utf8_lossy(out).into_owned();
     if let (Some(start), Some(end)) = (out.find("\nApple:\n"), out.find("\nHelp Options:\n")) {
@@ -537,10 +537,43 @@ fn test_unfurl_flag() {
     let (code, out, _) = output(APROND, &["--print-config"]);
     assert_eq!(code, 0);
     let out = String::from_utf8(out).unwrap();
-    assert!(out.ends_with("\n[unfurl]\n\n# Fetch the pages that messages link to and attach their OpenGraph previews, with images hosted here; the server then requests any public http(s) URL a user posts (off by default; not in the Go aprond)\nenable = false\n"), "{out}");
+    assert!(out.contains("\n[unfurl]\n\n# Fetch the pages that messages link to and attach their OpenGraph previews, with images hosted here; the server then requests any public http(s) URL a user posts (off by default; not in the Go aprond)\nenable = false\n\n[guest]\n"), "{out}");
     let (code, out, _) = output(APROND, &["--print-config", "--unfurl.enable"]);
     assert_eq!(code, 0);
     assert!(String::from_utf8(out)
         .unwrap()
-        .ends_with("\nenable = true\n"));
+        .contains("\nenable = true\n\n[guest]\n"));
+}
+
+/// `--guest.read-only` and `--history.retention`, extensions: off by
+/// default, kept by `--print-config`, and a retention that is not a
+/// positive Go duration stops the server.
+#[test]
+fn test_guest_and_history_flags() {
+    let (code, out, _) = output(APROND, &["--print-config"]);
+    assert_eq!(code, 0);
+    let out = String::from_utf8(out).unwrap();
+    assert!(out.ends_with("\n[guest]\n\n# Guests may read but not post, react, join, leave, or make rooms; server.ext.settings says so (off by default; not in the Go aprond)\nread-only = false\n\n[history]\n\n# Delete messages, reactions, and their uploads older than this, such as 168h, checking hourly; emptied threads go, other rooms stay (default: keep forever; not in the Go aprond)\nretention = \"\"\n"), "{out}");
+    let (code, out, _) = output(
+        APROND,
+        &[
+            "--print-config",
+            "--guest.read-only",
+            "--history.retention",
+            "168h",
+        ],
+    );
+    assert_eq!(code, 0);
+    assert!(String::from_utf8(out)
+        .unwrap()
+        .ends_with("\nread-only = true\n\n[history]\n\n# Delete messages, reactions, and their uploads older than this, such as 168h, checking hourly; emptied threads go, other rooms stay (default: keep forever; not in the Go aprond)\nretention = \"168h\"\n"));
+    for bad in ["7d", "-1h"] {
+        let flag = format!("--history.retention={bad}");
+        let (code, _, err) = output(APROND, &["--store", "memory", &flag]);
+        assert_eq!(code, 1, "{bad}");
+        assert_eq!(
+            without_times(&err),
+            format!("level=ERROR msg=\"server stopped\" error=\"invalid --history.retention \\\"{bad}\\\": use a positive duration, such as 168h\"")
+        );
+    }
 }

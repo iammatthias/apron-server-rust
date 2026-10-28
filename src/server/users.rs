@@ -186,6 +186,32 @@ impl UserState {
     }
 }
 
+/// Denies a read-only guest's writes (Config.guest_posting).
+pub const GUEST_READ_ONLY: &str = "Guests can only read here; sign in to post or join rooms";
+
+/// Reports whether a read-only guest is denied the method outright;
+/// `command` and `activity` decide per request.
+pub fn guest_write(method: &str) -> bool {
+    matches!(
+        method,
+        "message"
+            | "reactions"
+            | "room_set"
+            | "room_join"
+            | "room_leave"
+            | "push_register"
+            | "push_unregister"
+    )
+}
+
+impl State {
+    /// Reports whether the user is a guest on a server whose guests only
+    /// read.
+    pub fn read_only_guest(&self, user_id: &str) -> bool {
+        !self.config.guest_posting && self.users.get(user_id).is_some_and(|u| !u.persists())
+    }
+}
+
 /// The outcome shared with the duplicates of a request (§1.2).
 pub struct DedupEntry {
     /// A hash of the request's method and canonical params.
