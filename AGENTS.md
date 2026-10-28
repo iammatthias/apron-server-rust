@@ -196,23 +196,47 @@ tools/deploy/deploy.sh
 The script deploys the committed `HEAD` to the Docker host named by
 `APRON_DEPLOY_HOST`, set in the environment or in `tools/deploy/local.env`,
 which git ignores. The script's header lists the other settings. It bundles
-the crate, `cargo vendor` output with its `.cargo/config.toml`, the Go
-clone's built web client (`.apron-web/build`, built with
-`VITE_DEFAULT_SERVER_URL=` and `VITE_TRUSTED_MEDIA_ORIGINS=` so it connects
-same-origin), and `deploy/`. It rsyncs the bundle to the host and runs
-`docker compose -f deploy/compose.yaml up -d --build` there. Then it waits
-for `/healthz` through the public URL and prints the container table.
-Rerunning it is safe: the SQLite store and uploads live in the `apron_data`
-volume, which a deploy never removes.
+the crate, `cargo vendor` output with its `.cargo/config.toml`, `deploy/`,
+and a build of the web client in `deploy/web`. It rsyncs the bundle to the
+host and runs `docker compose -f deploy/compose.yaml up -d --build` there.
+Then it waits for `/healthz` through the public URL and prints the container
+table. Rerunning it is safe: the SQLite store and uploads live in the
+`apron_data` volume, which a deploy never removes.
 
-- `deploy/Dockerfile` builds offline (`--locked --offline`) from the vendored
-  sources and runs `aprond` as a non-root user on `debian:bookworm-slim`.
-- `deploy/compose.yaml` holds every `aprond` flag. The port is
+The web client is [apron-web](https://github.com/apron-chat/apron-web), not
+code in this repository. `APRON_WEB_BUILD` names a finished build to ship as
+is. Without it, the script builds the checkout at `APRON_WEB_DIR` (default
+`~/Developer/forks/apron-web`) with `VITE_DEFAULT_SERVER_URL=` and
+`VITE_TRUSTED_MEDIA_ORIGINS=`, so the client connects to the origin that
+serves it. The build needs Node 24. The homelab currently sets
+`APRON_WEB_BUILD` in `local.env` to a build of the `show-sign-in-qr` branch,
+the sign-in QR code change in apron-web pull request #143. Once that merges,
+check out apron-web's `main` there and unset `APRON_WEB_BUILD`.
+
+The Compose project runs three containers behind one hostname:
+
+- `aprond`, built by `deploy/Dockerfile` offline (`--locked --offline`) from
+  the vendored sources, runs as a non-root user on `debian:bookworm-slim`.
+  It publishes no port and serves no web client. `deploy/compose.yaml` holds
+  every `aprond` flag.
+- `web`, the `web` target of `deploy/caddy.Dockerfile`, serves the web build
+  with `deploy/web.Caddyfile`, as `--static-dir` did: no fallback to
+  `index.html` (apron-web routes by URL fragment) and no dotfiles.
+- `router`, the `router` target, sends aprond's paths to `aprond` and every
+  other path to `web` (`deploy/router.Caddyfile`). It publishes
   `172.17.0.1:8901`, the docker bridge gateway, which is where a reverse
-  proxy's `host.docker.internal` upstream points.
-- `--client-ip-header` is `Cf-Connecting-IP`, not `X-Forwarded-For`. Caddy
-  appends cloudflared's loopback address to `X-Forwarded-For`, so its last
-  entry is the same for every visitor.
+  proxy's `host.docker.internal` upstream points. Set `APRON_PUBLISH` to
+  publish elsewhere, such as `127.0.0.1:18901` on a Mac.
+
+aprond's paths come from `Server::handler` in `src/server/server.rs`: `/ws`,
+`/healthz`, `/write/`, `/files/`, `/streams/`, and
+`/.well-known/apple-app-site-association`. A new route there needs the same
+path in the router's `@aprond` matcher.
+
+`--client-ip-header` is `Cf-Connecting-IP`, not `X-Forwarded-For`. Each proxy
+replaces or appends to `X-Forwarded-For`, so its last entry is the same for
+every visitor. The host's Caddy and the router pass `Cf-Connecting-IP`
+through unchanged.
 
 `tools/deploy/proof/run.sh` proves sign-in end to end against the deployment.
 Set `LADLE_DIR` to a checkout of Ladle's `live-proof` branch. A Playwright page

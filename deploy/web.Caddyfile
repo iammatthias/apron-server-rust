@@ -1,0 +1,12 @@
+{
+	admin off
+}
+
+# Serves apron-web's static build the way aprond's --static-dir did: no
+# fallback to index.html (apron-web routes by URL fragment) and no dotfiles.
+:8080 {
+	root * /srv
+	file_server {
+		hide .*
+	}
+}
