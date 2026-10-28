@@ -20,7 +20,7 @@ use rust_stdlib::time::{self, Duration, Time};
 use rust_stdlib::{html, image, mime, os};
 use rust_stdlib_crypto::rand;
 
-use super::embeds::{upload_content_type, EmbedState};
+use super::embeds::EmbedState;
 use super::embeds::{MAX_EMBEDS_PER_MESSAGE, UPLOAD_SUFFIX};
 use super::protocol::*;
 use super::push::public_address;
@@ -528,20 +528,17 @@ impl Fetcher {
     }
 
     /// Downloads an og:image of at most MAX_IMAGE_BYTES, declared as an image
-    /// and decoding as the PNG, JPEG, GIF, or WebP its content shows.
+    /// and decoding as a PNG, JPEG, GIF, or WebP, the only formats that
+    /// decode. The decoded format is its type: sites often declare
+    /// `image/jpg`, or one type for another a CDN negotiated.
     fn image(&self, target: &str, alt: &str) -> Option<Image> {
         let (_, declared, bytes, over) = self.get(target, "image/*", MAX_IMAGE_BYTES).ok()?;
         if over || !mime::parse_media_type(&declared).0.starts_with("image/") {
             return None;
         }
-        let content_type = upload_content_type(&declared, &bytes[..bytes.len().min(512)]);
-        // Only PNG, JPEG, GIF and WebP decode, so the match also limits the
-        // type.
         crate::webp::register();
         let (config, format) = image::decode_config(&bytes[..]).ok()?;
-        if format!("image/{format}") != content_type {
-            return None;
-        }
+        let content_type = format!("image/{format}");
         Some(Image {
             bytes,
             content_type,
