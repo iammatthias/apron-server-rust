@@ -207,13 +207,30 @@ impl TestAuthenticator {
 /// Signs c in as a guest and registers a passkey, which makes a new account
 /// with a u_<random> user_id that c.user_id then names.
 pub fn register_test_passkey(c: &mut TestClient, a: &mut TestAuthenticator) -> Object {
+    let result = register_passkey_named(c, a, None);
+    assert!(
+        Regexp::new(r"^u_[A-Za-z0-9_-]{22}$")
+            .unwrap()
+            .match_string(&c.user_id),
+        "a registration without a name is not u_<random>: {}",
+        c.user_id
+    );
+    result
+}
+
+/// register_test_passkey with the begin asking for `name`.
+pub fn register_passkey_named(
+    c: &mut TestClient,
+    a: &mut TestAuthenticator,
+    name: Option<&str>,
+) -> Object {
     let guest = you_of(&guest_auth(c))["user_id"].clone();
     let options = passkey_result(&passkey_call(
         c,
         "register-start",
         "register",
         "begin",
-        Object::new(),
+        name.map(|name| obj! {"name" => name}).unwrap_or_default(),
     ));
     let public_key = passkey_public_key(&options);
     let selection = public_key
@@ -239,12 +256,6 @@ pub fn register_test_passkey(c: &mut TestClient, a: &mut TestAuthenticator) -> O
         Json::from(account.as_str()),
         guest,
         "registration kept the guest's user_id"
-    );
-    assert!(
-        Regexp::new(r"^u_[A-Za-z0-9_-]{22}$")
-            .unwrap()
-            .match_string(&account),
-        "a registration without a name is not u_<random>: {account}"
     );
     // The new account takes the guest's general, which its connection gets
     // as the logged join alone.
