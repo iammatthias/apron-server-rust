@@ -11,6 +11,7 @@ use rust_stdlib::time::{self, Duration};
 
 use super::helpers::*;
 use crate::obj;
+use crate::server::outbound::{public_only, DialCheck};
 use crate::server::protocol::*;
 use crate::server::unfurl::*;
 use crate::server::Config;
@@ -206,25 +207,11 @@ fn test_fetcher_preview() {
 #[test]
 fn test_fetcher_refuses_internal_addresses() {
     let page = fixture(vec![("/post", html(ARTICLE))]);
-    assert_eq!(
-        fetcher(public_dial_check()).preview(&page.url("/post")),
-        None
-    );
+    assert_eq!(fetcher(public_only()).preview(&page.url("/post")), None);
     assert_eq!(page.hits("/post"), 0, "loopback was dialed");
     let localhost = page.url("/post").replace("127.0.0.1", "localhost");
-    assert_eq!(fetcher(public_dial_check()).preview(&localhost), None);
+    assert_eq!(fetcher(public_only()).preview(&localhost), None);
     assert_eq!(page.hits("/post"), 0, "localhost was dialed");
-    for address in [
-        "10.0.0.1:80",
-        "192.168.1.1:443",
-        "169.254.169.254:80",
-        "[::1]:80",
-        "[fe80::1]:80",
-        "100.64.0.1:80",
-    ] {
-        assert!(!public_dial_check()(address), "{address} admitted");
-    }
-    assert!(public_dial_check()("93.184.215.14:443"));
 }
 
 #[test]

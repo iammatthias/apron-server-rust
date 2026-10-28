@@ -18,6 +18,7 @@ use super::devices::DeviceTokens;
 use super::email::{EmailSender, EmailState, ProposalId};
 use super::embeds::EmbedState;
 use super::messages::MessageState;
+use super::outbound;
 use super::persist::{DirtySet, StoredMeta};
 use super::protocol::*;
 use super::push::{PushDeliverer, PushRegistration};
@@ -736,10 +737,10 @@ pub fn open(config: Config) -> Result<Arc<Server>, store::StoreError> {
     }
     let push = PushDeliverer::new(config.allow_insecure_push, subject);
     let unfurler = config.unfurl.then(|| {
-        let check: unfurl::DialCheck = if config.unfurl_allow_internal {
-            Arc::new(|_: &str| true)
+        let check = if config.unfurl_allow_internal {
+            outbound::any_address()
         } else {
-            unfurl::public_dial_check()
+            outbound::public_only()
         };
         Unfurler::new(Fetcher::new(check, unfurl::FETCH_TIMEOUT))
     });
