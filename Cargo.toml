@@ -1,0 +1,29 @@
+[package]
+name = "apron-server-rust"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.87"
+publish = false
+license = "MIT"
+description = "A Rust port of the Apron reference chat server, built on rust-stdlib"
+
+[lib]
+name = "apron"
+path = "src/lib.rs"
+
+[[bin]]
+name = "aprond"
+path = "src/bin/aprond/main.rs"
+
+[dependencies]
+rust-stdlib = { git = "https://github.com/iammatthias/rust-stdlib", rev = "0765d022043e0317480fa48cc67ccb43ea52ad4b" }
+rust-stdlib-crypto = { git = "https://github.com/iammatthias/rust-stdlib", rev = "0765d022043e0317480fa48cc67ccb43ea52ad4b" }
+rust-stdlib-derive = { git = "https://github.com/iammatthias/rust-stdlib", rev = "0765d022043e0317480fa48cc67ccb43ea52ad4b" }
+rust-stdlib-tls = { git = "https://github.com/iammatthias/rust-stdlib", rev = "0765d022043e0317480fa48cc67ccb43ea52ad4b" }
+rust-stdlib-sys = { git = "https://github.com/iammatthias/rust-stdlib", rev = "0765d022043e0317480fa48cc67ccb43ea52ad4b" }
+rust-stdlib-sysnet = { git = "https://github.com/iammatthias/rust-stdlib", rev = "0765d022043e0317480fa48cc67ccb43ea52ad4b" }
+rusqlite = { version = "=0.37.0", features = ["bundled"] }
+toml = { version = "=1.1.8", default-features = false, features = ["std", "parse", "serde"] }
+
+[lints.rust]
+unsafe_code = "forbid"

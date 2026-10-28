@@ -1,0 +1,23 @@
+//! The Apron server: the WebSocket protocol handlers and the state they
+//! share, ported file by file from `internal/server`.
+
+pub mod commands;
+pub mod email;
+pub mod embeds;
+pub mod messages;
+pub mod persist;
+pub mod protocol;
+pub mod push;
+pub mod rooms;
+#[allow(clippy::module_inception)]
+pub mod server;
+pub mod status;
+pub mod unread;
+pub mod users;
+pub mod webauthn;
+pub mod webpush;
+
+#[cfg(test)]
+mod tests;
+
+pub use server::{default_config, open, Config, Server, State};

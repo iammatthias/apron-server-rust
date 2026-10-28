@@ -1,0 +1,792 @@
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::sync::{Arc, Condvar, Mutex};
+
+use rust_stdlib::regexp::Regexp;
+use rust_stdlib::time::Timer;
+use rust_stdlib::unicode;
+
+use super::protocol::*;
+use super::server::{Client, ClientId, Frame, Server, State, DEFAULT_ROOM_ID};
+use super::status::*;
+use super::webauthn::PasskeyUser;
+use crate::obj;
+use crate::rate::Limiter;
+
+pub const MAX_NAME_RUNES: usize = 64;
+/// Bounds an avatar given inline as a data: URL; larger images go through a
+/// /avatar upload (§4.8.6).
+pub const MAX_AVATAR_DATA_URL_BYTES: usize = 64 << 10;
+pub const MAX_DEDUP_ENTRIES: usize = 1024;
+/// Bounds a profile's ext, which is sent to everyone who shares a room with
+/// the user.
+pub const MAX_PROFILE_EXT_BYTES: usize = 16 << 10;
+
+/// Everything the server keeps for one user_id across its connections: the
+/// profile (§3.3), joined rooms (§4.2.2), request deduplication (§1.2), and
+/// push registrations (§4.9). Guest users are retired when their last
+/// connection closes; accounts persist.
+pub struct UserState {
+    pub id: String,
+    pub name: String,
+    pub avatar: String,
+    pub ext: ExtObject,
+    /// The account's sign-in address (§4.11), lowercased; empty for guests
+    /// and passkey users without one.
+    pub email: String,
+    /// The server roles (§3.3) Config.roles grants the account, sorted;
+    /// guests have none. Derived from the configuration, not stored.
+    pub roles: Vec<String>,
+    /// The hosted /avatar upload behind avatar, if any (an embed_id).
+    pub avatar_embed: Option<String>,
+    /// Tells a timer scheduled for this identity from a later one with the
+    /// same user_id (Go compares the pointers).
+    pub generation: u64,
+
+    pub clients: BTreeSet<ClientId>,
+    pub joined: BTreeSet<String>,
+    /// Each room the user left, and has not rejoined, to the log_id of the
+    /// leave, for room_list's `left` (§4.2.1).
+    pub left_at: BTreeMap<String, i64>,
+    pub dedup: DedupCache,
+    /// A passkey user's handle and credentials (§4.10).
+    pub passkey: Option<PasskeyUser>,
+    /// Limits the user's new messages, room_set requests, and /avatar
+    /// commands to messages_per_minute; `None` when unlimited.
+    pub posts: Option<Limiter>,
+    /// Limits the account's /add-device tokens; `None` until its first.
+    pub device_adds: Option<Limiter>,
+
+    /// The chosen status, set with `me` (§4.5.1); `mute` and `room_mutes`
+    /// their mutes; `shown` the shown status as last noted, and `offline_at`
+    /// the Unix milliseconds when it last became offline; `status` the shown
+    /// status published to others, and `seen` the Unix milliseconds when it
+    /// last became offline, 0 if unknown (§4.5.2).
+    pub chosen: String,
+    pub mute: MuteState,
+    pub room_mutes: BTreeMap<String, MuteState>,
+    pub mute_timer: Option<Timer>,
+    pub room_mute_timers: BTreeMap<String, Timer>,
+    pub shown: String,
+    pub offline_at: i64,
+    pub seen: i64,
+    pub status: String,
+    pub status_limit: Option<Limiter>,
+    pub status_timer: Option<Timer>,
+    pub status_requests: Option<Limiter>,
+    /// The rooms the user has not joined where a message mentioned or
+    /// replied to them, from the first such message, for unread counts.
+    pub pings: BTreeMap<String, i64>,
+    /// The counts known per room while the user has registrations.
+    pub unread: Option<BTreeMap<String, i64>>,
+    pub badge_timer: Option<Timer>,
+    /// The UTC day pushes_today counts the pushes delivered to the user on,
+    /// against MAX_PUSHES_PER_USER_DAY.
+    pub push_day: String,
+    pub pushes_today: i64,
+}
+
+impl UserState {
+    pub fn new(id: &str, name: &str, generation: u64) -> UserState {
+        UserState {
+            id: id.to_owned(),
+            name: name.to_owned(),
+            avatar: String::new(),
+            ext: ExtObject::new(),
+            email: String::new(),
+            roles: Vec::new(),
+            avatar_embed: None,
+            generation,
+            clients: BTreeSet::new(),
+            joined: BTreeSet::new(),
+            left_at: BTreeMap::new(),
+            dedup: DedupCache::default(),
+            passkey: None,
+            posts: None,
+            device_adds: None,
+            chosen: STATUS_ONLINE.into(),
+            mute: MuteState::default(),
+            room_mutes: BTreeMap::new(),
+            mute_timer: None,
+            room_mute_timers: BTreeMap::new(),
+            shown: STATUS_OFFLINE.into(),
+            offline_at: 0,
+            seen: 0,
+            status: STATUS_OFFLINE.into(),
+            status_limit: None,
+            status_timer: None,
+            status_requests: None,
+            pings: BTreeMap::new(),
+            unread: None,
+            badge_timer: None,
+            push_day: String::new(),
+            pushes_today: 0,
+        }
+    }
+
+    /// The recorded user object carried in logged records (a message's or
+    /// reaction's from, a membership's user): user_id and name. Avatars and
+    /// ext travel only in current objects (§3.3, §4.8.6).
+    pub fn from(&self) -> Object {
+        let mut value = obj! {"user_id" => self.id.as_str()};
+        if !self.name.is_empty() {
+            value.insert("name".into(), self.name.as_str().into());
+        }
+        value
+    }
+
+    /// Reports whether the user signed in with a credential, a passkey or
+    /// an email address, so it persists across connections and restarts,
+    /// rather than being a guest.
+    pub fn account(&self) -> bool {
+        self.passkey.is_some() || !self.email.is_empty()
+    }
+
+    pub fn has_role(&self, role: &str) -> bool {
+        self.roles.iter().any(|r| r == role)
+    }
+
+    /// The complete current user object for user and users (§3.3), with the
+    /// published shown status, and seen when it is offline (§4.5.2); `you`
+    /// has the chosen status instead.
+    pub fn profile(&self) -> Object {
+        let mut value = self.from();
+        value.insert("status".into(), self.status.as_str().into());
+        self.add_seen(&mut value);
+        if !self.avatar.is_empty() {
+            value.insert("avatar".into(), self.avatar.as_str().into());
+        }
+        // An account's roles are always sent, [] when it has none, so a
+        // role taken away clears the one a client kept (§3.3); guests hold
+        // none.
+        if !self.roles.is_empty() || self.account() {
+            value.insert("roles".into(), self.roles.clone().into());
+        }
+        if !self.ext.is_empty() {
+            value.insert("ext".into(), Json::Ext(self.ext.clone()));
+        }
+        value
+    }
+}
+
+/// The outcome shared with the duplicates of a request (§1.2).
+pub struct DedupEntry {
+    /// A hash of the request's method and canonical params.
+    pub fingerprint: [u8; 32],
+    outcome: Mutex<Option<Result<Json, RpcError>>>,
+    done: Condvar,
+}
+
+impl DedupEntry {
+    pub fn new(fingerprint: [u8; 32]) -> DedupEntry {
+        DedupEntry {
+            fingerprint,
+            outcome: Mutex::new(None),
+            done: Condvar::new(),
+        }
+    }
+
+    pub fn finish(&self, outcome: Result<Json, RpcError>) {
+        *self.outcome.lock().unwrap_or_else(|e| e.into_inner()) = Some(outcome);
+        self.done.notify_all();
+    }
+
+    pub fn is_closed(&self) -> bool {
+        self.outcome
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_some()
+    }
+
+    /// Waits for the original to finish and returns its outcome.
+    pub fn wait(&self) -> Result<Json, RpcError> {
+        let guard = self.outcome.lock().unwrap_or_else(|e| e.into_inner());
+        let guard = self
+            .done
+            .wait_while(guard, |outcome| outcome.is_none())
+            .unwrap_or_else(|e| e.into_inner());
+        guard
+            .clone()
+            .unwrap_or_else(|| Err(RpcError::new(CODE_INTERNAL_ERROR, "Internal error")))
+    }
+}
+
+/// The most recent request IDs of one user. Guarded by the state lock.
+#[derive(Default)]
+pub struct DedupCache {
+    entries: BTreeMap<String, Arc<DedupEntry>>,
+    order: VecDeque<String>,
+}
+
+impl DedupCache {
+    pub fn get(&self, id: &str) -> Option<Arc<DedupEntry>> {
+        self.entries.get(id).cloned()
+    }
+
+    pub fn put(&mut self, id: &str, entry: Arc<DedupEntry>) {
+        self.entries.insert(id.to_owned(), entry);
+        self.order.push_back(id.to_owned());
+        while self.order.len() > MAX_DEDUP_ENTRIES {
+            let Some(oldest) = self.order.pop_front() else {
+                break;
+            };
+            if self.entries.get(&oldest).is_some_and(|e| e.is_closed()) {
+                self.entries.remove(&oldest);
+            }
+        }
+    }
+
+    pub fn remove(&mut self, id: &str, entry: &Arc<DedupEntry>) {
+        if self.entries.get(id).is_some_and(|e| Arc::ptr_eq(e, entry)) {
+            self.entries.remove(id);
+        }
+    }
+}
+
+/// Prepares a requested display name with the PRECIS Nickname profile (RFC
+/// 8266): it maps compatibility characters, folds runs of spaces, and
+/// trims. Invisible characters, such as controls and bidirectional
+/// overrides, are dropped first rather than refused, and a name that still
+/// cannot be a nickname becomes empty. The result is capped at
+/// MAX_NAME_RUNES. The server may alter names (§3.3) and `you.name` is the
+/// answer.
+///
+/// rust-stdlib has no Unicode normalization (Go's is golang.org/x/text), so
+/// NFKC and the FreeformClass check are not applied; see docs/DEVIATIONS.md.
+pub fn normalize_name(name: &str) -> String {
+    let kept: String = name
+        .chars()
+        .filter(|&r| {
+            !unicode::in_(
+                r as i32,
+                &[unicode::CC, unicode::CF, unicode::CO, unicode::CS],
+            )
+        })
+        .collect();
+    // RFC 8266 §2.1 rule 2: non-ASCII spaces become SPACE, interior runs
+    // of spaces collapse to one, and leading and trailing spaces go.
+    let mut out = String::new();
+    let mut prev_space = false;
+    for r in kept.chars() {
+        if unicode::is(unicode::ZS, r as i32) {
+            prev_space = true;
+            continue;
+        }
+        if prev_space && !out.is_empty() {
+            out.push(' ');
+        }
+        out.push(r);
+        prev_space = false;
+    }
+    if out.chars().count() > MAX_NAME_RUNES {
+        out = out
+            .chars()
+            .take(MAX_NAME_RUNES)
+            .collect::<String>()
+            .trim()
+            .to_owned();
+    }
+    out
+}
+
+fn avatar_data_url() -> Regexp {
+    Regexp::new(r"^data:image/(png|jpeg|gif|webp);base64,[A-Za-z0-9+/]+={0,2}$")
+        .expect("constant pattern")
+}
+
+/// Accepts https: URLs and small image data: URLs (§4.8.6).
+pub fn valid_avatar(value: &str) -> bool {
+    if value.starts_with("data:") {
+        return value.len() <= MAX_AVATAR_DATA_URL_BYTES && avatar_data_url().match_string(value);
+    }
+    value.starts_with("https://")
+        && value.len() <= 2048
+        && !value.contains([' ', '\t', '\r', '\n', '"', '\'', '<', '>'])
+}
+
+/// The shape of a user_id a guest may request: the suggested convention for
+/// user-chosen IDs (Appendix A.3), letters, digits, _, ., and -, starting
+/// with a letter, and ending with a letter, digit, or _.
+fn requestable_user_id() -> Regexp {
+    Regexp::new(r"^[A-Za-z](?:[A-Za-z0-9_.-]{0,62}[A-Za-z0-9_])?$").expect("constant pattern")
+}
+
+/// Starts every counter-assigned guest ID. The guest_ namespace, ignoring
+/// case, belongs to the counter.
+pub const GUEST_ID_PREFIX: &str = "guest_";
+
+/// Reports whether a user may request `id`: it has the requestable shape and
+/// lies outside the counters' guest_ and user_ namespaces.
+pub fn requestable(id: &str) -> bool {
+    for prefix in [GUEST_ID_PREFIX, super::email::ACCOUNT_ID_PREFIX] {
+        if id.len() >= prefix.len() && id[..prefix.len()].eq_ignore_ascii_case(prefix) {
+            return false;
+        }
+    }
+    requestable_user_id().match_string(id)
+}
+
+impl State {
+    /// Honors a requested user_id when it is requestable and was never
+    /// assigned, ignoring case, nor names a room; otherwise assigns the next
+    /// unused guest_<n> (§3.2).
+    pub fn assign_user_id_locked(&mut self, requested: &str) -> String {
+        if requestable(requested) && self.claim_user_id_locked(requested) {
+            return requested.to_owned();
+        }
+        loop {
+            self.guest_number += 1;
+            let id = format!("{GUEST_ID_PREFIX}{}", self.guest_number);
+            if self.claim_user_id_locked(&id) {
+                return id;
+            }
+        }
+    }
+
+    /// Marks `id` used and reports whether it was free: never assigned,
+    /// ignoring case, not a room's name, and not granted a role.
+    pub fn claim_user_id_locked(&mut self, id: &str) -> bool {
+        let key = id.to_lowercase();
+        if self.used_ids.contains(&key)
+            || self.room_named_locked(id)
+            || self.granted_ids.contains(&key)
+        {
+            return false;
+        }
+        self.used_ids.insert(key.clone());
+        self.touch_used_id(&key);
+        true
+    }
+
+    /// Reports whether `id` names a room, ignoring case, so a user_id never
+    /// passes for a room_id to a reader that folds case.
+    pub fn room_named_locked(&self, id: &str) -> bool {
+        self.rooms.contains_key(id) || id.eq_ignore_ascii_case(DEFAULT_ROOM_ID)
+    }
+
+    pub fn new_user_locked(&mut self, id: &str, name: &str) -> UserState {
+        let generation = self.next_generation;
+        self.next_generation += 1;
+        UserState::new(id, name, generation)
+    }
+
+    /// Replies with user as `you` and extra fields beside it (§3.2, §3.3),
+    /// then makes user the connection's identity. Every notification a
+    /// sign-in causes on its connection follows the result (§3.2).
+    pub fn switch_user_locked(
+        &mut self,
+        c: &Arc<Client>,
+        req: &Request,
+        user_id: &str,
+        extra: Object,
+        sign_in: bool,
+        join_default: bool,
+    ) -> Object {
+        let mut result = obj! {"you" => self.users[user_id].you()};
+        result.extend(extra);
+        c.send_result(req, result.clone().into());
+        self.attach_locked(c, user_id);
+        if join_default {
+            self.join_default_room_locked(user_id);
+        }
+        if sign_in {
+            self.send_after_auth_locked(c);
+        }
+        result
+    }
+
+    /// Makes user the connection's identity and announces the status others
+    /// see of it and of the identity the connection leaves (§4.5). A guest
+    /// identity left without connections is retired, logging its leaves.
+    pub fn attach_locked(&mut self, c: &Arc<Client>, user_id: &str) {
+        let previous = self.client_user(c);
+        if previous.as_deref() == Some(user_id) {
+            return;
+        }
+        if let Some(previous) = &previous {
+            if let Some(u) = self.users.get_mut(previous) {
+                u.clients.remove(&c.id);
+            }
+        }
+        // A pending email proposal was made by the previous identity: it is
+        // dropped, so the connection cannot approve it as the next one
+        // (§4.11.3).
+        let proposal = self
+            .clients
+            .get_mut(&c.id)
+            .and_then(|conn| conn.proposal.take());
+        if let Some(id) = proposal {
+            self.drop_proposal_locked(id);
+        }
+        if let Some(conn) = self.clients.get_mut(&c.id) {
+            conn.user = Some(user_id.to_owned());
+        }
+        if let Some(u) = self.users.get_mut(user_id) {
+            u.clients.insert(c.id);
+        }
+        // The previous identity's departure goes first, then the user's own
+        // status.
+        if let Some(previous) = previous {
+            let retire = self
+                .users
+                .get(&previous)
+                .is_some_and(|u| u.clients.is_empty() && !u.account());
+            if retire {
+                self.retire_locked(&previous);
+            } else {
+                self.announce_status_locked(&previous);
+            }
+        }
+        self.announce_status_locked(user_id);
+    }
+
+    /// Forgets a closed connection, retiring its guest identity.
+    pub fn detach_locked(&mut self, conn: super::server::Conn) {
+        self.release_proposal_locked(&conn);
+        let Some(user_id) = conn.user else { return };
+        let Some(u) = self.users.get_mut(&user_id) else {
+            return;
+        };
+        u.clients.remove(&conn.client.id);
+        if u.clients.is_empty() && !u.account() {
+            self.retire_locked(&user_id);
+            return;
+        }
+        self.announce_status_locked(&user_id);
+    }
+
+    /// Removes a guest identity for good. It leaves every room it joined,
+    /// logging each leave as a membership for the remaining members
+    /// (§4.2.2). Its user_id is never reissued (§3.3).
+    pub fn retire_locked(&mut self, user_id: &str) {
+        let Some(u) = self.users.get(user_id) else {
+            return;
+        };
+        let mut rooms: Vec<(i64, String)> = u
+            .joined
+            .iter()
+            .filter_map(|id| self.rooms.get(id).map(|r| (r.created_id, id.clone())))
+            .collect();
+        rooms.sort();
+        // Its registrations go first, so its leaves send it no badge pushes.
+        let registrations: Vec<String> = self.sorted_pushes(user_id);
+        for key in registrations {
+            self.remove_push_locked(&key);
+        }
+        for (_, room_id) in rooms {
+            self.leave_locked(user_id, &room_id);
+            if let Some(r) = self.rooms.get_mut(&room_id) {
+                r.reads.remove(user_id);
+            }
+        }
+        self.stop_timers_locked(user_id);
+        self.set_avatar_embed_locked(user_id, None);
+        self.users.remove(user_id);
+        self.touch_user(user_id);
+    }
+
+    /// Stops u's timers: the ends of its timed mutes, its coalesced status,
+    /// and its pending badge pushes.
+    pub fn stop_timers_locked(&mut self, user_id: &str) {
+        if let Some(u) = self.users.get_mut(user_id) {
+            if let Some(timer) = u.mute_timer.take() {
+                timer.stop();
+            }
+            if let Some(timer) = u.status_timer.take() {
+                timer.stop();
+            }
+            for (_, timer) in std::mem::take(&mut u.room_mute_timers) {
+                timer.stop();
+            }
+        }
+        self.stop_badge_locked(user_id);
+    }
+
+    /// Lists the other users who share a joined room with u, by user_id.
+    pub fn sharers_locked(&self, user_id: &str) -> Vec<String> {
+        let mut seen = BTreeSet::new();
+        if let Some(u) = self.users.get(user_id) {
+            for room_id in &u.joined {
+                if let Some(r) = self.rooms.get(room_id) {
+                    for id in &r.members {
+                        if id != user_id {
+                            seen.insert(id.clone());
+                        }
+                    }
+                }
+            }
+        }
+        seen.into_iter().collect()
+    }
+
+    /// Sends a `user` notification after a profile change: `you` to the
+    /// user's connections other than `except`, and `new` to everyone who
+    /// shares a room with them (§3.3). `removed` lists fields the change
+    /// removed, and `cleared` the ext keys it removed, both announced as
+    /// empty values.
+    pub fn notify_profile_locked(
+        &mut self,
+        user_id: &str,
+        except: Option<&Client>,
+        cleared: &ExtObject,
+        removed: &[&str],
+    ) {
+        // The profile goes to every sharer, so it publishes the shown
+        // status, one held back to coalesce included.
+        self.publish_locked(user_id);
+        let Some(u) = self.users.get(user_id) else {
+            return;
+        };
+        let profile = with_cleared(with_removed(u.profile(), removed), cleared);
+        let you = Frame::from(notification(
+            "user",
+            obj! {"you" => with_cleared(with_removed(u.you(), removed), cleared)},
+        ));
+        for id in &u.clients {
+            if except.is_some_and(|c| c.id == *id) {
+                continue;
+            }
+            if let Some(conn) = self.clients.get(id) {
+                conn.client.enqueue_frame(you.clone());
+            }
+        }
+        let others = Frame::from(notification("user", obj! {"new" => profile}));
+        for other in self.sharers_locked(user_id) {
+            self.send_to_user(&other, &others);
+        }
+    }
+
+    /// Applies a `me` request (§3.3): a given field replaces the current
+    /// value, an omitted one stays, and an empty value ("" or {}) removes
+    /// the field, which the result and notifications carry as that empty
+    /// value.
+    pub fn update_profile_locked(
+        &mut self,
+        c: &Arc<Client>,
+        req: &Request,
+    ) -> Result<(Json, bool), RpcError> {
+        let name = parse_string(&req.params, "name", false)?;
+        let avatar = parse_string(&req.params, "avatar", false)?;
+        let (ext_write, has_ext) = parse_ext(&req.params, "ext")?;
+        let mut status = parse_string(&req.params, "status", false)?;
+        let has_name = req.params.contains_key("name");
+        let has_avatar = req.params.contains_key("avatar");
+        let has_status = req.params.contains_key("status");
+
+        let Some(user_id) = self.client_user(c) else {
+            return Err(RpcError::new(
+                CODE_DENIED,
+                "Sign in before sending requests",
+            ));
+        };
+        let u = &self.users[&user_id];
+        if has_avatar && !avatar.is_empty() && avatar != u.avatar && !valid_avatar(&avatar) {
+            if avatar.starts_with("data:") && avatar.len() > MAX_AVATAR_DATA_URL_BYTES {
+                return Err(RpcError::new(
+                    CODE_TOO_LARGE,
+                    format!("An avatar data: URL is at most {MAX_AVATAR_DATA_URL_BYTES} bytes; upload larger images with /avatar"),
+                ));
+            }
+            return Err(invalid_params(format!(
+                "avatar must be an https: URL or a data:image URL of at most {MAX_AVATAR_DATA_URL_BYTES} bytes; upload larger images with /avatar"
+            )));
+        }
+        if has_status && !settable_status(&status) {
+            status = STATUS_NONE.into();
+        }
+        // ext merges into the kept one (§4.12), and the limit applies to the
+        // result.
+        let mut ext = u.ext.clone();
+        if has_ext {
+            ext = merge_ext(&u.ext, &ext_write);
+            if encoded_size(&Json::Ext(ext.clone())) > MAX_PROFILE_EXT_BYTES {
+                return Err(RpcError::new(
+                    CODE_TOO_LARGE,
+                    format!("Your profile's ext would be over {MAX_PROFILE_EXT_BYTES} bytes"),
+                ));
+            }
+        }
+        // A status change counts against the user's limit on status changes,
+        // as a `status` request does (§4.5).
+        if has_status && status != u.chosen {
+            admit_status_locked(self.users.get_mut(&user_id).expect("user exists"))?;
+        }
+        let u = &self.users[&user_id];
+        let (before, before_you) = (u.profile(), u.you());
+        self.touch_user(&user_id);
+        let mut removed: Vec<&str> = Vec::new();
+        if has_name {
+            let u = self.users.get_mut(&user_id).expect("user exists");
+            u.name = normalize_name(&name);
+            if u.name.is_empty() {
+                removed.push("name");
+            }
+        }
+        if has_avatar && avatar != self.users[&user_id].avatar {
+            self.set_avatar_embed_locked(&user_id, None);
+            self.users.get_mut(&user_id).expect("user exists").avatar = avatar.clone();
+        }
+        if has_avatar && avatar.is_empty() {
+            removed.push("avatar");
+        }
+        let cleared = cleared_ext(&self.users[&user_id].ext, &ext_write);
+        self.users.get_mut(&user_id).expect("user exists").ext = ext;
+        if has_status {
+            // A change of the chosen status is sent at once, with the
+            // profile.
+            self.users.get_mut(&user_id).expect("user exists").chosen = status;
+            self.publish_locked(&user_id);
+        }
+        let u = &self.users[&user_id];
+        let result = obj! {"you" => with_removed(u.you(), &removed)};
+        if !json_equal(&before, &u.profile()) || !json_equal(&before_you, &u.you()) {
+            self.notify_profile_locked(&user_id, Some(c), &cleared, &removed);
+        }
+        c.send_result(req, result.clone().into());
+        Ok((result.into(), true))
+    }
+
+    /// Sets the roles Config.roles grants an account, by its user_id or
+    /// email address, and reports whether they changed. Guests hold no
+    /// roles.
+    pub fn grant_roles_locked(&mut self, user_id: &str) -> bool {
+        let Some(u) = self.users.get_mut(user_id) else {
+            return false;
+        };
+        let mut roles = Vec::new();
+        if u.account() {
+            for (role, holders) in &self.config.roles {
+                if holders.iter().any(|h| {
+                    h.eq_ignore_ascii_case(&u.id)
+                        || (!u.email.is_empty() && h.eq_ignore_ascii_case(&u.email))
+                }) {
+                    roles.push(role.to_lowercase());
+                }
+            }
+            roles.sort();
+        }
+        if roles == u.roles {
+            return false;
+        }
+        u.roles = roles;
+        true
+    }
+}
+
+/// Adds each removed field to a profile as its empty value.
+pub fn with_removed(mut profile: Object, removed: &[&str]) -> Object {
+    for field in removed {
+        profile.insert((*field).to_owned(), "".into());
+    }
+    profile
+}
+
+/// Adds each cleared ext key to a profile's ext as its empty value (§4.12).
+pub fn with_cleared(mut profile: Object, cleared: &ExtObject) -> Object {
+    if cleared.is_empty() {
+        return profile;
+    }
+    let mut ext = ext_of(profile.get("ext"));
+    ext.extend(cleared.iter().map(|(k, v)| (k.clone(), v.clone())));
+    profile.insert("ext".into(), Json::Ext(ext));
+    profile
+}
+
+pub fn json_equal(a: &Object, b: &Object) -> bool {
+    match (encode_json(a), encode_json(b)) {
+        (Some(left), Some(right)) => left == right,
+        _ => false,
+    }
+}
+
+impl Server {
+    pub(crate) fn authenticate(
+        self: &Arc<Self>,
+        c: &Arc<Client>,
+        req: &Request,
+    ) -> Result<Json, RpcError> {
+        let mut st = self.lock();
+        let scheme = parse_string(&req.params, "scheme", true)?;
+        // A scheme this document defines but the server does not offer is
+        // unsupported (§3.2), whatever else the request holds.
+        match scheme.as_str() {
+            "webauthn" => {
+                if self.config.web_authn.is_none() {
+                    return Err(RpcError::new(CODE_UNSUPPORTED, "Passkeys are disabled"));
+                }
+            }
+            "email" => {
+                if self.config.email_sender.is_none() {
+                    return Err(RpcError::new(CODE_UNSUPPORTED, "Email sign-in is disabled"));
+                }
+            }
+            "external" => {
+                // This server has no sign-in page (§4.11.5).
+                return Err(RpcError::new(
+                    CODE_UNSUPPORTED,
+                    "External sign-in is not offered",
+                ));
+            }
+            "token" => {
+                if self.config.web_authn.is_none() && self.config.email_sender.is_none() {
+                    return Err(RpcError::new(
+                        CODE_UNSUPPORTED,
+                        "This server has no sign-in sessions; use guest",
+                    ));
+                }
+            }
+            "guest" => {}
+            _ => {
+                // A request that depends on a name the server does not know
+                // is invalid_params (§1).
+                return Err(invalid_params(format!(
+                    "Unknown authentication scheme {}",
+                    quote(&scheme)
+                )));
+            }
+        }
+        // A user_id is never empty, nor contains whitespace or control
+        // characters (§2.4): requesting one that could be no user_id is
+        // invalid_params, with any scheme.
+        if req.params.contains_key("user_id") {
+            let requested = parse_string(&req.params, "user_id", true)?;
+            if !valid_id(&requested) {
+                return Err(invalid_params(
+                    "user_id must not be empty, or contain whitespace or control characters",
+                ));
+            }
+        }
+        match scheme.as_str() {
+            "webauthn" => return st.authenticate_passkey(c, req),
+            "email" => return st.authenticate_email(c, req),
+            "token" => return st.authenticate_token(c, req),
+            _ => {}
+        }
+        let name = parse_string(&req.params, "name", false)?;
+        let requested = parse_string(&req.params, "user_id", false)?;
+        if let Some(user_id) = st.client_user(c) {
+            // Guest auth on a signed-in connection answers with the identity
+            // it has. It signs the connection in as no other user, so it is
+            // no sign-in and sends nothing after its result (§4.5).
+            let result = obj! {"you" => st.users[&user_id].you()};
+            c.send_result(req, result.clone().into());
+            return Ok(result.into());
+        }
+        let id = st.assign_user_id_locked(&requested);
+        let user = st.new_user_locked(&id, &normalize_name(&name));
+        st.users.insert(id.clone(), user);
+        st.touch_user(&id);
+        // A new guest joins the default room, so their room list is not
+        // empty.
+        Ok(st
+            .switch_user_locked(c, req, &id, Object::new(), true, true)
+            .into())
+    }
+
+    pub(crate) fn update_profile(
+        self: &Arc<Self>,
+        c: &Arc<Client>,
+        req: &Request,
+    ) -> Result<(Json, bool), RpcError> {
+        self.lock().update_profile_locked(c, req)
+    }
+}
