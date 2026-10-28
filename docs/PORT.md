@@ -95,9 +95,8 @@ a Copy button. The app stores both, sends that origin as its `Origin`
 header, and authenticates with `{"scheme": "token", "token": ...}` (§3.2).
 The token resumes the account only from that origin, and lapses after 30
 days unused. No command revokes one token: it ends when unused for 30 days,
-when the app signs in again on a connection holding it, or when the account
-passes 10 sessions and it is the least recently used. An account adds five
-devices at once, then one each 12 minutes.
+or when the app signs in again on a connection holding it. An account adds
+five devices at once, then one each 12 minutes.
 
 ## Smoke check
 

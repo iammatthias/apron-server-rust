@@ -25,9 +25,7 @@ pub const MAX_KICK_REASON_RUNES: usize = 200;
 
 /// /add-device issues up to DEVICE_ADDS_PER_ACCOUNT tokens at once, enough
 /// to set up a phone, a tablet and a laptop in one sitting, and one more each
-/// DEVICE_ADD_REFILL, five an hour. Each token is a stored session, and past
-/// MAX_SESSIONS_PER_ACCOUNT each forgets another, so the limit also bounds
-/// how fast a stolen session can push the account's own devices out.
+/// DEVICE_ADD_REFILL, five an hour.
 pub const DEVICE_ADDS_PER_ACCOUNT: i64 = 5;
 pub const DEVICE_ADD_REFILL: Duration = Duration::from_mins(12);
 

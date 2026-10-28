@@ -23,10 +23,6 @@ pub use crate::webauthn::WebAuthn;
 
 pub const PASSKEY_LIFETIME: Duration = Duration::from_mins(2);
 pub const SESSION_LIFETIME: Duration = Duration::from_hours(30 * 24);
-/// Bounds an account's sessions; a new one past it forgets the one least
-/// recently used. Go has no bound, and /add-device would let an account mint
-/// sessions without one (docs/DEVIATIONS.md).
-pub const MAX_SESSIONS_PER_ACCOUNT: usize = 10;
 
 /// A passkey user's handle and credentials, persisted with the user
 /// (persist.rs). Go's `passkeyUser` also points back at its user; here the
@@ -99,15 +95,12 @@ pub struct Session {
 /// The SHA-256 of a bearer token.
 pub type SessionKey = [u8; 32];
 
-/// The sessions by key, with two indexes every change keeps in step: by
-/// expiry, so a prune visits only the expired sessions, and by account,
-/// least recently used first (a session expires a lifetime after its last
-/// use), so the cap finds an account's sessions without a scan.
+/// The sessions by key, with an index by expiry every change keeps in step,
+/// so a prune visits only the expired sessions.
 #[derive(Default)]
 pub struct Sessions {
     by_key: BTreeMap<SessionKey, Session>,
     by_expiry: BTreeSet<(i64, SessionKey)>,
-    by_user: BTreeMap<String, BTreeSet<(i64, SessionKey)>>,
 }
 
 impl Sessions {
@@ -125,25 +118,13 @@ impl Sessions {
 
     pub fn insert(&mut self, key: SessionKey, session: Session) {
         self.remove(&key);
-        let slot = (session.expires.unix_nano(), key);
-        self.by_expiry.insert(slot);
-        self.by_user
-            .entry(session.user.clone())
-            .or_default()
-            .insert(slot);
+        self.by_expiry.insert((session.expires.unix_nano(), key));
         self.by_key.insert(key, session);
     }
 
     pub fn remove(&mut self, key: &SessionKey) -> Option<Session> {
         let session = self.by_key.remove(key)?;
-        let slot = (session.expires.unix_nano(), *key);
-        self.by_expiry.remove(&slot);
-        if let Some(held) = self.by_user.get_mut(&session.user) {
-            held.remove(&slot);
-            if held.is_empty() {
-                self.by_user.remove(&session.user);
-            }
-        }
+        self.by_expiry.remove(&(session.expires.unix_nano(), *key));
         Some(session)
     }
 
@@ -161,15 +142,6 @@ impl Sessions {
             .map(|(_, key)| *key)
             .filter(|key| !now.before(&self.by_key[key].expires))
             .collect()
-    }
-
-    /// An account's sessions, least recently used first.
-    pub fn of_user(&self, user_id: &str) -> impl Iterator<Item = SessionKey> + '_ {
-        self.by_user
-            .get(user_id)
-            .into_iter()
-            .flatten()
-            .map(|(_, key)| *key)
     }
 }
 
@@ -505,8 +477,7 @@ impl State {
 
     /// Issues a bearer token that resumes the account from the origin for
     /// SESSION_LIFETIME, renewed on each use (§3.2). Only its SHA-256 is
-    /// kept, as the session's key. An account at MAX_SESSIONS_PER_ACCOUNT
-    /// forgets its least recently used session first.
+    /// kept, as the session's key.
     pub fn new_session_locked(
         &mut self,
         user_id: &str,
@@ -517,12 +488,6 @@ impl State {
         rand::read(&mut secret);
         let token = URL_SAFE_NO_PAD.encode(secret);
         let key = sha256::sum256(token.as_bytes());
-        let held: Vec<SessionKey> = self.sessions.of_user(user_id).collect();
-        let excess = (held.len() + 1).saturating_sub(MAX_SESSIONS_PER_ACCOUNT);
-        for old in &held[..excess] {
-            self.sessions.remove(old);
-            self.touch_session(*old);
-        }
         self.sessions.insert(
             key,
             Session {
