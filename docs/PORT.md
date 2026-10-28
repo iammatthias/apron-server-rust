@@ -67,8 +67,44 @@ Phases 2a, 2b, and 2c run in parallel once phase 1 lands.
 | 2026-10-28 | The `/invite-device` notice carries Cloudflare's sign-in link line when a public URL is configured, and none otherwise. | A client can open the link or draw it as a QR code for a phone to scan. Cloudflare builds it from the URL each connection reached. This server builds it from the public URL (`--public-url`, or `--tls.domain`) only, not from the request's `Host`, so a server without one never writes a link for an address it may not be reachable at. |
 | 2026-10-28 | `/invite-bot` gives an account one bot, `bot_<user_id>`, named after it, with a token of its own store kind, `bot`, keyed by the hex SHA-256 of the token and holding `{bot, owner, created}`; one token per bot, revoked before the new one is stored. A bot is a `UserState` with `owner` set, stored as a `bot` member of its `user` entry. `account()` stays a credential check, so a bot runs no account commands; the new `persists()` (account or bot) decides retirement in `attach_locked`, `detach_locked` and the restore loop, and `grant_roles_locked` gives a bot `["bot"]` only. A bot may not add a passkey or an email address, and `requestable` reserves `bot_`. | It follows apron-server-cloudflare's `/invite-bot`, which the owner needs to test a bot here. An owner field is the smallest change that makes a bot durable without making it an account: every `account()` gate (`/invite-device`, `/invite-bot`, session and device restore) keeps excluding it for free. A passkey or address would turn the bot into an account that could mint its own tokens, so both are refused. Go skips unknown members and kinds, but it takes the bot for a guest and retires it (docs/DEVIATIONS.md). |
 | 2026-10-28 | A replaced device or bot token's connections are signed out under the lock that replaces the token (`revoke_connection_locked`: the connection leaves its user, its ceremony and proposal go, and the user's status is announced), and `process_frame` ignores the frames of a connection whose close is queued; `authenticate` denies an `auth` that was read before. | A security review of the first `/invite-bot` commit found that `close_with_error` only queued the error behind the outgoing batches, so a revoked connection kept running requests as the user until its writer drained. Signing it out under the lock covers a request already past the read loop, because every handler resolves its identity with `client_user` under its own lock; ignoring later frames stops it signing in again. Go runs a closing connection's frames, but it closes with an error only at shutdown and at the connection cap (docs/DEVIATIONS.md). The tests run the replacing command while holding the state lock, so they check the revoked connection before its writer can drain and detach it; without that, a fast test writer hides the bug. |
+| 2026-10-28 | A guest's passkey registration makes a new account with apron-server-cloudflare's user_id, `<slug>_<4 digits>` from the requested name or `u_<random>`, rather than keeping `guest_<n>` in place as Go does. `begin` picks the id with `candidate_user_id` against `user_id_taken_locked`, which `claim_user_id_locked` now calls too, and carries it in `PasskeyCeremony.candidate_id`; `finish` claims it, inserts a new `UserState` with the passkey, and switches the connection, which retires the guest through the usual `attach_locked` path. The account joins the guest's rooms with `add_member_locked`, and `notify_user_id_change_locked` sends `user` with `new` and `old`. Existing `guest_<n>` accounts are not migrated. | The owner's rule is to follow the official servers, and Cloudflare where Go and Cloudflare differ (docs/DEVIATIONS.md, Account user_ids). Retiring the guest and making a fresh account reuses the code a guest's departure and a new account already have, so nothing bound to the guest needs rekeying: a guest has no sessions, device tokens or bots, and its push registrations go with it, as a Cloudflare guest has none. The guest-adds-email path has no Cloudflare counterpart, so it keeps Go's in-place account. |
 | 2026-10-27 | autocert is ported as `aprond::acme`: an RFC 8555 client (`client.rs`), ES256 JWS and challenge certificates over rust-stdlib-crypto (`jws.rs`), `DirCache` (`cache.rs`) and `Manager` (`manager.rs`). | golang.org/x/crypto is not Go's standard library, so rust-stdlib has no counterpart. The port keeps autocert's cache names (`<domain>`, `<domain>+token`, `<token>+http-01`, `acme_account+key`) and file layout (PEM key, then the PEM chain), so a cache directory moves between the Go and Rust aprond. `tools/differential/acme` checks thumbprints, key authorizations, JWS signatures, the TLS-ALPN-01 certificate, and cache files in both directions against x/crypto/acme v0.57.0. |
 | 2026-10-27 | The ACME gate runs Pebble v2.10.1 and pebble-challtestsrv from `cargo test` (`acme::pebble_test`). The test fails when they are missing, unless `APRON_SKIP_PEBBLE=1`; AGENTS.md, Verification, gives the install command and the lookup order (`$PEBBLE_BIN_DIR`, `PATH`, `$(go env GOPATH)/bin`). | It issues over TLS-ALPN-01 through a real handshake, verifies the chain against Pebble's root, reuses the certificate, renews it, and has Go's autocert read the cache. Pebble's validator sends HTTP-01 requests with `Host: <domain>:5002`, which `HostWhitelist` rejects in Go and here alike, so HTTP-01 is checked by the handler tests, not against Pebble. |
+
+## Migrating a guest_<n> account
+
+Accounts registered before 2026-10-28, such as the live `guest_1` with its
+bot `bot_guest_1`, keep their user_ids. Nothing migrates them. Moving one to
+a Cloudflare-style id, say `ada_1234`, would take all of the following under
+one lock, as one store flush:
+
+1. Claim the new id (`claim_user_id_locked`); the old one stays in
+   `used_ids`, so it is never reissued (§3.3.3).
+2. Re-key the `UserState` in `State.users`, its `user` store entry, and
+   `id`. Its passkey, email, roles, profile, status, mutes, pings and unread
+   counts move with it; re-run `grant_roles_locked`, since `Config.roles`
+   may name the old id.
+3. Every reference by user_id: `State.credentials` values, `State.emails`
+   values, `RoomState.members`, `active` and `reads` in every room,
+   `RoomState.creator`, `MessageState.owner` (what lets the user edit and
+   delete), `EmbedState.avatar_for`, and the keys of `MessageState.reactions`.
+   PROTOCOL.md §3.3.3 says logged records keep the old user_id, so logged
+   `from` objects and memberships stay as they are, where Cloudflare's
+   `/rename` (store.ts) rewrites them.
+4. Sessions (`Session.user`) and `device` entries (`user`) point at the new
+   id, so existing tokens keep signing in; push registrations are re-keyed,
+   `"<user> <url>"` to the new id, or deleted so devices register again.
+5. The bot: `bot_guest_1` becomes `bot_ada_1234`, by steps 1 to 4 for the
+   bot's own `UserState` (whose `owner` becomes the new id), and its `bot`
+   token entry's `bot` and `owner` fields. The entry is keyed by the
+   token's hash, so the bot's token keeps working; the bot client learns
+   its id from the `auth` result on its next connection.
+6. Frames: `you` with the new id to the user's connections and the bot's,
+   and `user` `{new, old}` to everyone who shares a room with either.
+   Connected clients then derive per-user state again (§3.3.3).
+
+A Go `aprond` on the same store opens the result, since every entry keeps
+its shape.
 
 ## Passkeys for a native iOS client
 
