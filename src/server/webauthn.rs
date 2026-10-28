@@ -13,8 +13,9 @@ use rust_stdlib_crypto::{rand, sha256};
 use super::bots::{BOT_SIGNS_IN_WITH_TOKEN, BOT_TOKEN_PREFIX};
 use super::devices::DEVICE_TOKEN_PREFIX;
 use super::protocol::*;
+use super::rooms::room_update;
 use super::server::{Client, State};
-use super::users::normalize_name;
+use super::users::{candidate_user_id, normalize_name};
 use crate::obj;
 use crate::webauthn::protocol::{
     self as wa, AuthenticatorSelection, ResidentKeyRequirement, UserVerificationRequirement,
@@ -35,13 +36,14 @@ pub struct PasskeyUser {
     pub credentials: Vec<Credential>,
 }
 
-/// The `webauthn::User` of one ceremony: Go's `passkeyUser`, or
-/// `labelledPasskeyUser` when `label` is the display name a guest's
-/// registration asks for, which password managers show as the user name.
+/// The `webauthn::User` of one ceremony: Go's `passkeyUser`, or, for a
+/// guest's registration, the new account as Cloudflare offers it, with its
+/// user_id as the user name and its name as the display name.
 struct PasskeyView<'a> {
     user_id: &'a str,
     handle: &'a [u8],
     credentials: &'a [Credential],
+    user_name: String,
     label: String,
 }
 
@@ -50,7 +52,7 @@ impl User for PasskeyView<'_> {
         self.handle
     }
     fn webauthn_name(&self) -> String {
-        self.label.clone()
+        self.user_name.clone()
     }
     fn webauthn_display_name(&self) -> String {
         self.label.clone()
@@ -78,8 +80,10 @@ pub struct PasskeyCeremony {
     pub origin: String,
     /// The user handle a registration's passkey gets; empty for a login.
     pub handle: Vec<u8>,
-    /// The display name a guest's registration asked for, applied when it
-    /// finishes; empty for a login, or a passkey added to an account.
+    /// The new account a guest's registration makes: the user_id picked at
+    /// begin, claimed only when it finishes, and its name; both empty for a
+    /// login, or a passkey added to an account.
+    pub candidate_id: String,
     pub name: String,
     pub data: SessionData,
     pub expires: Time,
@@ -223,6 +227,7 @@ impl State {
 
         let mut identity_id = String::new();
         let mut handle = Vec::new();
+        let mut candidate_id = String::new();
         let mut name = String::new();
         let (public_key, mut data) = if action == "register" {
             let Some(user_id) = self.client_user(c) else {
@@ -234,6 +239,15 @@ impl State {
                 return Err(denied(BOT_SIGNS_IN_WITH_TOKEN));
             }
             identity_id = user_id.clone();
+            // A guest is no account: its registration makes one under a new
+            // user_id, as apron-server-cloudflare's does (docs/DEVIATIONS.md).
+            if !u.account() {
+                name = normalize_name(&parse_string(&req.params, "name", false)?);
+                candidate_id = candidate_user_id(&name, |id| self.user_id_taken_locked(id));
+                if name.is_empty() {
+                    name = u.name.clone();
+                }
+            }
             let fresh;
             let passkey = match &u.passkey {
                 Some(passkey) => passkey,
@@ -245,12 +259,6 @@ impl State {
                     &fresh
                 }
             };
-            // A guest becoming an account may ask for its name with the
-            // begin (§3.2); a passkey added to an account keeps the
-            // account's name.
-            if !u.account() {
-                name = normalize_name(&parse_string(&req.params, "name", false)?);
-            }
             if passkey.credentials.len() >= 10 {
                 return Err(denied("This identity already has ten passkeys"));
             }
@@ -259,15 +267,22 @@ impl State {
                 .iter()
                 .map(Credential::descriptor)
                 .collect();
-            let registering = PasskeyView {
-                user_id: &u.id,
-                handle: &passkey.handle,
-                credentials: &passkey.credentials,
-                label: if name.is_empty() {
-                    passkey_name(&u.name, &u.id)
-                } else {
-                    name.clone()
-                },
+            let registering = if candidate_id.is_empty() {
+                PasskeyView {
+                    user_id: &u.id,
+                    handle: &passkey.handle,
+                    credentials: &passkey.credentials,
+                    user_name: passkey_name(&u.name, &u.id),
+                    label: passkey_name(&u.name, &u.id),
+                }
+            } else {
+                PasskeyView {
+                    user_id: &candidate_id,
+                    handle: &passkey.handle,
+                    credentials: &passkey.credentials,
+                    user_name: candidate_id.clone(),
+                    label: passkey_name(&name, &candidate_id),
+                }
             };
             let (mut creation, data) = w
                 .begin_registration(
@@ -307,6 +322,7 @@ impl State {
             rp_id: w.config.rpid.clone(),
             origin: c.origin.clone(),
             handle,
+            candidate_id,
             name,
             expires: data.expires.clone(),
             data,
@@ -353,14 +369,21 @@ impl State {
             return Err(denied("Identity changed; try again"));
         }
         let raw = parse_passkey_credential(&req.params, &ceremony.action)?;
+        let mut replaced: Option<(Object, Vec<String>)> = None;
         let user_id = if ceremony.action == "register" {
-            let user_id = ceremony.identity_id.clone();
+            let new_account = !ceremony.candidate_id.is_empty();
+            let user_id = if new_account {
+                ceremony.candidate_id.clone()
+            } else {
+                ceremony.identity_id.clone()
+            };
             let parsed = wa::parse_credential_creation_response_bytes(&raw)
                 .map_err(|_| verification_failed())?;
             let registering = PasskeyView {
                 user_id: &user_id,
                 handle: &ceremony.handle,
                 credentials: &[],
+                user_name: String::new(),
                 label: String::new(),
             };
             let credential = w
@@ -369,32 +392,49 @@ impl State {
             if self.credentials.contains_key(&credential.id.0) {
                 return Err(denied("Passkey is already registered"));
             }
-            let u = self.users.get_mut(&user_id).expect("the connection's user");
-            if u.passkey
-                .as_ref()
-                .is_some_and(|user| user.handle != ceremony.handle || user.credentials.len() >= 10)
+            let u = &self.users[&ceremony.identity_id];
+            if u.account() != !new_account
+                || u.passkey.as_ref().is_some_and(|user| {
+                    user.handle != ceremony.handle || user.credentials.len() >= 10
+                })
             {
                 return Err(denied("Registration changed; try again"));
             }
             let credential_id = credential.id.0.clone();
-            u.passkey
-                .get_or_insert_with(|| PasskeyUser {
+            if new_account {
+                // Cloudflare's finish fails the same way when another
+                // registration took the user_id since begin.
+                if !self.claim_user_id_locked(&user_id) {
+                    return Err(invalid_params("identity already exists"));
+                }
+                let guest = &self.users[&ceremony.identity_id];
+                let mut rooms: Vec<(i64, String)> = guest
+                    .joined
+                    .iter()
+                    .filter_map(|id| self.rooms.get(id).map(|r| (r.created_id, id.clone())))
+                    .collect();
+                rooms.sort();
+                replaced = Some((guest.from(), rooms.into_iter().map(|(_, id)| id).collect()));
+                let mut account = self.new_user_locked(&user_id, &ceremony.name);
+                account.passkey = Some(PasskeyUser {
                     handle: ceremony.handle.clone(),
-                    credentials: Vec::new(),
-                })
-                .credentials
-                .push(credential);
-            // The account takes the name its registration asked for.
-            let renamed = !ceremony.name.is_empty() && ceremony.name != u.name;
-            if renamed {
-                u.name = ceremony.name.clone();
+                    credentials: vec![credential],
+                });
+                self.users.insert(user_id.clone(), account);
+                self.grant_roles_locked(&user_id);
+            } else {
+                self.users
+                    .get_mut(&user_id)
+                    .expect("the connection's user")
+                    .passkey
+                    .get_or_insert_with(|| PasskeyUser {
+                        handle: ceremony.handle.clone(),
+                        credentials: Vec::new(),
+                    })
+                    .credentials
+                    .push(credential);
             }
             self.touch_user(&user_id);
-            // A guest that becomes an account takes the roles its user_id
-            // was granted.
-            if self.grant_roles_locked(&user_id) || renamed {
-                self.notify_profile_locked(&user_id, Some(c), &ExtObject::new(), &[]);
-            }
             self.credentials.insert(credential_id, user_id.clone());
             user_id
         } else {
@@ -415,6 +455,7 @@ impl State {
                                 user_id: &u.id,
                                 handle: &passkey.handle,
                                 credentials: &passkey.credentials,
+                                user_name: passkey_name(&u.name, &u.id),
                                 label: passkey_name(&u.name, &u.id),
                             }),
                             None => Err("unknown credential"),
@@ -440,11 +481,30 @@ impl State {
             }
             user_id
         };
-        // A registration adds the passkey to the signed-in connection's
-        // account, and a login as the user the connection is signed in as
-        // changes no user: neither is a sign-in (§4.5).
-        let sign_in = ceremony.action != "register" && current.as_deref() != Some(&user_id);
-        self.sign_in_locked(c, req, &user_id, now, sign_in, false)
+        // A passkey added to the signed-in connection's account, and a
+        // login as the user the connection is signed in as, change no user:
+        // neither is a sign-in (§4.5).
+        let sign_in = current.as_deref() != Some(&user_id);
+        let Some((guest, rooms)) = replaced else {
+            return self.sign_in_locked(c, req, &user_id, now, sign_in, false);
+        };
+        // The guest is retired as the connection leaves it. The new account
+        // takes its rooms, each a logged join the connection gets as
+        // room_update memberships, as Cloudflare sends it, since it has the
+        // rooms already; then those who share one learn it is the same
+        // person (§3.3.3), and the connection gets what follows a sign-in.
+        let result = self.sign_in_locked(c, req, &user_id, now, false, false)?;
+        for room_id in rooms {
+            if let Some(membership) = self.add_member_locked(&user_id, &room_id) {
+                self.send_to_user(
+                    &user_id,
+                    &room_update("memberships", vec![membership.into()]),
+                );
+            }
+        }
+        self.notify_user_id_change_locked(&user_id, guest);
+        self.send_after_auth_locked(c);
+        Ok(result)
     }
 
     /// Makes an account the connection's identity after a passkey or email
