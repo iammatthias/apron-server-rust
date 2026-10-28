@@ -431,16 +431,22 @@ impl State {
         }
     }
 
-    /// Marks `id` used and reports whether it was free: never assigned,
-    /// ignoring case, not a room's name, and not granted a role.
-    pub fn claim_user_id_locked(&mut self, id: &str) -> bool {
+    /// Reports whether `id` may not be assigned: it was assigned before,
+    /// ignoring case, names a room, or is granted a role.
+    pub fn user_id_taken_locked(&self, id: &str) -> bool {
         let key = id.to_lowercase();
-        if self.used_ids.contains(&key)
+        self.used_ids.contains(&key)
             || self.room_named_locked(id)
             || self.granted_ids.contains(&key)
-        {
+    }
+
+    /// Marks `id` used and reports whether it was free
+    /// (`user_id_taken_locked`).
+    pub fn claim_user_id_locked(&mut self, id: &str) -> bool {
+        if self.user_id_taken_locked(id) {
             return false;
         }
+        let key = id.to_lowercase();
         self.used_ids.insert(key.clone());
         self.touch_used_id(&key);
         true
