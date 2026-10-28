@@ -849,3 +849,111 @@ pub fn post_embeds(c: &mut TestClient, id: &str, params: Object) -> Object {
     );
     result
 }
+
+/// The connection signed in as user_id whose bearer token's SHA-256 is or,
+/// with `is` false, is not that of token, from the server's state, for
+/// checks on a connection the test client cannot reach.
+pub fn token_connection(
+    server: &TestServer,
+    user_id: &str,
+    token: &str,
+    is: bool,
+) -> Arc<crate::server::server::Client> {
+    let key = rust_stdlib_crypto::sha256::sum256(token.as_bytes());
+    let st = server.app.lock();
+    st.clients
+        .values()
+        .find(|conn| conn.user.as_deref() == Some(user_id) && (conn.token == key) == is)
+        .map(|conn| conn.client.clone())
+        .unwrap_or_else(|| panic!("no such connection of {user_id}"))
+}
+
+const LATE_POST: &[u8] =
+    br#"{"method":"message","id":"late","params":{"room_id":"general","body":{"text":"still here"}}}"#;
+
+/// Runs the command `text` on asker, whose connection in the server is
+/// asker_conn, while holding the state lock, and checks before releasing it
+/// that the command revoked `revoked`, a connection of user_id: it is still
+/// connected, as its writer has not drained, but closing and signed out, so
+/// a request already past the read loop is denied when it resolves its
+/// identity. Returns the frames asker receives before the result.
+pub fn command_revoking(
+    server: &TestServer,
+    asker: &mut TestClient,
+    asker_conn: &Arc<crate::server::server::Client>,
+    text: &str,
+    revoked: &Arc<crate::server::server::Client>,
+    user_id: &str,
+) -> Vec<Object> {
+    let command = encode_json(&obj! {
+        "method" => "command", "id" => "reissue", "params" => obj! {"body" => obj! {"text" => text}},
+    })
+    .unwrap();
+    let (command, _) = parse_request(&command);
+    let (late, _) = parse_request(LATE_POST);
+    {
+        let mut st = server.app.lock();
+        st.command_locked(asker_conn, &command)
+            .unwrap_or_else(|e| panic!("{text}: {e:?}"));
+        assert!(
+            st.clients.contains_key(&revoked.id) && revoked.is_closing(),
+            "the revoked connection is not closing"
+        );
+        assert!(
+            st.client_user(revoked).is_none(),
+            "the revoked connection is signed in"
+        );
+        assert!(
+            !st.users[user_id].clients.contains(&revoked.id),
+            "{user_id} keeps the revoked connection"
+        );
+        let messages = st.messages.len();
+        let err = st.save_message_locked(revoked, &late).unwrap_err();
+        assert_eq!(
+            (err.code, err.message.as_str(), st.messages.len()),
+            (CODE_DENIED, "Sign in before sending requests", messages),
+            "in-flight message on the revoked connection"
+        );
+    }
+    let mut before = Vec::new();
+    loop {
+        let frame = asker.read();
+        if frame.get("id") == Some(&Json::from("reissue")) {
+            assert!(frame.contains_key("result"), "{text}: {frame:?}");
+            return before;
+        }
+        before.push(frame);
+    }
+}
+
+/// Checks that frames the revoked connection c sends from now on are
+/// ignored, a sign-in included, and that no message reached watcher.
+pub fn assert_revoked_runs_nothing(
+    server: &TestServer,
+    c: &Arc<crate::server::server::Client>,
+    watcher: &mut TestClient,
+) {
+    let (messages, users) = {
+        let st = server.app.lock();
+        (st.messages.len(), st.users.len())
+    };
+    server.app.process_frame(c, LATE_POST);
+    server.app.process_frame(
+        c,
+        br#"{"method":"auth","id":"again","params":{"scheme":"guest"}}"#,
+    );
+    let st = server.app.lock();
+    assert_eq!(
+        (st.messages.len(), st.users.len(), st.client_user(c)),
+        (messages, users, None),
+        "the revoked connection posted or signed in"
+    );
+    drop(st);
+    let frames = watcher.drain();
+    assert!(
+        frames
+            .iter()
+            .all(|f| f.get("method") != Some(&Json::from("message"))),
+        "a message reached a member: {frames:?}"
+    );
+}

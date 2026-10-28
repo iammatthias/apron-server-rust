@@ -472,6 +472,35 @@ impl State {
         self.announce_status_locked(&user_id);
     }
 
+    /// Closes a connection whose sign-in was revoked, with a connection-level
+    /// error, and signs it out at once. The close waits behind the frames
+    /// already queued, and every request resolves its identity under the
+    /// lock, so from here on nothing the connection sent runs as the user,
+    /// in flight or not.
+    pub fn revoke_connection_locked(&mut self, id: ClientId, e: RpcError) {
+        let Some(conn) = self.clients.get_mut(&id) else {
+            return;
+        };
+        conn.client.close_with_error(e);
+        conn.ceremony = None;
+        let proposal = conn.proposal.take();
+        let Some(user_id) = conn.user.take() else {
+            return;
+        };
+        if let Some(proposal) = proposal {
+            self.drop_proposal_locked(proposal);
+        }
+        let Some(u) = self.users.get_mut(&user_id) else {
+            return;
+        };
+        u.clients.remove(&id);
+        if u.clients.is_empty() && !u.persists() {
+            self.retire_locked(&user_id);
+            return;
+        }
+        self.announce_status_locked(&user_id);
+    }
+
     /// Removes a guest identity for good. It leaves every room it joined,
     /// logging each leave as a membership for the remaining members
     /// (§4.2.2). Its user_id is never reissued (§3.3).
@@ -733,6 +762,11 @@ impl Server {
         req: &Request,
     ) -> Result<Json, RpcError> {
         let mut st = self.lock();
+        // A revoked connection is closing: an auth read before the close was
+        // queued must not sign it in again (revoke_connection_locked).
+        if c.is_closing() {
+            return Err(RpcError::new(CODE_DENIED, "This connection is closing"));
+        }
         let scheme = parse_string(&req.params, "scheme", true)?;
         // A scheme this document defines but the server does not offer is
         // unsupported (§3.2), whatever else the request holds.

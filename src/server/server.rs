@@ -502,6 +502,12 @@ impl Client {
         }
     }
 
+    /// Reports whether a connection-level error is queued, after which the
+    /// connection sends nothing more and runs none of its frames.
+    pub fn is_closing(&self) -> bool {
+        self.closing.load(Ordering::SeqCst)
+    }
+
     pub fn enqueue<T: MarshalTo>(&self, value: &T) -> bool {
         match render(value) {
             Some(frame) => self.enqueue_frames(vec![frame]),
@@ -1185,6 +1191,12 @@ impl Server {
     }
 
     pub(crate) fn process_frame(self: &Arc<Self>, c: &Arc<Client>, payload: &[u8]) {
+        // Once a connection-level error is queued, any reply would be
+        // dropped, and the connection may have lost its sign-in: its later
+        // frames are ignored rather than run (docs/DEVIATIONS.md).
+        if c.is_closing() {
+            return;
+        }
         let (req, parse_err) = parse_request(payload);
         if let Some(parse_err) = parse_err {
             if notification_only(&req.method) {

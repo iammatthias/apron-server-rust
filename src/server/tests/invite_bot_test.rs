@@ -218,6 +218,42 @@ fn test_invite_bot_again_revokes_old_token() {
     assert!(frame.contains_key("result"), "new token: {frame:?}");
 }
 
+/// The old token's connection, signed out at the replacement, runs nothing
+/// more: a message it sends then is refused and reaches no one.
+#[test]
+fn test_replaced_bot_token_connection_runs_nothing() {
+    let server = passkey_test_server();
+    let (mut ada, ada_id) = account(&server, "Ada");
+    let bot_id = format!("bot_{ada_id}");
+    let (old, _) = invite_bot(&mut ada, &bot_id, "Bot of Ada", NO_URL);
+    let (first, _) = bot(&server, "", &old);
+    let conn = token_connection(&server, &bot_id, &old, true);
+    let ada_conn = token_connection(&server, &ada_id, &old, false);
+    ada.drain();
+
+    let before = command_revoking(&server, &mut ada, &ada_conn, "/invite-bot", &conn, &bot_id);
+    assert_eq!(before.len(), 1, "only the notice: {before:?}");
+    // The socket may be gone already; a frame that gets through is ignored.
+    let _ = first.ws.write(
+        crate::ws::MessageType::Text,
+        br#"{"method":"message","id":"late","params":{"body":{"text":"after the reissue"}}}"#,
+        time::SECOND,
+    );
+    assert_eq!(
+        first.read(),
+        obj! {"error" => obj! {
+            "code" => CODE_DENIED,
+            "message" => "Bot token replaced; sign in with the new one",
+        }},
+        "the old token's connection gets only the close error"
+    );
+    assert!(
+        first.read_raw(time::SECOND).is_err(),
+        "the old token's connection stayed open"
+    );
+    assert_revoked_runs_nothing(&server, &conn, &mut ada);
+}
+
 #[test]
 fn test_invite_bot_denied_to_guests_and_bots() {
     let server = passkey_test_server();
@@ -322,7 +358,20 @@ fn test_bot_keeps_its_name() {
     let (mut ada, ada_id) = account(&server, "Ada");
     let (token, _) = invite_bot(&mut ada, &format!("bot_{ada_id}"), "Bot of Ada", NO_URL);
     let (mut b, _) = bot(&server, "", &token);
-    b.expect_error("me", "rename", obj! {"name" => "Skynet"}, CODE_DENIED);
+    let frame = b.call("me", "rename", obj! {"name" => "Skynet"});
+    assert_eq!(
+        frame.get("error"),
+        Some(&Json::from(obj! {
+            "code" => CODE_DENIED,
+            "message" => "A bot is named after its owner, who can rename it with /invite-bot",
+        })),
+        "bot rename"
+    );
+    assert_eq!(
+        server.app.lock().users[&format!("bot_{ada_id}")].name,
+        "Bot of Ada",
+        "a denied rename changed the name"
+    );
     // The name it has, as a bot client sends on every connection, is no
     // change; nor is one that normalizes to it.
     for (id, name) in [("same", "Bot of Ada"), ("spaced", "  Bot  of Ada ")] {
@@ -383,17 +432,201 @@ fn test_invite_bot_renames_after_the_owner() {
 
 #[test]
 fn test_bot_ids_are_reserved() {
+    // A guest asking for a bot's user_id, in any case, gets a guest_<n>.
     let server = passkey_test_server();
-    let (mut c, _) = dial_raw(&server);
-    let result = c.result(
-        "auth",
-        "guest",
-        obj! {"scheme" => "guest", "user_id" => "Bot_ada"},
+    for (n, requested) in ["bot_ada", "Bot_ada", "BOT_ADA", "bOt_x"]
+        .iter()
+        .enumerate()
+    {
+        let (mut c, _) = dial_raw(&server);
+        let result = c.result(
+            "auth",
+            "guest",
+            obj! {"scheme" => "guest", "user_id" => *requested},
+        );
+        assert_eq!(
+            you_of(&result)["user_id"],
+            Json::from(format!("guest_{}", n + 1)),
+            "guest requesting {requested:?}"
+        );
+    }
+    // So does a new email account, with a user_<n>.
+    let (server, mailbox) = super::email_test::email_test_server(|_| {});
+    for (n, requested) in ["bot_ada", "Bot_Ada"].iter().enumerate() {
+        let (mut c, _) = dial_raw(&server);
+        let email = format!("ada{n}@example.com");
+        super::email_test::propose(&mut c, &email);
+        let code = mailbox.receive().code;
+        let (_, result) = super::email_test::approve(&mut c, &code, obj! {"user_id" => *requested});
+        assert_eq!(
+            you_of(&result)["user_id"],
+            Json::from(format!("user_{}", n + 1)),
+            "email account requesting {requested:?}: {result:?}"
+        );
+    }
+}
+
+/// /invite-bot never reissues a user_id (§3.3): a bot_<owner> someone else
+/// holds, or one ever assigned, ignoring case, means no bot.
+#[test]
+fn test_invite_bot_denied_when_its_id_is_taken() {
+    let server = passkey_test_server();
+    let (mut ada, ada_id) = account(&server, "Ada");
+    let bot_id = format!("bot_{ada_id}");
+    {
+        // A user who held the id before the prefix was reserved.
+        let mut st = server.app.lock();
+        let squatter = st.new_user_locked(&bot_id, "Not a bot");
+        st.users.insert(bot_id.clone(), squatter);
+        st.used_ids.insert(bot_id.to_lowercase());
+    }
+    assert_eq!(
+        command_error(&mut ada, "/invite-bot"),
+        Json::from(obj! {
+            "code" => CODE_DENIED,
+            "message" => format!("The user_id {bot_id} belongs to someone else, so you cannot have a bot"),
+        }),
+        "held by another user"
     );
-    assert_ne!(
-        you_of(&result)["user_id"],
-        Json::from("Bot_ada"),
-        "a guest took a bot's user_id"
+    // That user is gone, but its user_id was assigned.
+    server.app.lock().users.remove(&bot_id);
+    let taken = Json::from(obj! {
+        "code" => CODE_DENIED,
+        "message" => format!("The user_id {bot_id} was taken, so you cannot have a bot"),
+    });
+    assert_eq!(command_error(&mut ada, "/invite-bot"), taken, "used id");
+    let st = server.app.lock();
+    assert!(
+        !st.users.contains_key(&bot_id) && st.bots.keys().next().is_none(),
+        "a denied /invite-bot made a bot or a token"
+    );
+}
+
+/// A user_id Config.roles names is never assigned to anyone but its holder,
+/// so a role meant for a bot_ id cannot reach a bot: /invite-bot is denied.
+#[test]
+fn test_invite_bot_denied_for_a_role_holders_id() {
+    let kept: Arc<dyn Store> = Arc::new(store::Memory::new());
+    let dir = TempDir::new("apron-bot-roles-");
+    let upload_dir = format!("{dir}/uploads");
+    let mut server = start_with_store(kept.clone(), &upload_dir);
+    let (mut ada, ada_id) = account(&server, "Ada");
+    let (_, laptop) = private_reply(&mut ada, "/invite-device laptop");
+    let laptop = laptop.split("```\n").nth(1).unwrap().trim_end().to_owned();
+    drop(ada);
+    server.stop();
+
+    let bot_id = format!("bot_{ada_id}");
+    let roles_for = bot_id.to_uppercase();
+    let server = super::persist_test::start_with(kept, &upload_dir, |config| {
+        config.roles = std::collections::BTreeMap::from([("admin".into(), vec![roles_for])]);
+    });
+    let (mut ada, _) = dial_origin(&server, OTHER_ORIGIN);
+    passkey_result(&passkey_call(
+        &mut ada,
+        "laptop",
+        "token",
+        "",
+        obj! {"token" => laptop.as_str()},
+    ));
+    ada.drain();
+    assert_eq!(
+        command_error(&mut ada, "/invite-bot"),
+        Json::from(obj! {
+            "code" => CODE_DENIED,
+            "message" => format!("The user_id {bot_id} was taken, so you cannot have a bot"),
+        }),
+        "id granted a role"
+    );
+}
+
+/// The token goes to the asking connection only: the owner's others get
+/// the bot's join, and no notice.
+#[test]
+fn test_invite_bot_notice_only_to_the_asker() {
+    let server = passkey_test_server();
+    let (mut ada, _) = dial_origin(&server, TEST_PASSKEY_ORIGIN);
+    let registered = register_test_passkey(&mut ada, &mut new_test_authenticator());
+    let ada_id = you_of(&registered)["user_id"].as_str().unwrap().to_owned();
+    let (mut other, _) = dial_origin(&server, TEST_PASSKEY_ORIGIN);
+    passkey_result(&passkey_call(
+        &mut other,
+        "resume",
+        "token",
+        "",
+        obj! {"token" => registered["token"].clone()},
+    ));
+    ada.drain();
+    other.drain();
+
+    let bot_id = format!("bot_{ada_id}");
+    let name = format!("Bot of {ada_id}");
+    let (token, _) = invite_bot(&mut ada, &bot_id, &name, NO_URL);
+    let frames = other.drain();
+    assert_eq!(frames.len(), 1, "the owner's other connection: {frames:?}");
+    assert_eq!(
+        joined_general(&frames[0]),
+        Json::from(obj! {"user_id" => bot_id.as_str(), "name" => name.as_str()}),
+        "the join"
+    );
+    assert!(
+        !format!("{frames:?}").contains(&token),
+        "the token reached another connection"
+    );
+}
+
+/// A bot entry whose bot is gone, or is no bot of that owner, is dropped at
+/// start, from the store too.
+#[test]
+fn test_orphaned_bot_entries_dropped_at_restore() {
+    let kept: Arc<dyn Store> = Arc::new(store::Memory::new());
+    let dir = TempDir::new("apron-bot-orphan-");
+    let upload_dir = format!("{dir}/uploads");
+    let mut server = start_with_store(kept.clone(), &upload_dir);
+    let (mut ada, ada_id) = account(&server, "Ada");
+    let bot_id = format!("bot_{ada_id}");
+    let (token, _) = invite_bot(&mut ada, &bot_id, "Bot of Ada", NO_URL);
+    drop(ada);
+    server.stop();
+
+    let orphan = "11".repeat(32);
+    let stranger = "22".repeat(32);
+    kept.apply(&[
+        crate::store::Entry::put(
+            "bot",
+            &orphan,
+            r#"{"bot":"bot_gone","owner":"gone","created":"2026-10-28T00:00:00Z"}"#,
+        ),
+        crate::store::Entry::put(
+            "bot",
+            &stranger,
+            format!(
+                r#"{{"bot":"{bot_id}","owner":"someone_else","created":"2026-10-28T00:00:00Z"}}"#
+            ),
+        ),
+    ])
+    .unwrap();
+    let mut server = start_with_store(kept.clone(), &upload_dir);
+    assert_eq!(
+        server.app.lock().bots.keys().count(),
+        1,
+        "only the bot's own token is restored"
+    );
+    let (_, frame) = bot(&server, "", &token);
+    assert!(frame.contains_key("result"), "the kept token: {frame:?}");
+    server.stop();
+
+    let mut ids = Vec::new();
+    kept.load(&mut |e| {
+        if e.kind == "bot" {
+            ids.push(e.id);
+        }
+        Ok(())
+    })
+    .unwrap();
+    assert!(
+        ids.len() == 1 && !ids.contains(&orphan) && !ids.contains(&stranger),
+        "bot entries in the store: {ids:?}"
     );
 }
 

@@ -313,6 +313,56 @@ fn test_invite_device_same_name_revokes_old_token() {
     assert!(frame.contains_key("result"), "new token: {frame:?}");
 }
 
+/// The old token's connection, signed out at the replacement, runs nothing
+/// more: a message it sends then is refused and reaches no one.
+#[test]
+fn test_replaced_device_token_connection_runs_nothing() {
+    let server = passkey_test_server();
+    let (mut ada, ada_id) = account(&server);
+    let old = invite_device(&mut ada, &ada_id, "phone", false);
+    let (phone, _) = device(&server, OTHER_ORIGIN, &old);
+    let conn = token_connection(&server, &ada_id, &old, true);
+    let ada_conn = token_connection(&server, &ada_id, &old, false);
+    ada.drain();
+
+    let before = command_revoking(
+        &server,
+        &mut ada,
+        &ada_conn,
+        "/invite-device phone",
+        &conn,
+        &ada_id,
+    );
+    assert_eq!(before.len(), 1, "only the notice: {before:?}");
+    // The socket may be gone already; a frame that gets through is ignored.
+    let _ = phone.ws.write(
+        crate::ws::MessageType::Text,
+        br#"{"method":"message","id":"late","params":{"body":{"text":"after the reissue"}}}"#,
+        time::SECOND,
+    );
+    assert_eq!(
+        phone.read(),
+        obj! {"error" => obj! {
+            "code" => CODE_DENIED,
+            "message" => "Device token replaced; sign in with the new one",
+        }},
+        "the old token's connection gets only the close error"
+    );
+    assert!(
+        phone.read_raw(time::SECOND).is_err(),
+        "the old token's connection stayed open"
+    );
+    let mut watcher = dial_test_client(&server);
+    assert_revoked_runs_nothing(&server, &conn, &mut watcher);
+    let frames = ada.drain();
+    assert!(
+        frames
+            .iter()
+            .all(|f| f.get("method") != Some(&Json::from("message"))),
+        "a message reached ada: {frames:?}"
+    );
+}
+
 #[test]
 fn test_help_lists_invite_device_for_accounts() {
     let server = passkey_test_server();
