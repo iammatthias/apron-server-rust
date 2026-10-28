@@ -1,5 +1,7 @@
 # The public test server at https://apron.farfield.systems, behind Caddy and
 # a Cloudflare Tunnel. Deploy with tools/deploy/deploy.sh.
+# The router sends aprond's paths to aprond and the rest to web, which serves
+# a build of apron-web.
 name: apron
 services:
   aprond:
@@ -8,17 +10,12 @@ services:
       dockerfile: deploy/Dockerfile
     image: apron-aprond:latest
     restart: unless-stopped
-    ports:
-      # The reverse proxy reaches aprond at host.docker.internal, the docker
-      # bridge gateway, so the port binds there and nowhere public.
-      - "172.17.0.1:8901:8080"
     volumes:
       - data:/data
     command:
       - --addr=0.0.0.0:8080
       - --store=sqlite:/data/aprond.db
       - --upload.dir=/data/uploads
-      - --static-dir=/web
       - --public-url=https://apron.farfield.systems
       - --origin=https://apron.farfield.systems
       - --webauthn.rp-id=apron.farfield.systems
@@ -26,13 +23,32 @@ services:
       - --apple.app-id=MP92RCAPRG.app.ladle.ios
       # Link previews: the server fetches the pages messages link to.
       - --unfurl.enable
-      # Caddy appends cloudflared's loopback address to X-Forwarded-For, so
-      # its last entry is 127.0.0.1 for every visitor. Cloudflare sets
-      # Cf-Connecting-IP to the visitor alone and Caddy passes it through.
+      # X-Forwarded-For's last entry is a proxy's address for every visitor.
+      # Cloudflare sets Cf-Connecting-IP to the visitor alone, and the host's
+      # Caddy and the router pass it through.
       - --client-ip-header=Cf-Connecting-IP
       - --messages-per-minute=30
       - --max-connections=300
       - --max-listener-connections=600
       - --max-private-rooms=20
+  web:
+    build:
+      context: .
+      dockerfile: caddy.Dockerfile
+      target: web
+    image: apron-web:latest
+    restart: unless-stopped
+  router:
+    build:
+      context: .
+      dockerfile: caddy.Dockerfile
+      target: router
+    image: apron-router:latest
+    restart: unless-stopped
+    depends_on: [aprond, web]
+    ports:
+      # The reverse proxy reaches the router at host.docker.internal, the
+      # docker bridge gateway, so the port binds there and nowhere public.
+      - "${APRON_PUBLISH:-172.17.0.1:8901}:8080"
 volumes:
   data:

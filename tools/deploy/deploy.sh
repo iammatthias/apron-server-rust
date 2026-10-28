@@ -7,11 +7,14 @@
 #   APRON_DEPLOY_HOST  the SSH destination, such as user@host (required)
 #   APRON_DEPLOY_DIR   the bundle directory on the host (default: apron)
 #   APRON_PUBLIC_URL   the URL to check (default: https://apron.farfield.systems)
-#   APRON_WEB_BUILD    the built web client (default: the Go clone's .apron-web/build)
+#   APRON_WEB_DIR      a checkout of apron-chat/apron-web (default:
+#                      ~/Developer/forks/apron-web)
+#   APRON_WEB_BUILD    a built web client to ship as is; unset, the script
+#                      builds $APRON_WEB_DIR same-origin and ships its build/
 #
 # The host builds offline, so this ships a source bundle instead of a git
-# checkout: the crate at HEAD, `cargo vendor` output
-# with its .cargo/config.toml, the built web client, and deploy/. Rerunning it
+# checkout: the crate at HEAD, `cargo vendor` output with its
+# .cargo/config.toml, deploy/, and the web build in deploy/web. Rerunning it
 # converges: rsync --delete replaces the bundle, compose rebuilds and
 # recreates only what changed, and the data volume is kept.
 set -euo pipefail
@@ -22,12 +25,17 @@ fi
 host=${APRON_DEPLOY_HOST:?set APRON_DEPLOY_HOST to the SSH destination, in the environment or tools/deploy/local.env}
 dest=${APRON_DEPLOY_DIR:-apron}
 url=${APRON_PUBLIC_URL:-https://apron.farfield.systems}
-go_dir=${APRON_GO_DIR:-$HOME/Developer/forks/apron-server-go}
-web=${APRON_WEB_BUILD:-$go_dir/.apron-web/build}
+web_dir=${APRON_WEB_DIR:-$HOME/Developer/forks/apron-web}
 
+if [[ -n ${APRON_WEB_BUILD:-} ]]; then
+	web=$APRON_WEB_BUILD
+else
+	# Empty URLs build a client that connects to the origin serving it.
+	(cd "$web_dir" && npm ci && VITE_DEFAULT_SERVER_URL= VITE_TRUSTED_MEDIA_ORIGINS= npm run build)
+	web=$web_dir/build
+fi
 if [[ ! -f "$web/index.html" ]]; then
-	echo "No web build at $web. Build it same-origin in the Go clone:" >&2
-	echo "  cd .apron-web && VITE_DEFAULT_SERVER_URL= VITE_TRUSTED_MEDIA_ORIGINS= mise exec node@24 -- npm run build" >&2
+	echo "No web build at $web." >&2
 	exit 1
 fi
 if [[ -n $(git -C "$root" status --porcelain -- Cargo.toml Cargo.lock src deploy) ]]; then
@@ -55,6 +63,6 @@ for _ in $(seq 60); do
 	fi
 	sleep 2
 done
-echo "$url/healthz did not answer 200. The container is up; check the reverse proxy in front of it." >&2
+echo "$url/healthz did not answer 200. The containers are up; check the reverse proxy in front of them." >&2
 ssh -o BatchMode=yes "$host" "cd $dest && docker compose -f deploy/compose.yaml ps && docker compose -f deploy/compose.yaml logs --tail 20"
 exit 1

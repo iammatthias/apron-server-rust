@@ -1,0 +1,15 @@
+{
+	admin off
+}
+
+# aprond's routes, from Server::handler in src/server/server.rs. Everything
+# else is the web client.
+:8080 {
+	@aprond path /ws /healthz /write/* /files/* /streams/* /.well-known/apple-app-site-association
+	handle @aprond {
+		reverse_proxy aprond:8080
+	}
+	handle {
+		reverse_proxy web:8080
+	}
+}

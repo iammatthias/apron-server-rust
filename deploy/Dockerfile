@@ -1,6 +1,7 @@
-# Builds from the bundle tools/deploy/deploy.sh assembles: the crate, its
-# vendored dependencies with .cargo/config.toml pointing at them, and the
-# built web client in deploy/web. The build never touches the network.
+# Builds aprond from the bundle tools/deploy/deploy.sh assembles: the crate
+# and its vendored dependencies with .cargo/config.toml pointing at them. The
+# build never touches the network. The web client has its own image,
+# deploy/caddy.Dockerfile.
 FROM rust:1.99.0-bookworm AS build
 LABEL systems.farfield.project=apron
 WORKDIR /src
@@ -19,7 +20,6 @@ RUN apt-get update \
 	&& mkdir -p /data \
 	&& chown apron:apron /data
 COPY --from=build /src/target/release/aprond /usr/local/bin/aprond
-COPY deploy/web /web
 USER apron
 VOLUME /data
 EXPOSE 8080

@@ -91,12 +91,18 @@ command, the other gates, and the variables that skip a gate on purpose.
 
 ## Deploy
 
-`deploy/` holds a Dockerfile and a Compose file for the public test server
-at https://apron.farfield.systems. `tools/deploy/deploy.sh` builds a source
-bundle with vendored dependencies, copies it to a Docker host over SSH, and
-starts it there. Set `APRON_DEPLOY_HOST` to the SSH destination. The
-script's header lists the other settings. To run your own server, change the
-URLs and `--apple.app-id` in `deploy/compose.yaml`.
+`deploy/` holds the Compose project for the public test server at
+https://apron.farfield.systems. It runs three containers on one origin:
+`aprond`, `web`, which serves a build of
+[apron-web](https://github.com/apron-chat/apron-web), and `router`, which
+sends aprond's paths to aprond and everything else to `web`. The server and
+the web client deploy as separate images.
+
+`tools/deploy/deploy.sh` builds a source bundle with vendored dependencies
+and the web build, copies it to a Docker host over SSH, and starts it there.
+Set `APRON_DEPLOY_HOST` to the SSH destination. The script's header lists the
+other settings. To run your own server, change the URLs and `--apple.app-id`
+in `deploy/compose.yaml`.
 
 ## The rust-stdlib dependency
 
