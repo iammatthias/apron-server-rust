@@ -52,6 +52,8 @@ pub struct Settings {
     pub webauthn: Option<WebAuthnSettings>,
     /// `--apple.app-id`, an extension Go lacks.
     pub apple_app_ids: Vec<String>,
+    /// `--unfurl.enable`, an extension Go lacks.
+    pub unfurl: bool,
 }
 
 /// main.go's `serverConfig`: turns options into the server's settings, or
@@ -152,6 +154,7 @@ pub fn server_settings(options: &Options) -> Result<Settings, String> {
         }
     }
     config.apple_app_ids = options.apple.app_ids.clone();
+    config.unfurl = options.unfurl.enable;
     Ok(config)
 }
 

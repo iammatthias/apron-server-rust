@@ -86,6 +86,7 @@ fn server_config(settings: Settings) -> Result<server::Config, String> {
     });
     config.email_link_url = settings.email_link_url;
     config.apple_app_ids = settings.apple_app_ids;
+    config.unfurl = settings.unfurl;
     if let Some(rp) = settings.webauthn {
         let web_authn = WebAuthn::new(webauthn::Config {
             rpid: rp.rp_id,
