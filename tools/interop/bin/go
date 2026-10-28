@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Answers `go run ./cmd/aprond ...` with the Rust aprond, so the Go
+# repository's Playwright config starts this port. Everything else reaches the
+# real go.
+set -euo pipefail
+if [[ "${1:-}" == run && "${2:-}" == ./cmd/aprond ]]; then
+	exec "$APROND_BIN" "${@:3}"
+fi
+here=$(cd "$(dirname "$0")" && pwd)
+PATH=$(tr ':' '\n' <<<"$PATH" | grep -vx "$here" | paste -sd: -)
+exec go "$@"

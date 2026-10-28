@@ -1,0 +1,40 @@
+# Runs the gates AGENTS.md requires before a commit: fmt, clippy, and
+# cargo test with the Go comparison and Pebble gates.
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      APRON_GO_DIR: ${{ github.workspace }}/apron-server-go
+      PEBBLE_BIN_DIR: ${{ github.workspace }}/pebble-bin
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read the apron-server-go commit from UPSTREAM
+        id: upstream
+        run: echo "sha=$(awk '$1 == "apron-server-go" { print $2 }' UPSTREAM)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          repository: apron-chat/apron-server-go
+          ref: ${{ steps.upstream.outputs.sha }}
+          path: apron-server-go
+          submodules: recursive
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.x"
+          cache: false
+      - name: Install Pebble
+        run: GOBIN="$PEBBLE_BIN_DIR" go install github.com/letsencrypt/pebble/v2/cmd/pebble@v2.10.1 github.com/letsencrypt/pebble/v2/cmd/pebble-challtestsrv@v2.10.1
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked
