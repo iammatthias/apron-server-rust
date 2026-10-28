@@ -331,7 +331,7 @@ fn test_status_values_and_derivation() {
     let (mut b, _) = dial_origin(&server, TEST_PASSKEY_ORIGIN);
     let registered = register_test_passkey(&mut b, &mut new_test_authenticator());
     let token = registered["token"].clone();
-    expect_membership(&a, "general", &b.user_id, true);
+    expect_registered(&a, &b.user_id);
     watching(&mut [&mut a, &mut b]);
     b.drain();
     a.drain();
@@ -498,7 +498,7 @@ fn test_dnd_only_while_connected() {
     let (mut b, _) = dial_origin(&server, TEST_PASSKEY_ORIGIN);
     let registered = register_test_passkey(&mut b, &mut new_test_authenticator());
     let token = registered["token"].clone();
-    expect_membership(&a, "general", &b.user_id, true);
+    expect_registered(&a, &b.user_id);
     watching(&mut [&mut a]);
     b.drain();
     a.drain();
@@ -564,7 +564,7 @@ fn test_invisible_privacy() {
     let mut a = dial_test_client(&server);
     let (mut b, _) = dial_origin(&server, TEST_PASSKEY_ORIGIN);
     let registered = register_test_passkey(&mut b, &mut new_test_authenticator());
-    expect_membership(&a, "general", &b.user_id, true);
+    expect_registered(&a, &b.user_id);
     watching(&mut [&mut a]);
     a.drain();
     let b_id = b.user_id.clone();
@@ -654,7 +654,7 @@ fn test_mute_echo_to_all_connections() {
         obj! {"scheme" => "token", "token" => registered["token"].clone()},
     );
     second.user_id = first.user_id.clone();
-    expect_membership(&observer, "general", &first.user_id, true);
+    expect_registered(&observer, &first.user_id);
     watching(&mut [&mut observer]);
     first.drain();
     second.drain();
@@ -914,8 +914,9 @@ fn test_additions_are_not_sign_ins() {
     assert!(frames.len() == 1, "mute echo: {frames:?}");
     check_mute(&frames[0], "", &Json::from(true));
 
-    // A passkey registration adds the passkey: its result, and nothing
-    // after it.
+    // A guest's passkey registration makes a new account, a sign-in (§3.3.3):
+    // after its result, the account's join to general and the statuses,
+    // and no mute, which stays the guest's.
     let mut authenticator = new_test_authenticator();
     let options = passkey_result(&passkey_call(
         &mut c,
@@ -932,16 +933,22 @@ fn test_additions_are_not_sign_ins() {
         "finish",
         obj! {"credential" => credential},
     ));
+    let account = account_id(&registered);
     assert!(
-        you_of(&registered)["user_id"] == Json::from(c.user_id.as_str())
-            && registered.get("token").is_some_and(|t| *t != Json::Null),
+        account != c.user_id && registered.get("token").is_some_and(|t| *t != Json::Null),
         "passkey registration: {registered:?}"
     );
+    c.user_id = account;
     let frames = c.drain();
     assert!(
-        frames.is_empty(),
+        frames.len() == 2,
         "frames after a passkey registration: {frames:?}"
     );
+    check_membership(&membership_only(&frames[0]), "general", &c.user_id, true);
+    check_status(&frames[1], &other.user_id, "online");
+    let frames = c.status(obj! {"mute" => true});
+    assert!(frames.len() == 1, "the account's mute echo: {frames:?}");
+    check_mute(&frames[0], "", &Json::from(true));
 
     // Nor is an address added to the account.
     propose(&mut c, "added@example.com");
@@ -1494,12 +1501,11 @@ fn test_sign_in_to_existing_account_is_a_departure() {
     watching(&mut [&mut observer]);
     observer.drain();
 
-    // A guest that registers a passkey becomes an account in place.
+    // A guest that registers a passkey becomes a new account, which takes
+    // over from it (§3.3.3).
     let (mut newcomer, _) = dial_origin(&server, TEST_PASSKEY_ORIGIN);
     register_test_passkey(&mut newcomer, &mut new_test_authenticator());
-    // The guest's join, with its status, and then nothing.
-    expect_membership(&observer, "general", &newcomer.user_id, true);
-    expect_status(&observer, &newcomer.user_id, "online");
+    expect_registered(&observer, &newcomer.user_id);
     observer.expect_quiet();
 
     for status in ["online", "invisible", ""] {
@@ -1549,7 +1555,7 @@ fn test_seen_on_disconnect() {
     let (mut b, _) = dial_origin(&server, TEST_PASSKEY_ORIGIN);
     let registered = register_test_passkey(&mut b, &mut new_test_authenticator());
     let (token, user_id) = (registered["token"].clone(), b.user_id.clone());
-    expect_membership(&a, "general", &user_id, true);
+    expect_registered(&a, &user_id);
     watching(&mut [&mut a]);
     a.drain();
     b.drain();
@@ -1615,7 +1621,7 @@ fn test_seen_with_invisible() {
     let (mut b, _) = dial_origin(&server, TEST_PASSKEY_ORIGIN);
     let registered = register_test_passkey(&mut b, &mut new_test_authenticator());
     let (token, user_id) = (registered["token"].clone(), b.user_id.clone());
-    expect_membership(&a, "general", &user_id, true);
+    expect_registered(&a, &user_id);
     watching(&mut [&mut a]);
     a.drain();
     b.drain();
@@ -1709,7 +1715,7 @@ fn test_seen_survives_restart() {
     let (mut b, _) = dial_origin(&server, TEST_PASSKEY_ORIGIN);
     let registered = register_test_passkey(&mut b, &mut new_test_authenticator());
     let user_id = b.user_id.clone();
-    expect_membership(&a, "general", &user_id, true);
+    expect_registered(&a, &user_id);
     add_account(&server, "never", &[&a, &b]);
     watching(&mut [&mut a]);
     a.drain();
@@ -1754,7 +1760,7 @@ fn test_coalesced_offline_carries_seen() {
     let (mut b, _) = dial_origin(&server, TEST_PASSKEY_ORIGIN);
     register_test_passkey(&mut b, &mut new_test_authenticator());
     let user_id = b.user_id.clone();
-    expect_membership(&a, "general", &user_id, true);
+    expect_registered(&a, &user_id);
     watching(&mut [&mut a]);
     a.drain();
     // b's first status, online when it signed in, took one of the burst.
@@ -1783,7 +1789,7 @@ fn test_hidden_flap_keeps_seen() {
     let (mut b, _) = dial_origin(&server, TEST_PASSKEY_ORIGIN);
     let token = register_test_passkey(&mut b, &mut new_test_authenticator())["token"].clone();
     let user_id = b.user_id.clone();
-    expect_membership(&a, "general", &user_id, true);
+    expect_registered(&a, &user_id);
     watching(&mut [&mut a]);
     a.drain();
     // b has one change of its burst left, which refills no more.
@@ -1827,7 +1833,7 @@ fn test_seen_only_with_the_last_connection() {
     let (mut b, _) = dial_origin(&server, TEST_PASSKEY_ORIGIN);
     let token = register_test_passkey(&mut b, &mut new_test_authenticator())["token"].clone();
     let user_id = b.user_id.clone();
-    expect_membership(&a, "general", &user_id, true);
+    expect_registered(&a, &user_id);
     watching(&mut [&mut a]);
     a.drain();
     drop(b);
@@ -1862,11 +1868,11 @@ fn test_seen_when_the_last_connection_signs_in_elsewhere() {
     let mut a = dial_test_client(&server);
     let (mut b, _) = dial_origin(&server, TEST_PASSKEY_ORIGIN);
     register_test_passkey(&mut b, &mut new_test_authenticator());
-    expect_membership(&a, "general", &b.user_id, true);
+    expect_registered(&a, &b.user_id);
     let (mut c, _) = dial_origin(&server, TEST_PASSKEY_ORIGIN);
     let other = register_test_passkey(&mut c, &mut new_test_authenticator());
     let c_id = c.user_id.clone();
-    expect_membership(&a, "general", &c_id, true);
+    expect_registered(&a, &c_id);
     watching(&mut [&mut a]);
     a.drain();
     drop(c);
@@ -1895,7 +1901,7 @@ fn test_listings_carry_seen() {
     let (mut b, _) = dial_origin(&server, TEST_PASSKEY_ORIGIN);
     register_test_passkey(&mut b, &mut new_test_authenticator());
     let user_id = b.user_id.clone();
-    expect_membership(&a, "general", &user_id, true);
+    expect_registered(&a, &user_id);
     let (room, _) = save_room(&mut b, "room", obj! {"title" => "Room"});
     watching(&mut [&mut a]);
     a.drain();
@@ -1949,7 +1955,7 @@ fn test_seen_after_crash() {
     let sign_up = |a: &TestClient| {
         let (mut c, _) = dial_origin(&server, TEST_PASSKEY_ORIGIN);
         let token = register_test_passkey(&mut c, &mut new_test_authenticator())["token"].clone();
-        expect_membership(a, "general", &c.user_id, true);
+        expect_registered(a, &c.user_id);
         (c, token)
     };
     let (mut back, token) = sign_up(&a);

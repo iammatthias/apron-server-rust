@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use rust_stdlib::encoding::base64::URL_SAFE_NO_PAD;
 use rust_stdlib::encoding::json::v2 as json;
+use rust_stdlib::regexp::Regexp;
 use rust_stdlib::time::{self, Duration};
 use rust_stdlib_crypto::{ecdsa, elliptic, rand, sha256};
 
@@ -203,6 +204,8 @@ impl TestAuthenticator {
     }
 }
 
+/// Signs c in as a guest and registers a passkey, which makes a new account
+/// with a u_<random> user_id that c.user_id then names.
 pub fn register_test_passkey(c: &mut TestClient, a: &mut TestAuthenticator) -> Object {
     let guest = you_of(&guest_auth(c))["user_id"].clone();
     let options = passkey_result(&passkey_call(
@@ -231,12 +234,68 @@ pub fn register_test_passkey(c: &mut TestClient, a: &mut TestAuthenticator) -> O
         "finish",
         obj! {"credential" => credential},
     ));
-    assert_eq!(
-        you_of(&result)["user_id"],
+    let account = str_of(&you_of(&result), "user_id").to_owned();
+    assert_ne!(
+        Json::from(account.as_str()),
         guest,
-        "registration changed guest identity"
+        "registration kept the guest's user_id"
     );
+    assert!(
+        Regexp::new(r"^u_[A-Za-z0-9_-]{22}$")
+            .unwrap()
+            .match_string(&account),
+        "a registration without a name is not u_<random>: {account}"
+    );
+    // The new account takes the guest's general, which its connection gets
+    // as the logged join alone.
+    expect_membership(c, "general", &account, true);
+    c.user_id = account;
     result
+}
+
+/// Reads what someone in general sees of a guest that joined and then
+/// registered a passkey as `account`: the guest's join and leave, the
+/// account's join, and `user` linking them (§3.3.3). Returns the guest's
+/// user_id.
+pub fn expect_registered(c: &TestClient, account: &str) -> String {
+    let next = || loop {
+        let frame = c.read();
+        if !is_status_announcement(&frame) {
+            return frame;
+        }
+    };
+    let joined = membership_only(&next());
+    let guest = str_of(
+        joined["members"].as_list()[0].as_object().unwrap()["user"]
+            .as_object()
+            .unwrap(),
+        "user_id",
+    )
+    .to_owned();
+    assert!(
+        guest.starts_with("guest_"),
+        "first membership is not a guest's: {joined:?}"
+    );
+    check_membership(&joined, "general", &guest, true);
+    check_membership(&membership_only(&next()), "general", &guest, false);
+    check_membership(&membership_only(&next()), "general", account, true);
+    let user = notification_params(&next(), "user");
+    assert_eq!(
+        user["old"],
+        Json::from(obj! {"user_id" => guest.as_str()}),
+        "user = {user:?}"
+    );
+    assert_eq!(
+        str_of(user["new"].as_object().unwrap(), "user_id"),
+        account,
+        "user = {user:?}"
+    );
+    guest
+}
+
+/// The user_id a registration's result signed the connection in as.
+pub fn account_id(result: &Object) -> String {
+    str_of(&you_of(result), "user_id").to_owned()
 }
 
 fn token_of(result: &Object) -> String {
@@ -377,8 +436,10 @@ fn test_registration_takes_requested_name() {
         }
     };
 
-    // A begin that is superseded changes nothing: the name applies only to
-    // the registration that finishes.
+    // A begin offers the new account as Cloudflare does: its user_id, made
+    // from the name, as the user name, and the name as the display name. A
+    // begin that is superseded changes nothing: the name and user_id apply
+    // only to the registration that finishes.
     let abandoned = passkey_result(&passkey_call(
         &mut c,
         "begin-abandoned",
@@ -386,10 +447,13 @@ fn test_registration_takes_requested_name() {
         "begin",
         obj! {"name" => "Abandoned"},
     ));
-    assert_eq!(
-        str_of(&user_of(&abandoned), "name"),
-        "Abandoned",
-        "passkey not labelled with the requested name"
+    let user = user_of(&abandoned);
+    assert!(
+        Regexp::new(r"^abandoned_[0-9]{4}$")
+            .unwrap()
+            .match_string(str_of(&user, "name"))
+            && str_of(&user, "displayName") == "Abandoned",
+        "passkey not offered as the requested name's account: {user:?}"
     );
     let options = passkey_result(&passkey_call(
         &mut c,
@@ -399,9 +463,13 @@ fn test_registration_takes_requested_name() {
         obj! {"name" => "  Ada   Lovelace "},
     ));
     let user = user_of(&options);
+    let account = str_of(&user, "name").to_owned();
     assert!(
-        str_of(&user, "name") == "Ada Lovelace" && str_of(&user, "displayName") == "Ada Lovelace",
-        "passkey not labelled with the normalized requested name: {user:?}"
+        Regexp::new(r"^ada_lovelace_[0-9]{4}$")
+            .unwrap()
+            .match_string(&account)
+            && str_of(&user, "displayName") == "Ada Lovelace",
+        "passkey not offered as the normalized requested name's account: {user:?}"
     );
     let mut a = new_test_authenticator();
     let credential = a.registration(&options, TEST_PASSKEY_ORIGIN);
@@ -414,8 +482,10 @@ fn test_registration_takes_requested_name() {
     ));
     let you = you_of(&result);
     assert!(
-        you["user_id"] == guest["user_id"] && str_of(&you, "name") == "Ada Lovelace",
-        "registration did not keep the guest's identity with the requested name: {you:?}"
+        you["user_id"] != guest["user_id"]
+            && str_of(&you, "user_id") == account
+            && str_of(&you, "name") == "Ada Lovelace",
+        "registration did not make the offered account with the requested name: {you:?}"
     );
 
     // Adding a passkey to an account keeps the account's name, whatever is

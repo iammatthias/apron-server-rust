@@ -679,6 +679,23 @@ impl State {
         }
     }
 
+    /// Sends `user` with `new` and `old` to everyone who shares a room
+    /// with the user, which took over from the identity `old` under a new
+    /// user_id (§3.3.3). The user has no other connections to send `you`.
+    pub fn notify_user_id_change_locked(&mut self, user_id: &str, old: Object) {
+        self.publish_locked(user_id);
+        let Some(u) = self.users.get(user_id) else {
+            return;
+        };
+        let frame = Frame::from(notification(
+            "user",
+            obj! {"new" => u.profile(), "old" => old},
+        ));
+        for other in self.sharers_locked(user_id) {
+            self.send_to_user(&other, &frame);
+        }
+    }
+
     /// Applies a `me` request (§3.3): a given field replaces the current
     /// value, an omitted one stays, and an empty value ("" or {}) removes
     /// the field, which the result and notifications carry as that empty
