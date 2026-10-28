@@ -2,6 +2,7 @@
 //! the crate so the ones that inspect internal state can, as the Go tests
 //! do with `app.mu`.
 
+mod account_id_test;
 mod email_test;
 mod ext_test;
 mod helpers;

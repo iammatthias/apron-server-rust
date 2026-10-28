@@ -1,9 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Arc, Condvar, Mutex};
 
+use rust_stdlib::encoding::base64::URL_SAFE_NO_PAD;
 use rust_stdlib::regexp::Regexp;
 use rust_stdlib::time::Timer;
 use rust_stdlib::unicode;
+use rust_stdlib_crypto::rand;
 
 use super::protocol::*;
 use super::server::{Client, ClientId, Frame, Server, State, DEFAULT_ROOM_ID};
@@ -341,6 +343,75 @@ pub fn requestable(id: &str) -> bool {
         }
     }
     requestable_user_id().match_string(id)
+}
+
+/// The longest name part of a user_id picked from a requested name.
+const USER_ID_SLUG_BYTES: usize = 16;
+/// The tries at a `<slug>_<4 digits>` user_id before a random one.
+pub const USER_ID_SLUG_ATTEMPTS: usize = 8;
+
+/// apron-server-cloudflare's `userIdSlug`: the user_id part a requested
+/// name suggests, lowercase ASCII letters and digits with other runs as one
+/// `_`, at most 16 characters. Empty when nothing usable is left or when it
+/// would pass for a counter's or a bot's user_id. Without NFKD, an accented
+/// letter is a run of other characters (docs/DEVIATIONS.md).
+pub fn user_id_slug(name: &str) -> String {
+    let mut slug = String::new();
+    let mut gap = false;
+    for ch in name.to_lowercase().chars() {
+        if ch.is_ascii_lowercase() || ch.is_ascii_digit() {
+            if gap && !slug.is_empty() {
+                slug.push('_');
+            }
+            gap = false;
+            slug.push(ch);
+        } else {
+            gap = true;
+        }
+    }
+    slug.truncate(USER_ID_SLUG_BYTES);
+    let slug = slug.trim_end_matches('_');
+    let reserved = [
+        GUEST_ID_PREFIX,
+        super::email::ACCOUNT_ID_PREFIX,
+        super::bots::BOT_ID_PREFIX,
+    ]
+    .iter()
+    .any(|prefix| slug.starts_with(prefix) || slug == prefix.trim_end_matches('_'));
+    if reserved {
+        return String::new();
+    }
+    slug.to_owned()
+}
+
+/// apron-server-cloudflare's `candidateUserIdFor`: a new account's user_id,
+/// `<slug>_<4 random digits>` for a name with a slug, tried
+/// USER_ID_SLUG_ATTEMPTS times while `taken`, else `u_` and 16 random bytes
+/// as unpadded base64url.
+pub fn candidate_user_id(name: &str, mut taken: impl FnMut(&str) -> bool) -> String {
+    let slug = user_id_slug(name);
+    if !slug.is_empty() {
+        for _ in 0..USER_ID_SLUG_ATTEMPTS {
+            let id = format!("{slug}_{}", random_digits::<4>());
+            if !taken(&id) {
+                return id;
+            }
+        }
+    }
+    let mut raw = [0u8; 16];
+    rand::read(&mut raw);
+    format!("u_{}", URL_SAFE_NO_PAD.encode(raw))
+}
+
+/// N decimal digits, each a random u32 modulo 10, as Cloudflare draws them.
+fn random_digits<const N: usize>() -> String {
+    let mut raw = [[0u8; 4]; N];
+    for word in &mut raw {
+        rand::read(word);
+    }
+    raw.iter()
+        .map(|word| char::from(b'0' + (u32::from_le_bytes(*word) % 10) as u8))
+        .collect()
 }
 
 impl State {
