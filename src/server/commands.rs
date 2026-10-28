@@ -1,6 +1,6 @@
-//! Server commands (§4.1): /help, /avatar, /invite-device, and /kick, run from
-//! a `command` request and answered with scoped system notices
-//! (Appendix A.1).
+//! Server commands (§4.1): /help, /avatar, /invite-device, /invite-bot, and
+//! /kick, run from a `command` request and answered with scoped system
+//! notices (Appendix A.1).
 
 use std::sync::Arc;
 
@@ -57,6 +57,13 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         help: "get a token that signs in as you on another device, named <name>; at most 3 names, and a name again replaces its token",
         available: Some(|u, _| u.account()),
         run: State::invite_device_command,
+    },
+    ServerCommand {
+        name: "invite-bot",
+        usage: "/invite-bot",
+        help: "get a token that signs in as your bot, named after you; again, it replaces the token and renames the bot",
+        available: Some(|u, _| u.account()),
+        run: State::invite_bot_command,
     },
     ServerCommand {
         name: "kick",

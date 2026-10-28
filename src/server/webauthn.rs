@@ -10,6 +10,7 @@ use rust_stdlib::encoding::json::jsontext::Value;
 use rust_stdlib::time::{self, Duration, Time};
 use rust_stdlib_crypto::{rand, sha256};
 
+use super::bots::{BOT_SIGNS_IN_WITH_TOKEN, BOT_TOKEN_PREFIX};
 use super::devices::DEVICE_TOKEN_PREFIX;
 use super::protocol::*;
 use super::server::{Client, State};
@@ -228,6 +229,10 @@ impl State {
                 return Err(denied("Sign in as a guest before adding a passkey"));
             };
             let u = &self.users[&user_id];
+            // A passkey would make the bot an account (bots.rs).
+            if u.bot() {
+                return Err(denied(BOT_SIGNS_IN_WITH_TOKEN));
+            }
             identity_id = user_id.clone();
             let fresh;
             let passkey = match &u.passkey {
@@ -523,6 +528,9 @@ impl State {
         }
         if token.starts_with(DEVICE_TOKEN_PREFIX) {
             return self.authenticate_device_locked(c, req, &token);
+        }
+        if token.starts_with(BOT_TOKEN_PREFIX) {
+            return self.authenticate_bot_locked(c, req, &token);
         }
         self.prune_sessions_locked(&now);
         let key = sha256::sum256(token.as_bytes());

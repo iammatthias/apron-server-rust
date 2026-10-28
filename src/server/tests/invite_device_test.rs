@@ -323,7 +323,7 @@ fn test_help_lists_invite_device_for_accounts() {
     assert_eq!(
         private_reply(&mut ada, "/help"),
         format!(
-            "- `/help`: list the commands you can use here\n- `/avatar`: with one image attached: set your avatar\n{listed}"
+            "- `/help`: list the commands you can use here\n- `/avatar`: with one image attached: set your avatar\n{listed}\n- `/invite-bot`: get a token that signs in as your bot, named after you; again, it replaces the token and renames the bot"
         ),
         "account's help"
     );

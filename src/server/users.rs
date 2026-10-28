@@ -24,7 +24,7 @@ pub const MAX_PROFILE_EXT_BYTES: usize = 16 << 10;
 /// Everything the server keeps for one user_id across its connections: the
 /// profile (§3.3), joined rooms (§4.2.2), request deduplication (§1.2), and
 /// push registrations (§4.9). Guest users are retired when their last
-/// connection closes; accounts persist.
+/// connection closes; accounts and bots persist.
 pub struct UserState {
     pub id: String,
     pub name: String,
@@ -50,6 +50,9 @@ pub struct UserState {
     pub dedup: DedupCache,
     /// A passkey user's handle and credentials (§4.10).
     pub passkey: Option<PasskeyUser>,
+    /// The account a `/invite-bot` bot belongs to (bots.rs); `None` for
+    /// every other user.
+    pub owner: Option<String>,
     /// Limits the user's new messages, room_set requests, and /avatar
     /// commands to messages_per_minute; `None` when unlimited.
     pub posts: Option<Limiter>,
@@ -99,6 +102,7 @@ impl UserState {
             left_at: BTreeMap::new(),
             dedup: DedupCache::default(),
             passkey: None,
+            owner: None,
             posts: None,
             chosen: STATUS_ONLINE.into(),
             mute: MuteState::default(),
@@ -136,6 +140,18 @@ impl UserState {
     /// rather than being a guest.
     pub fn account(&self) -> bool {
         self.passkey.is_some() || !self.email.is_empty()
+    }
+
+    /// Reports whether the user is an account's `/invite-bot` bot, which
+    /// signs in only with its token.
+    pub fn bot(&self) -> bool {
+        self.owner.is_some()
+    }
+
+    /// Reports whether the user outlives its connections and restarts: an
+    /// account or a bot, not a guest.
+    pub fn persists(&self) -> bool {
+        self.account() || self.bot()
     }
 
     pub fn has_role(&self, role: &str) -> bool {
@@ -312,9 +328,14 @@ fn requestable_user_id() -> Regexp {
 pub const GUEST_ID_PREFIX: &str = "guest_";
 
 /// Reports whether a user may request `id`: it has the requestable shape and
-/// lies outside the counters' guest_ and user_ namespaces.
+/// lies outside the counters' guest_ and user_ namespaces and the bots'
+/// bot_ one (an extension; docs/DEVIATIONS.md).
 pub fn requestable(id: &str) -> bool {
-    for prefix in [GUEST_ID_PREFIX, super::email::ACCOUNT_ID_PREFIX] {
+    for prefix in [
+        GUEST_ID_PREFIX,
+        super::email::ACCOUNT_ID_PREFIX,
+        super::bots::BOT_ID_PREFIX,
+    ] {
         if id.len() >= prefix.len() && id[..prefix.len()].eq_ignore_ascii_case(prefix) {
             return false;
         }
@@ -426,7 +447,7 @@ impl State {
             let retire = self
                 .users
                 .get(&previous)
-                .is_some_and(|u| u.clients.is_empty() && !u.account());
+                .is_some_and(|u| u.clients.is_empty() && !u.persists());
             if retire {
                 self.retire_locked(&previous);
             } else {
@@ -444,7 +465,7 @@ impl State {
             return;
         };
         u.clients.remove(&conn.client.id);
-        if u.clients.is_empty() && !u.account() {
+        if u.clients.is_empty() && !u.persists() {
             self.retire_locked(&user_id);
             return;
         }
@@ -576,6 +597,14 @@ impl State {
             ));
         };
         let u = &self.users[&user_id];
+        // A bot is named after its owner. The bot client sends its name on
+        // every connection, so the name it already has is no change.
+        if has_name && u.bot() && normalize_name(&name) != u.name {
+            return Err(RpcError::new(
+                CODE_DENIED,
+                "A bot is named after its owner, who can rename it with /invite-bot",
+            ));
+        }
         if has_avatar && !avatar.is_empty() && avatar != u.avatar && !valid_avatar(&avatar) {
             if avatar.starts_with("data:") && avatar.len() > MAX_AVATAR_DATA_URL_BYTES {
                 return Err(RpcError::new(
@@ -644,13 +673,15 @@ impl State {
 
     /// Sets the roles Config.roles grants an account, by its user_id or
     /// email address, and reports whether they changed. Guests hold no
-    /// roles.
+    /// roles, and a bot only `bot`.
     pub fn grant_roles_locked(&mut self, user_id: &str) -> bool {
         let Some(u) = self.users.get_mut(user_id) else {
             return false;
         };
         let mut roles = Vec::new();
-        if u.account() {
+        if u.bot() {
+            roles.push(super::bots::BOT_ROLE.to_owned());
+        } else if u.account() {
             for (role, holders) in &self.config.roles {
                 if holders.iter().any(|h| {
                     h.eq_ignore_ascii_case(&u.id)

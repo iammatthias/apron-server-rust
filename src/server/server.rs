@@ -13,6 +13,7 @@ use rust_stdlib::net::http::{self, Handler, Request as HttpRequest, ResponseWrit
 use rust_stdlib::time::{self, Duration};
 use rust_stdlib_crypto::sha256;
 
+use super::bots::BotTokens;
 use super::devices::DeviceTokens;
 use super::email::{EmailSender, EmailState, ProposalId};
 use super::embeds::EmbedState;
@@ -599,6 +600,8 @@ pub struct State {
     pub sessions: Sessions,
     /// `/invite-device` tokens by the SHA-256 of the token (devices.rs).
     pub devices: DeviceTokens,
+    /// `/invite-bot` tokens by the SHA-256 of the token (bots.rs).
+    pub bots: BotTokens,
     pub email: EmailState,
     /// The webpush key (§4.9); vapid_stored reports that it is the store's,
     /// rather than Config's, so a flush keeps it there.
@@ -761,6 +764,7 @@ pub fn open(config: Config) -> Result<Arc<Server>, store::StoreError> {
                 credentials: BTreeMap::new(),
                 sessions: Sessions::default(),
                 devices: DeviceTokens::default(),
+                bots: BotTokens::default(),
                 email: EmailState::default(),
                 vapid,
                 vapid_stored: false,

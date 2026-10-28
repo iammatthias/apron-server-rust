@@ -11,6 +11,7 @@ use rust_stdlib::time::{self, Duration, Time};
 use rust_stdlib_crypto::bigint::Int;
 use rust_stdlib_crypto::{rand, subtle};
 
+use super::bots::BOT_SIGNS_IN_WITH_TOKEN;
 use super::protocol::*;
 use super::server::{Client, Conn, State};
 use super::status::retry_after;
@@ -544,6 +545,13 @@ impl State {
             return Err(invalid_params(
                 "email must be an email address at a domain name",
             ));
+        }
+        // An address would make the bot an account (bots.rs).
+        if self
+            .client_user(c)
+            .is_some_and(|id| self.users.get(&id).is_some_and(|u| u.bot()))
+        {
+            return Err(denied(BOT_SIGNS_IN_WITH_TOKEN));
         }
         let now = time::now();
         let busy = || {

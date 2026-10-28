@@ -5,6 +5,7 @@
 mod email_test;
 mod ext_test;
 mod helpers;
+mod invite_bot_test;
 mod invite_device_test;
 mod limits_test;
 mod persist_test;
