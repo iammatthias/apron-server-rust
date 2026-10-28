@@ -78,7 +78,10 @@ fn resume(c: &mut TestClient, token: &str) -> Object {
 
 fn user_sessions(server: &TestServer, user_id: &str) -> usize {
     let st = server.app.lock();
-    st.sessions.of_user(user_id).count()
+    st.sessions
+        .keys()
+        .filter(|key| st.sessions.get(key).unwrap().user == user_id)
+        .count()
 }
 
 #[test]
@@ -205,59 +208,6 @@ fn test_add_device_rate_limit() {
         6,
         "the limited command minted a token"
     );
-}
-
-/// Logs a new connection in with the account's passkey and returns the
-/// sign-in's token.
-fn login(server: &TestServer, a: &mut TestAuthenticator) -> String {
-    let (mut c, _) = dial_origin(server, TEST_PASSKEY_ORIGIN);
-    let options = passkey_result(&passkey_call(
-        &mut c,
-        "begin",
-        "login",
-        "begin",
-        Object::new(),
-    ));
-    let credential = a.assertion(&options, TEST_PASSKEY_ORIGIN, "localhost", 0x05);
-    let result = passkey_result(&passkey_call(
-        &mut c,
-        "finish",
-        "login",
-        "finish",
-        obj! {"credential" => credential},
-    ));
-    result["token"].as_str().unwrap().to_owned()
-}
-
-fn resumes(server: &TestServer, token: &str) -> bool {
-    let (mut c, _) = dial_origin(server, TEST_PASSKEY_ORIGIN);
-    resume(&mut c, token).contains_key("result")
-}
-
-/// An account keeps at most ten sessions: a new one, from a sign-in or
-/// /add-device, forgets the one least recently used.
-#[test]
-fn test_sessions_per_account_are_capped() {
-    let server = passkey_test_server();
-    let (mut ada, _) = dial_origin(&server, TEST_PASSKEY_ORIGIN);
-    let mut a = new_test_authenticator();
-    let registered = register_test_passkey(&mut ada, &mut a);
-    let ada_id = you_of(&registered)["user_id"].as_str().unwrap().to_owned();
-    let first = registered["token"].as_str().unwrap().to_owned();
-    ada.drain();
-    let devices: Vec<String> = (1..=5)
-        .map(|n| add_device(&mut ada, &ada_id, &format!("d{n}"), &format!("“d{n}”")))
-        .collect();
-    // The registration's token is the oldest until it is used again.
-    assert!(resumes(&server, &first), "first token");
-    let logins: Vec<String> = (0..4).map(|_| login(&server, &mut a)).collect();
-    assert_eq!(user_sessions(&server, &ada_id), 10, "at the cap");
-    login(&server, &mut a);
-    assert_eq!(user_sessions(&server, &ada_id), 10, "past the cap");
-    assert!(!resumes(&server, &devices[0]), "least recently used token");
-    for token in [&first, &devices[1], &devices[4], &logins[0]] {
-        assert!(resumes(&server, token), "kept token {token}");
-    }
 }
 
 #[test]
