@@ -24,6 +24,8 @@ services:
       - --webauthn.rp-id=apron.farfield.systems
       - --webauthn.origin=https://apron.farfield.systems
       - --apple.app-id=MP92RCAPRG.app.ladle.ios
+      # Link previews: the server fetches the pages messages link to.
+      - --unfurl.enable
       # Caddy appends cloudflared's loopback address to X-Forwarded-For, so
       # its last entry is 127.0.0.1 for every visitor. Cloudflare sets
       # Cf-Connecting-IP to the visitor alone and Caddy passes it through.
