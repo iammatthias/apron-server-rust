@@ -13,10 +13,13 @@
 //! record   log_id       a logged record and the rooms whose logs hold it
 //! room     room_id
 //! message  message_id
-//! user     user_id      guests too, retired at the next start
+//! user     user_id      guests too, retired at the next start, and
+//!                       /invite-bot bots, which Go takes for guests
 //! session  hex SHA-256 of the bearer token
 //! device   hex SHA-256 of the /invite-device token (an extension; Go
 //!          ignores the kind)
+//! bot      hex SHA-256 of the /invite-bot token (an extension; Go ignores
+//!          the kind)
 //! embed    embed_id
 //! push     user_id, a space, and url
 //! ```
@@ -33,6 +36,7 @@ use rust_stdlib::path;
 use rust_stdlib::time::{self, Time};
 use rust_stdlib_derive::{MarshalTo, UnmarshalFrom};
 
+use super::bots::BotToken;
 use super::devices::DeviceToken;
 use super::embeds::{EmbedState, StreamBuffer};
 use super::messages::{MessageState, ReactionSet};
@@ -55,6 +59,7 @@ pub const ENTRY_MESSAGE: &str = "message";
 pub const ENTRY_USER: &str = "user";
 pub const ENTRY_SESSION: &str = "session";
 pub const ENTRY_DEVICE: &str = "device";
+pub const ENTRY_BOT: &str = "bot";
 pub const ENTRY_EMBED: &str = "embed";
 pub const ENTRY_PUSH: &str = "push";
 
@@ -69,6 +74,7 @@ pub struct DirtySet {
     pub users: BTreeSet<String>,
     pub sessions: BTreeSet<[u8; 32]>,
     pub devices: BTreeSet<[u8; 32]>,
+    pub bots: BTreeSet<[u8; 32]>,
     pub embeds: BTreeSet<String>,
     pub pushes: BTreeSet<String>,
     pub used_ids: Vec<String>,
@@ -173,6 +179,9 @@ pub struct StoredUser {
     pub passkey: Option<StoredPasskey>,
     #[json("email,omitzero")]
     pub email: String,
+    /// A bot's owner (bots.rs). Go's decoder skips the member.
+    #[json("bot,omitzero")]
+    pub bot: String,
     /// The chosen status (§4.5.1), absent for online.
     #[json("status,omitzero")]
     pub status: Option<String>,
@@ -241,6 +250,16 @@ pub struct StoredDevice {
     pub user: String,
     #[json("name")]
     pub name: String,
+    #[json("created")]
+    pub created: Time,
+}
+
+#[derive(Clone, Debug, Default, MarshalTo, UnmarshalFrom)]
+pub struct StoredBot {
+    #[json("bot")]
+    pub bot: String,
+    #[json("owner")]
+    pub owner: String,
     #[json("created")]
     pub created: Time,
 }
@@ -387,6 +406,21 @@ impl State {
                 None => batch.push(Entry::delete(ENTRY_DEVICE, &session_id(key))),
             }
         }
+        for key in &d.bots {
+            match self.bots.get(key) {
+                Some(bot) => put(
+                    &mut batch,
+                    ENTRY_BOT,
+                    &session_id(key),
+                    &StoredBot {
+                        bot: bot.bot.clone(),
+                        owner: bot.owner.clone(),
+                        created: bot.created.clone(),
+                    },
+                ),
+                None => batch.push(Entry::delete(ENTRY_BOT, &session_id(key))),
+            }
+        }
         for id in &d.embeds {
             match self.embeds.get(id) {
                 Some(e) => put(&mut batch, ENTRY_EMBED, id, &stored_embed_of(e)),
@@ -515,6 +549,7 @@ pub fn stored_user_of(u: &UserState) -> StoredUser {
             credentials: p.credentials.clone(),
         }),
         email: u.email.clone(),
+        bot: u.owner.clone().unwrap_or_default(),
         status: if u.chosen != STATUS_ONLINE {
             Some(u.chosen.clone())
         } else {
@@ -704,6 +739,9 @@ impl Server {
                 u.email = stored.email.clone();
                 st.emails.insert(stored.email.clone(), id.clone());
             }
+            if !stored.bot.is_empty() {
+                u.owner = Some(stored.bot.clone());
+            }
             u.left_at = stored.left_at.clone();
             match &stored.status {
                 Some(status) if settable_status(status) => u.chosen = status.clone(),
@@ -875,6 +913,43 @@ impl Server {
             );
         }
 
+        // A bot holds one token. Batches apply whole, so a store never holds
+        // two; one that does keeps the newest.
+        let mut bots = Vec::new();
+        for (id, raw) in of(ENTRY_BOT) {
+            let Some(key) = hex::decode(id)
+                .ok()
+                .and_then(|key| <[u8; 32]>::try_from(key).ok())
+            else {
+                continue;
+            };
+            let stored = decode::<StoredBot>(ENTRY_BOT, id, raw)?;
+            let owned = st
+                .users
+                .get(&stored.bot)
+                .is_some_and(|u| u.owner.as_deref() == Some(stored.owner.as_str()));
+            if owned {
+                bots.push((key, stored));
+            } else {
+                st.touch_bot(key);
+            }
+        }
+        bots.sort_by_key(|(_, stored)| stored.created.unix_nano());
+        for (key, stored) in bots {
+            if let Some(older) = st.bots.of_bot(&stored.bot) {
+                st.bots.remove(&older);
+                st.touch_bot(older);
+            }
+            st.bots.insert(
+                key,
+                BotToken {
+                    bot: stored.bot,
+                    owner: stored.owner,
+                    created: stored.created,
+                },
+            );
+        }
+
         // Nothing is connected yet: guests are retired as if their last
         // connections had just closed. An account stored as shown other than
         // offline was connected when the server stopped without closing its
@@ -882,7 +957,7 @@ impl Server {
         // so seen is now (§4.5.2).
         let ids: Vec<String> = st.users.keys().cloned().collect();
         for id in ids {
-            if !st.users[&id].account() {
+            if !st.users[&id].persists() {
                 st.retire_locked(&id);
                 continue;
             }
