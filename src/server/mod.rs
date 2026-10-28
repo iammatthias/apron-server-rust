@@ -7,6 +7,7 @@ pub mod devices;
 pub mod email;
 pub mod embeds;
 pub mod messages;
+pub mod outbound;
 pub mod persist;
 pub mod protocol;
 pub mod push;

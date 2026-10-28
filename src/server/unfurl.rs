@@ -15,15 +15,15 @@ use rust_stdlib::concurrent::WaitGroup;
 use rust_stdlib::net::http::client::{CheckRedirect, Client};
 use rust_stdlib::net::http::header::BoxError;
 use rust_stdlib::net::http::Request as HttpRequest;
-use rust_stdlib::net::{split_host_port, url};
+use rust_stdlib::net::url;
 use rust_stdlib::time::{self, Duration, Time};
 use rust_stdlib::{html, image, mime, os};
 use rust_stdlib_crypto::rand;
 
 use super::embeds::EmbedState;
 use super::embeds::{MAX_EMBEDS_PER_MESSAGE, UPLOAD_SUFFIX};
+use super::outbound::{self, DialCheck};
 use super::protocol::*;
-use super::push::public_address;
 use super::server::{Server, State};
 use crate::obj;
 use crate::rate::{every, Limiter};
@@ -55,15 +55,6 @@ pub const USER_AGENT: &str = concat!(
     env!("CARGO_PKG_VERSION"),
     "; link preview; +https://github.com/iammatthias/apron-server-rust)"
 );
-
-/// Decides whether a dialed address, `host:port` with the host an IP
-/// address, may be connected to.
-pub type DialCheck = Arc<dyn Fn(&str) -> bool + Send + Sync>;
-
-/// The dial check for the public internet only, as push's.
-pub fn public_dial_check() -> DialCheck {
-    Arc::new(|address: &str| split_host_port(address).is_ok_and(|(host, _)| public_address(&host)))
-}
 
 /// What a page says about itself.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -426,27 +417,6 @@ pub struct Fetcher {
 
 impl Fetcher {
     pub fn new(check: DialCheck, timeout: Duration) -> Fetcher {
-        let dialer = rust_stdlib_sys::net::Dialer {
-            timeout: timeout.as_nanos(),
-            control: Some(Box::new(move |_network: &str, address: &str, _raw: &_| {
-                if check(address) {
-                    Ok(())
-                } else {
-                    Err(std::io::Error::other(
-                        "link preview address is not on the public internet",
-                    ))
-                }
-            })),
-            ..rust_stdlib_sys::net::Dialer::default()
-        };
-        let transport = rust_stdlib::net::http::transport::Transport {
-            // The proxy of the environment would carry requests past the
-            // check on the dialed address.
-            proxy: None,
-            dial_context: Some(rust_stdlib_sysnet::dial_context(dialer)),
-            tls_handshake_timeout: timeout,
-            ..rust_stdlib_sysnet::transport()
-        };
         // The transport refuses schemes other than http and https.
         let check_redirect: CheckRedirect = Arc::new(|_: &HttpRequest, via: &[HttpRequest]| {
             if via.len() > MAX_REDIRECTS {
@@ -455,12 +425,7 @@ impl Fetcher {
             Ok(())
         });
         Fetcher {
-            client: Client {
-                timeout,
-                transport: Some(Arc::new(transport)),
-                check_redirect: Some(check_redirect),
-                ..Client::default()
-            },
+            client: outbound::client(check, timeout, check_redirect, |_| {}),
         }
     }
 

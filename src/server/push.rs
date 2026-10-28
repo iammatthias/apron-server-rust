@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 use std::io::Read;
 use std::ops::{BitAnd, BitOr, BitOrAssign};
-use std::sync::{Arc, Condvar, LazyLock, Mutex, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread;
 
 use rust_stdlib::concurrent::WaitGroup;
@@ -12,11 +12,12 @@ use rust_stdlib::context::Context;
 use rust_stdlib::net::http::client::Client;
 use rust_stdlib::net::http::header::{BoxError, ERR_USE_LAST_RESPONSE};
 use rust_stdlib::net::http::Request as HttpRequest;
-use rust_stdlib::net::netip::{Addr, Prefix};
-use rust_stdlib::net::{split_host_port, url};
+use rust_stdlib::net::netip::Addr;
+use rust_stdlib::net::url;
 use rust_stdlib::time::{self, Duration, Time};
 
 use super::messages::mentions;
+use super::outbound::{self, public_address};
 use super::protocol::*;
 use super::server::{Client as Connection, Server, State};
 use super::users::UserState;
@@ -663,57 +664,6 @@ pub fn check_push_url(endpoint: &str, allow_insecure: bool) -> Result<String, &'
     Ok(endpoint)
 }
 
-/// Special-purpose ranges that netip's classification does not already
-/// exclude: this network, shared address space (CGNAT), IETF protocol
-/// assignments, documentation, the 6to4 relay anycast, benchmarking, and the
-/// reserved class E range; and in IPv6, IPv4-compatible addresses,
-/// discard-only, translation and tunneling prefixes that embed IPv4
-/// addresses, benchmarking, ORCHID, documentation, deprecated site-local,
-/// and segment routing.
-static NON_PUBLIC_PREFIXES: LazyLock<Vec<Prefix>> = LazyLock::new(|| {
-    [
-        "0.0.0.0/8",
-        "100.64.0.0/10",
-        "192.0.0.0/24",
-        "192.0.2.0/24",
-        "192.88.99.0/24",
-        "198.18.0.0/15",
-        "198.51.100.0/24",
-        "203.0.113.0/24",
-        "240.0.0.0/4",
-        "::/96",
-        "64:ff9b::/96",
-        "64:ff9b:1::/48",
-        "100::/64",
-        "2001::/32",
-        "2001:2::/48",
-        "2001:10::/28",
-        "2001:20::/28",
-        "2001:db8::/32",
-        "2002::/16",
-        "3fff::/20",
-        "5f00::/16",
-        "fec0::/10",
-    ]
-    .iter()
-    .map(|p| p.parse().expect("constant prefix"))
-    .collect()
-});
-
-/// Reports whether a dialed address is on the public internet.
-pub fn public_address(host: &str) -> bool {
-    let Ok(addr) = host.parse::<Addr>() else {
-        return false;
-    };
-    let addr = addr.unmap();
-    if !addr.is_global_unicast() || addr.is_private() {
-        return false;
-    }
-    !NON_PUBLIC_PREFIXES
-        .iter()
-        .any(|prefix| prefix.contains(&addr))
-}
-
 /// What a delivery reports its outcome to: the endpoint's status code, or 0
 /// for a delivery dropped beyond a queue bound or one that got no answer.
 pub type DoneFn = Box<dyn FnOnce(u16) + Send>;
@@ -796,42 +746,20 @@ pub struct PushDeliverer {
 
 impl PushDeliverer {
     pub fn new(allow_internal: bool, subject: String) -> Arc<PushDeliverer> {
-        let mut dialer = rust_stdlib_sys::net::Dialer {
-            timeout: PUSH_TIMEOUT.as_nanos(),
-            ..rust_stdlib_sys::net::Dialer::default()
-        };
-        if !allow_internal {
-            dialer.control = Some(Box::new(|_network: &str, address: &str, _raw: &_| {
-                let (host, _) =
-                    split_host_port(address).map_err(|e| std::io::Error::other(e.to_string()))?;
-                if !public_address(&host) {
-                    return Err(std::io::Error::other(
-                        "push endpoint resolves to an internal address",
-                    ));
-                }
-                Ok(())
-            }));
-        }
-        let transport = rust_stdlib::net::http::transport::Transport {
-            // The proxy of the environment would carry pushes past the
-            // check on the dialed address.
-            proxy: None,
-            dial_context: Some(rust_stdlib_sysnet::dial_context(dialer)),
-            tls_handshake_timeout: PUSH_TIMEOUT,
-            // Push services serve many pushes over one HTTP/2 connection.
-            force_attempt_http2: true,
-            max_idle_conns_per_host: MAX_PUSH_PER_HOST as i64,
-            ..rust_stdlib_sysnet::transport()
+        let check = if allow_internal {
+            outbound::any_address()
+        } else {
+            outbound::public_only()
         };
         let check_redirect: rust_stdlib::net::http::client::CheckRedirect =
             Arc::new(|_, _| Err(Box::new(ERR_USE_LAST_RESPONSE) as BoxError));
+        let client = outbound::client(check, PUSH_TIMEOUT, check_redirect, |transport| {
+            // Push services serve many pushes over one HTTP/2 connection.
+            transport.force_attempt_http2 = true;
+            transport.max_idle_conns_per_host = MAX_PUSH_PER_HOST as i64;
+        });
         Arc::new(PushDeliverer {
-            client: Client {
-                timeout: PUSH_TIMEOUT,
-                transport: Some(Arc::new(transport)),
-                check_redirect: Some(check_redirect),
-                ..Client::default()
-            },
+            client,
             slots: Semaphore::new(MAX_CONCURRENT_PUSH_POST),
             pending: WaitGroup::new(),
             vapid: OnceLock::new(),
