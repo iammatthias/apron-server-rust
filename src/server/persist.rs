@@ -222,6 +222,10 @@ pub struct StoredPush {
     pub token: String,
     #[json("push_id,omitzero")]
     pub push_id: String,
+    /// The hex SHA-256 of the /invite-device token the registering
+    /// connection signed in with.
+    #[json("device,omitzero")]
+    pub device: String,
     /// The subscription's keys, in base64url.
     #[json("p256dh,omitzero")]
     pub p256dh: String,
@@ -440,6 +444,9 @@ impl State {
                         renewed: p.renewed.clone(),
                         ..StoredPush::default()
                     };
+                    if p.device != [0; 32] {
+                        stored.device = session_id(&p.device);
+                    }
                     if let Some(keys) = &p.keys {
                         stored.p256dh = encode_base64_url(&keys.p256dh);
                         stored.auth = encode_base64_url(&keys.auth);
@@ -852,6 +859,12 @@ impl Server {
                     let keys = parse_push_keys(&stored.p256dh, &stored.auth)
                         .map_err(|e| format!("stored push {key:?}: {e}"))?;
                     p.keys = Some(keys);
+                }
+                if let Some(device) = hex::decode(&stored.device)
+                    .ok()
+                    .and_then(|device| <[u8; 32]>::try_from(device).ok())
+                {
+                    p.device = device;
                 }
                 if st.users.contains_key(&stored.user) && p.live(&now) {
                     st.add_push_locked(p);
