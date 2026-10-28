@@ -34,6 +34,7 @@ pub struct Options {
     pub push: PushOptions,
     pub tls: TlsOptions,
     pub apple: AppleOptions,
+    pub unfurl: UnfurlOptions,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -83,6 +84,12 @@ pub struct TlsOptions {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AppleOptions {
     pub app_ids: Vec<String>,
+}
+
+/// An extension Go lacks (docs/DEVIATIONS.md).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct UnfurlOptions {
+    pub enable: bool,
 }
 
 /// A borrowed option field. `Int` is Go's `int` and `Int64` its `int64`;
@@ -217,6 +224,13 @@ pub static GROUPS: &[Group] = &[
         namespace: "apple",
         options: &[
             spec!("app-id", List, apple.app_ids, [], [], "iOS app allowed to use this server's passkeys, as <team ID>.<bundle ID>, listed in /.well-known/apple-app-site-association; repeat for more (not in the Go aprond)"),
+        ],
+    },
+    Group {
+        name: "Link previews",
+        namespace: "unfurl",
+        options: &[
+            spec!("enable", Bool, unfurl.enable, [], [], "Fetch the pages that messages link to and attach their OpenGraph previews, with images hosted here; the server then requests any public http(s) URL a user posts (off by default; not in the Go aprond)"),
         ],
     },
 ];

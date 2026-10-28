@@ -92,9 +92,9 @@ fn without_times(log: &[u8]) -> String {
         .join("\n")
 }
 
-/// Drops the `--apple.app-id` group, an extension Go lacks, which comes last
-/// in `--help` and `--print-config`.
-fn without_apple(out: &[u8]) -> String {
+/// Drops the groups of extensions Go lacks, `--apple.app-id` and
+/// `--unfurl.enable`, which come last in `--help` and `--print-config`.
+fn without_extensions(out: &[u8]) -> String {
     let out = String::from_utf8_lossy(out).into_owned();
     if let (Some(start), Some(end)) = (out.find("\nApple:\n"), out.find("\nHelp Options:\n")) {
         return format!("{}{}", &out[..start], &out[end..]);
@@ -106,7 +106,7 @@ fn without_apple(out: &[u8]) -> String {
 }
 
 /// Runs both programs with `args` and compares exit status, standard output
-/// (without the Apple group) and standard error (without log times).
+/// (without the extension groups) and standard error (without log times).
 fn compare_with_go(args: &[&str]) {
     let Some(go) = go_aprond() else {
         return GO.unavailable("go toolchain or apron-server-go clone not found");
@@ -118,7 +118,7 @@ fn compare_with_go(args: &[&str]) {
         String::from_utf8_lossy(&go_out).into_owned(),
         without_times(&go_err),
     );
-    let view = (code, without_apple(&out), without_times(&err));
+    let view = (code, without_extensions(&out), without_times(&err));
     assert!(
         go_view == view,
         "{args:?}\n--- go (exit {})\n{}{}\n--- rust (exit {})\n{}{}",
@@ -517,7 +517,7 @@ fn test_apple_app_site_association() {
         &["--print-config", "--apple.app-id", "ABCDE12345.chat.apron"],
     );
     assert_eq!(code, 0);
-    assert!(String::from_utf8(out).unwrap().ends_with("[apple]\n\n# iOS app allowed to use this server's passkeys, as <team ID>.<bundle ID>, listed in /.well-known/apple-app-site-association; repeat for more (not in the Go aprond)\napp-id = [\"ABCDE12345.chat.apron\"]\n"));
+    assert!(String::from_utf8(out).unwrap().contains("\n[apple]\n\n# iOS app allowed to use this server's passkeys, as <team ID>.<bundle ID>, listed in /.well-known/apple-app-site-association; repeat for more (not in the Go aprond)\napp-id = [\"ABCDE12345.chat.apron\"]\n\n[unfurl]\n"));
 
     let (code, _, err) = output(
         APROND,
@@ -528,4 +528,19 @@ fn test_apple_app_site_association() {
         without_times(&err),
         r#"level=ERROR msg="server stopped" error="invalid --apple.app-id \"chat.apron\": use <team ID>.<bundle ID>, such as ABCDE12345.chat.apron""#
     );
+}
+
+/// `--unfurl.enable`, an extension: off by default, and kept by
+/// `--print-config`.
+#[test]
+fn test_unfurl_flag() {
+    let (code, out, _) = output(APROND, &["--print-config"]);
+    assert_eq!(code, 0);
+    let out = String::from_utf8(out).unwrap();
+    assert!(out.ends_with("\n[unfurl]\n\n# Fetch the pages that messages link to and attach their OpenGraph previews, with images hosted here; the server then requests any public http(s) URL a user posts (off by default; not in the Go aprond)\nenable = false\n"), "{out}");
+    let (code, out, _) = output(APROND, &["--print-config", "--unfurl.enable"]);
+    assert_eq!(code, 0);
+    assert!(String::from_utf8(out)
+        .unwrap()
+        .ends_with("\nenable = true\n"));
 }
