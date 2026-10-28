@@ -2,6 +2,7 @@
 //! share, ported file by file from `internal/server`.
 
 pub mod commands;
+pub mod devices;
 pub mod email;
 pub mod embeds;
 pub mod messages;

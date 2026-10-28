@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Proves sign-in end to end against the deployed server: a Playwright page
-# makes a passkey account in the real web client, runs /add-device, and hands
+# makes a passkey account in the real web client, runs /invite-device, and hands
 # the token to Ladle's ServerSession (LiveServerProofTests on Ladle's
 # live-proof branch) in the environment, never on disk. The page then checks
 # that the message Ladle posted arrives. Arguments go to `playwright test`.

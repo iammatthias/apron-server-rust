@@ -63,6 +63,7 @@ Phases 2a, 2b, and 2c run in parallel once phase 1 lands.
 | 2026-10-27 | `limit_listener` releases a slot when a connection is closed or dropped. | Go releases only on `Close`; a Rust connection dropped without `close` is closed too, so not releasing it would leak the slot. |
 | 2026-10-27 | `--help` and `--print-config` are compared byte for byte with the Go `aprond` by `cargo test` (`test_help_and_errors_match_go`, `test_print_config_matches_go`) always, against the Go clone. Since phase 3 they live in `tests/aprond.rs` and run the built binary, next to `test_startup_errors_match_go`, which compares the errors `run` stops with (log times dropped). | The comparison is the gate for go-flags' layout and BurntSushi's encoder. Without `go` or the clone the tests fail, unless `APRON_SKIP_GO=1`; a skipped run prints `SKIPPED` and does not count as the gate passing (AGENTS.md, Verification). |
 | 2026-10-27 | `run` is Go's: `server_settings`, then `server_config` maps `Settings` onto `server::Config` (counts at or below 0 become 0, Go's unlimited) and builds WebAuthn. `signal::notify_context` from `rust-stdlib-sys` watches SIGINT and SIGTERM under a cancellable parent context; each `http::Server` serves on its own thread, and the first serve error other than `ERR_SERVER_CLOSED` cancels the parent, as errgroup does. Shutdown gives `Server::shutdown` and each `http::Server::shutdown` one 10-second context. The text handler logger is `run`'s own; the server keeps `slog::default`, as Go's does. | The errgroup and `NotifyContext` pair is one context in Go; here the parent context carries the errgroup half. |
+| 2026-10-28 | `/invite-device <name>` replaces `/add-device [label]`. Device tokens are a store kind of their own, `device`, keyed by the hex SHA-256 of the token and holding `{user, name, created}`, rather than sessions. The per-account session cap and the `/add-device` limiter are gone. | The official server (apron-server-cloudflare) has `/invite-device` for the same job, so clients can give one instruction everywhere. Its tokens sign in from any origin and never expire, which sessions, bound to an origin and renewed on use, cannot express without sentinel values a Go `aprond` would misread. Go loads only the kinds it knows, so it ignores `device` entries and never deletes them. The cap and limiter existed only because `/add-device` minted sessions without bound; three named tokens per account bound the new store kind. |
 | 2026-10-27 | autocert is ported as `aprond::acme`: an RFC 8555 client (`client.rs`), ES256 JWS and challenge certificates over rust-stdlib-crypto (`jws.rs`), `DirCache` (`cache.rs`) and `Manager` (`manager.rs`). | golang.org/x/crypto is not Go's standard library, so rust-stdlib has no counterpart. The port keeps autocert's cache names (`<domain>`, `<domain>+token`, `<token>+http-01`, `acme_account+key`) and file layout (PEM key, then the PEM chain), so a cache directory moves between the Go and Rust aprond. `tools/differential/acme` checks thumbprints, key authorizations, JWS signatures, the TLS-ALPN-01 certificate, and cache files in both directions against x/crypto/acme v0.57.0. |
 | 2026-10-27 | The ACME gate runs Pebble v2.10.1 and pebble-challtestsrv from `cargo test` (`acme::pebble_test`). The test fails when they are missing, unless `APRON_SKIP_PEBBLE=1`; AGENTS.md, Verification, gives the install command and the lookup order (`$PEBBLE_BIN_DIR`, `PATH`, `$(go env GOPATH)/bin`). | It issues over TLS-ALPN-01 through a real handshake, verifies the chain against Pebble's root, reuses the certificate, renews it, and has Go's autocert read the cache. Pebble's validator sends HTTP-01 requests with `Host: <domain>:5002`, which `HostWhitelist` rejects in Go and here alike, so HTTP-01 is checked by the handler tests, not against Pebble. |
 
@@ -88,15 +89,15 @@ web client's origins, and `--apple.app-id` for each app, such as a
 development build with its own bundle ID.
 
 The native client gets its bearer token from another signed-in client,
-with `/add-device [label]`, an extension Go lacks (docs/DEVIATIONS.md). Run
-it in the web client while signed in with a passkey or email. The
-`~private` reply holds the token and the origin, each in a code block with
-a Copy button. The app stores both, sends that origin as its `Origin`
-header, and authenticates with `{"scheme": "token", "token": ...}` (§3.2).
-The token resumes the account only from that origin, and lapses after 30
-days unused. No command revokes one token: it ends when unused for 30 days,
-or when the app signs in again on a connection holding it. An account adds
-five devices at once, then one each 12 minutes.
+with `/invite-device <name>`, an extension Go lacks that matches
+apron-server-cloudflare's (docs/DEVIATIONS.md). Send it in the web client
+while signed in with a passkey or email, and paste the token from the
+`~private` reply, which shows it in a code block with a Copy button. The
+app authenticates with `{"scheme": "token", "token": ...}` (§3.2), from any
+origin or none. The token does not expire. An account holds at most three,
+one per name; running `/invite-device` with a held name again mints a new
+token for it, revokes the old one, and closes the connections that signed
+in with the old one.
 
 ## Smoke check
 

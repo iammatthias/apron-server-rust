@@ -2,10 +2,10 @@
 //! the crate so the ones that inspect internal state can, as the Go tests
 //! do with `app.mu`.
 
-mod add_device_test;
 mod email_test;
 mod ext_test;
 mod helpers;
+mod invite_device_test;
 mod limits_test;
 mod persist_test;
 mod push_fixture_test;

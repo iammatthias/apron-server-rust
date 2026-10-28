@@ -48,6 +48,7 @@ impl State {
         all.messages = self.messages.keys().cloned().collect();
         all.users = self.users.keys().cloned().collect();
         all.sessions = self.sessions.keys().copied().collect();
+        all.devices = self.devices.keys().copied().collect();
         all.embeds = self.embeds.keys().cloned().collect();
         all.pushes = self.pushes.keys().cloned().collect();
         all.vapid = self.vapid_stored;

@@ -1,0 +1,217 @@
+//! `/invite-device <name>`, an extension Go lacks (docs/DEVIATIONS.md): an
+//! account mints a bearer token that signs it in on another device through
+//! the `token` scheme (§3.2), from any origin, until the same name mints a
+//! new one. It follows apron-server-cloudflare's `/invite-device`.
+
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
+use rust_stdlib::encoding::base64::URL_SAFE_NO_PAD;
+use rust_stdlib::time::{self, Time};
+use rust_stdlib_crypto::{rand, sha256};
+
+use super::protocol::*;
+use super::server::{Client, State};
+use super::webauthn::SessionKey;
+
+/// Device tokens an account may hold at once, each under its own name.
+pub const MAX_DEVICE_TOKENS: usize = 3;
+pub const DEVICE_TOKEN_PREFIX: &str = "apron_device_";
+
+/// A device token, kept by the SHA-256 of the token: the account it signs in
+/// as and the name it was minted under.
+#[derive(Clone, Debug)]
+pub struct DeviceToken {
+    pub user: String,
+    pub name: String,
+    pub created: Time,
+}
+
+/// The device tokens by key, and each account's keys oldest first, so a
+/// name again finds its token and the cap names them in order.
+#[derive(Default)]
+pub struct DeviceTokens {
+    by_key: BTreeMap<SessionKey, DeviceToken>,
+    by_user: BTreeMap<String, Vec<SessionKey>>,
+}
+
+impl DeviceTokens {
+    pub fn get(&self, key: &SessionKey) -> Option<&DeviceToken> {
+        self.by_key.get(key)
+    }
+
+    pub fn keys(&self) -> impl Iterator<Item = &SessionKey> {
+        self.by_key.keys()
+    }
+
+    /// Adds a token after the account's others.
+    pub fn insert(&mut self, key: SessionKey, token: DeviceToken) {
+        self.by_user
+            .entry(token.user.clone())
+            .or_default()
+            .push(key);
+        self.by_key.insert(key, token);
+    }
+
+    pub fn remove(&mut self, key: &SessionKey) -> Option<DeviceToken> {
+        let token = self.by_key.remove(key)?;
+        if let Some(held) = self.by_user.get_mut(&token.user) {
+            held.retain(|k| k != key);
+            if held.is_empty() {
+                self.by_user.remove(&token.user);
+            }
+        }
+        Some(token)
+    }
+
+    /// An account's tokens, oldest first.
+    pub fn of_user<'a>(
+        &'a self,
+        user_id: &str,
+    ) -> impl Iterator<Item = (SessionKey, &'a DeviceToken)> + 'a {
+        self.by_user
+            .get(user_id)
+            .into_iter()
+            .flatten()
+            .map(|key| (*key, &self.by_key[key]))
+    }
+}
+
+/// A device name: 1 to 32 letters, digits, `_`, `.` or `-`, starting with a
+/// letter or digit.
+fn valid_device_name(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    (1..=32).contains(&bytes.len())
+        && bytes[0].is_ascii_alphanumeric()
+        && bytes
+            .iter()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'-'))
+}
+
+impl State {
+    pub fn touch_device(&mut self, key: SessionKey) {
+        self.dirty.devices.insert(key);
+    }
+
+    /// Mints a device token for the sender's account under the one name in
+    /// args, replacing that name's last token: the account's other
+    /// connections that signed in with it close. The token goes to this
+    /// connection only, in a ~private notice before the result (§1).
+    pub(super) fn invite_device_command(
+        &mut self,
+        c: &Arc<Client>,
+        room_id: &str,
+        _body: &Object,
+        args: &str,
+    ) -> Result<Object, RpcError> {
+        let user_id = self.client_user(c).unwrap_or_default();
+        if !self.users[&user_id].account() {
+            return Err(RpcError::new(
+                CODE_DENIED,
+                "Sign in with a passkey or email to use /invite-device",
+            ));
+        }
+        let mut words = args.split_whitespace();
+        let (Some(name), None) = (words.next(), words.next()) else {
+            return Err(invalid_params("Usage: /invite-device <name>"));
+        };
+        if !valid_device_name(name) {
+            return Err(invalid_params(
+                "A device name is 1 to 32 letters, digits, _, . or -, starting with a letter or digit",
+            ));
+        }
+        let held: Vec<(SessionKey, String)> = self
+            .devices
+            .of_user(&user_id)
+            .map(|(key, token)| (key, token.name.clone()))
+            .collect();
+        let previous = held
+            .iter()
+            .find(|(_, held)| held == name)
+            .map(|(key, _)| *key);
+        if previous.is_none() && held.len() >= MAX_DEVICE_TOKENS {
+            let names: Vec<String> = held.iter().map(|(_, name)| format!("`{name}`")).collect();
+            return Err(RpcError::new(
+                CODE_DENIED,
+                format!(
+                    "You have {MAX_DEVICE_TOKENS} device tokens ({}); run /invite-device with one of those names to replace its token",
+                    names.join(", ")
+                ),
+            ));
+        }
+        if let Some(old) = previous {
+            self.devices.remove(&old);
+            self.touch_device(old);
+        }
+        let mut secret = [0u8; 32];
+        rand::read(&mut secret);
+        let token = format!("{DEVICE_TOKEN_PREFIX}{}", URL_SAFE_NO_PAD.encode(secret));
+        let key = sha256::sum256(token.as_bytes());
+        self.devices.insert(
+            key,
+            DeviceToken {
+                user: user_id.clone(),
+                name: name.to_owned(),
+                created: time::now(),
+            },
+        );
+        self.touch_device(key);
+        if let Some(old) = previous {
+            self.revoke_device_locked(c, &user_id, &old);
+        }
+        let replaced = if previous.is_some() {
+            ", and replaces its earlier token"
+        } else {
+            ""
+        };
+        let text = format!(
+            "This token signs in as you (`{user_id}`) on your device **{name}**{replaced}. It does not expire, and anyone who has it can sign in as you, so keep it secret. `/invite-device {name}` again replaces it.\n\n```\n{token}\n```\n\nTo sign in, authenticate with the token scheme: `{{\"method\": \"auth\", \"params\": {{\"scheme\": \"token\", \"token\": \"{token}\"}}}}`"
+        );
+        c.enqueue(&super::commands::private_notice(
+            &self.rooms[room_id],
+            &text,
+        ));
+        Ok(Object::new())
+    }
+
+    /// Closes the account's connections, other than the asking one, that
+    /// signed in with the replaced token, then forgets the account's push
+    /// registrations, so the replaced device stops getting its messages.
+    /// Its other devices register again on their next connection.
+    fn revoke_device_locked(&mut self, c: &Client, user_id: &str, old: &SessionKey) {
+        for id in &self.users[user_id].clients {
+            let conn = &self.clients[id];
+            if *id != c.id && conn.token == *old {
+                conn.client.close_with_error(RpcError::new(
+                    CODE_DENIED,
+                    "Device token replaced; sign in with the new one",
+                ));
+            }
+        }
+        for key in self.sorted_pushes(user_id) {
+            self.remove_push_locked(&key);
+        }
+    }
+
+    /// Signs the connection in with a device token, from any origin. The
+    /// result carries no session token: the device keeps its own.
+    pub(super) fn authenticate_device_locked(
+        &mut self,
+        c: &Arc<Client>,
+        req: &Request,
+        token: &str,
+    ) -> Result<Json, RpcError> {
+        let key = sha256::sum256(token.as_bytes());
+        let Some(user_id) = self.devices.get(&key).map(|d| d.user.clone()) else {
+            return Err(RpcError::new(
+                CODE_DENIED,
+                "This device token is not valid; get a new one with /invite-device on a signed-in device",
+            ));
+        };
+        self.set_conn_token(c, key);
+        let sign_in = self.client_user(c).as_deref() != Some(&user_id);
+        Ok(self
+            .switch_user_locked(c, req, &user_id, Object::new(), sign_in, false)
+            .into())
+    }
+}

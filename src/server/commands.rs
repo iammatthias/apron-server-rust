@@ -1,20 +1,15 @@
-//! Server commands (§4.1): /help, /avatar, /add-device, and /kick, run from
+//! Server commands (§4.1): /help, /avatar, /invite-device, and /kick, run from
 //! a `command` request and answered with scoped system notices
 //! (Appendix A.1).
 
 use std::sync::Arc;
 
-use super::email::wait;
 use super::messages::{mentions, parse_message_ref, validate_body, MessageState};
 use super::protocol::*;
 use super::rooms::RoomState;
 use super::server::{Client, Server, State, DEFAULT_ROOM_ID};
-use super::status::retry_after;
-use super::users::{normalize_name, UserState};
-use super::webauthn::SESSION_LIFETIME;
+use super::users::UserState;
 use crate::obj;
-use crate::rate::{every, Limiter};
-use rust_stdlib::time::{self, Duration};
 
 /// Scoped system identities (Appendix A.1). user_ids starting with `~` are
 /// reserved for them (Appendix A.3): requestable_user_id never matches one.
@@ -22,12 +17,6 @@ pub const ROOM_NOTICE_ID: &str = "~room";
 pub const PRIVATE_NOTICE_ID: &str = "~private";
 
 pub const MAX_KICK_REASON_RUNES: usize = 200;
-
-/// /add-device issues up to DEVICE_ADDS_PER_ACCOUNT tokens at once, enough
-/// to set up a phone, a tablet and a laptop in one sitting, and one more each
-/// DEVICE_ADD_REFILL, five an hour.
-pub const DEVICE_ADDS_PER_ACCOUNT: i64 = 5;
-pub const DEVICE_ADD_REFILL: Duration = Duration::from_mins(12);
 
 /// Executes a command for the sender in a room, with the message body and
 /// the arguments after the command word.
@@ -63,11 +52,11 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         run: State::avatar_command,
     },
     ServerCommand {
-        name: "add-device",
-        usage: "/add-device [label]",
-        help: "get a sign-in token for another device, such as the iOS app",
+        name: "invite-device",
+        usage: "/invite-device <name>",
+        help: "get a token that signs in as you on another device, named <name>; at most 3 names, and a name again replaces its token",
         available: Some(|u, _| u.account()),
-        run: State::add_device_command,
+        run: State::invite_device_command,
     },
     ServerCommand {
         name: "kick",
@@ -80,7 +69,7 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
 
 /// Renders a notice for the one connection it is queued on: unlogged,
 /// without message_id or log_id (Appendix A.1).
-fn private_notice(r: &RoomState, text: &str) -> Object {
+pub(super) fn private_notice(r: &RoomState, text: &str) -> Object {
     obj! {"method" => "message", "params" => obj! {
         "room_id" => r.id.as_str(),
         "from" => obj! {"user_id" => PRIVATE_NOTICE_ID, "name" => "System message to you"},
@@ -230,61 +219,6 @@ impl State {
         Ok(obj! {
             "embeds" => vec![Json::from(obj! {"embed_id" => id.as_str(), "kind" => "upload", "write_url" => e.write_url()})],
         })
-    }
-
-    /// Issues another bearer token for the sender's account (§4.10), which
-    /// resumes it through the `token` scheme (§3.2) from this connection's
-    /// origin, like a passkey sign-in's. The ~private reply carries the
-    /// token and the origin in code blocks, which the web client gives Copy
-    /// buttons. The label only names the device in the reply.
-    fn add_device_command(
-        &mut self,
-        c: &Arc<Client>,
-        room_id: &str,
-        _body: &Object,
-        args: &str,
-    ) -> Result<Object, RpcError> {
-        let user_id = self.client_user(c).unwrap_or_default();
-        if !self.users[&user_id].account() {
-            return Err(RpcError::new(
-                CODE_DENIED,
-                "Sign in with a passkey or email before adding a device",
-            ));
-        }
-        let now = time::now();
-        let u = self.users.get_mut(&user_id).expect("signed in");
-        let adds = u
-            .device_adds
-            .get_or_insert_with(|| Limiter::new(every(DEVICE_ADD_REFILL), DEVICE_ADDS_PER_ACCOUNT));
-        let delay = wait(adds, &now);
-        if delay.as_nanos() > 0 {
-            return Err(retry_after(
-                "Too many devices added; try again later",
-                delay,
-            ));
-        }
-        adds.allow_n(&now, 1);
-        let (token, _) = self.new_session_locked(&user_id, &c.origin, &now);
-        let label = normalize_name(args);
-        let device = if label.is_empty() {
-            "a new device".to_owned()
-        } else {
-            format!("“{label}”")
-        };
-        let days = SESSION_LIFETIME.as_nanos() / time::HOUR.as_nanos() / 24;
-        let origin = if c.origin.is_empty() {
-            "It works only on a connection without an Origin header.".to_owned()
-        } else {
-            format!(
-                "It works only from this origin, which the app sends:\n\n```\n{}\n```",
-                c.origin
-            )
-        };
-        let text = format!(
-            "Sign in on {device} as @{user_id} with this token. Keep it private: it opens your account until it goes {days} days unused.\n\n```\n{token}\n```\n\n{origin}"
-        );
-        c.enqueue(&private_notice(&self.rooms[room_id], &text));
-        Ok(Object::new())
     }
 
     /// Removes the one mentioned user from the room: the room's members, the

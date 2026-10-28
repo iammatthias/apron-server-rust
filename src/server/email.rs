@@ -348,7 +348,7 @@ impl EmailState {
 }
 
 /// How long until `limiter` allows one more event, or zero.
-pub fn wait(limiter: &mut Limiter, now: &Time) -> Duration {
+fn wait(limiter: &mut Limiter, now: &Time) -> Duration {
     let reservation = limiter.reserve_n(now, 1);
     let delay = reservation.delay_from(now);
     limiter.cancel_at(&reservation, now);

@@ -218,10 +218,12 @@ volume, which a deploy never removes.
 Set `LADLE_DIR` to a checkout of Ladle's `live-proof` branch. A Playwright page
 (the Go clone's `tests/interop` dependencies, Chrome's virtual authenticator)
 makes a passkey account named `ladle-proof` in the web client, posts, and runs
-`/add-device phone`. It passes the notice's token and origin to Ladle's
-`LiveServerProofTests` in the environment. That test signs in with the token
-as the same `user_id`, posts in `general`, and checks that the token is refused
-from another origin and without one. The page then waits for Ladle's message.
+`/invite-device phone`. It passes the notice's token and the server's origin
+to Ladle's `LiveServerProofTests` in the environment. That test signs in with
+the token as the same `user_id` and posts in `general`. The page then waits
+for Ladle's message. Device tokens sign in from any origin, so a Ladle
+`live-proof` branch that still expects the token refused from another origin
+or without one fails until it is updated.
 Each run leaves one more `ladle-proof` account, whose passkey went away with
 the virtual authenticator.
 
