@@ -185,7 +185,7 @@ fn test_parse_page() {
     let base = url::parse("https://a.example/posts/1").unwrap();
     assert_eq!(
         parse_page(ARTICLE, &base),
-        Page {
+        Meta {
             title: "Before & after".into(),
             description: "The fix, explained".into(),
             site_name: "Example".into(),
@@ -195,9 +195,9 @@ fn test_parse_page() {
     );
     assert_eq!(
         parse_page("<title>Only a title</title>", &base),
-        Page {
+        Meta {
             title: "Only a title".into(),
-            ..Page::default()
+            ..Meta::default()
         }
     );
     let fallbacks = r#"<html><head><!-- <meta property="og:title" content="commented"> -->
@@ -207,10 +207,10 @@ fn test_parse_page() {
 <meta property="og:image" content="javascript:alert(1)"></head>"#;
     assert_eq!(
         parse_page(fallbacks, &base),
-        Page {
+        Meta {
             title: "A title <3".into(),
             description: "Meta description".into(),
-            ..Page::default()
+            ..Meta::default()
         }
     );
 }
@@ -225,15 +225,18 @@ fn test_fetcher_preview() {
     assert_eq!(
         preview,
         Preview {
-            title: "Before & after".into(),
-            description: "The fix, explained".into(),
-            site_name: "Example".into(),
+            meta: Meta {
+                title: "Before & after".into(),
+                description: "The fix, explained".into(),
+                site_name: "Example".into(),
+                image: page.url("/before.png"),
+                image_alt: "Dashboard before the fix".into(),
+            },
             image: Some(Image {
                 bytes: test_png(),
                 content_type: "image/png".into(),
                 width: 3,
                 height: 2,
-                alt: "Dashboard before the fix".into(),
             }),
         }
     );
@@ -350,11 +353,11 @@ fn test_fetcher_size_caps() {
         None,
         "read past the page cap"
     );
-    assert_eq!(f.preview(&page.url("/early")).unwrap().title, "Early");
+    assert_eq!(f.preview(&page.url("/early")).unwrap().meta.title, "Early");
     for path in ["/big-image", "/svg-image", "/lying-image"] {
         let preview = f.preview(&page.url(path)).unwrap();
         assert_eq!(
-            (preview.title.as_str(), preview.image),
+            (preview.meta.title.as_str(), preview.image),
             ("T", None),
             "{path}"
         );
@@ -393,8 +396,7 @@ fn test_cache() {
     ]);
     let unfurler = Unfurler::new(fetcher(allow_all()));
     let first = unfurler.preview(&page.url("/post")).unwrap();
-    let second = unfurler.preview(&page.url("/post")).unwrap();
-    assert!(Arc::ptr_eq(&first, &second));
+    assert_eq!(unfurler.preview(&page.url("/post")).unwrap(), first);
     assert_eq!(unfurler.preview(&page.url("/missing")), None);
     assert_eq!(unfurler.preview(&page.url("/missing")), None);
     assert_eq!(
@@ -408,22 +410,58 @@ fn test_cache() {
 
     let mut cache = Cache::default();
     let now = time::now();
-    cache.insert("https://a.example/", Some(first), &now);
-    cache.insert("https://b.example/", None, &now);
+    let found = Unfurled::Preview(first);
+    cache.insert("https://a.example/", found.clone(), &now);
+    cache.insert("https://b.example/", Unfurled::Nothing, &now);
     let later = |d: Duration| now.add(d);
-    assert!(cache
-        .get("https://a.example/", &later(CACHE_TTL - time::SECOND))
-        .is_some_and(|p| p.is_some()));
+    assert_eq!(
+        cache.get("https://a.example/", &later(CACHE_TTL - time::SECOND)),
+        Some(found)
+    );
     assert_eq!(cache.get("https://a.example/", &later(CACHE_TTL)), None);
     assert_eq!(
         cache.get("https://b.example/", &later(FAILURE_TTL - time::SECOND)),
-        Some(None)
+        Some(Unfurled::Nothing)
     );
     assert_eq!(cache.get("https://b.example/", &later(FAILURE_TTL)), None);
     for i in 0..MAX_CACHED + 10 {
-        cache.insert(&format!("https://{i}.example/"), None, &now);
+        cache.insert(&format!("https://{i}.example/"), Unfurled::Nothing, &now);
     }
     assert_eq!(cache.len(), MAX_CACHED);
+}
+
+/// A preview whose image is `size` bytes.
+fn sized(size: usize) -> Unfurled {
+    Unfurled::Preview(Arc::new(Preview {
+        meta: Meta::default(),
+        image: Some(Image {
+            bytes: vec![0; size],
+            content_type: "image/png".into(),
+            width: 1,
+            height: 1,
+        }),
+    }))
+}
+
+#[test]
+fn test_cache_byte_budget() {
+    let mut cache = Cache::default();
+    let now = time::now();
+    let quarter = MAX_CACHED_BYTES / 4 + 1;
+    for i in 0..4 {
+        let at = now.add(Duration::from_secs(i));
+        cache.insert(&format!("https://{i}.example/"), sized(quarter), &at);
+    }
+    let at = now.add(Duration::from_secs(4));
+    let held: Vec<bool> = (0..4)
+        .map(|i| cache.get(&format!("https://{i}.example/"), &at).is_some())
+        .collect();
+    assert_eq!(held, vec![false, true, true, true]);
+    assert_eq!(cache.bytes(), 3 * quarter);
+
+    cache.insert("https://huge.example/", sized(MAX_CACHED_BYTES + 1), &at);
+    assert_eq!(cache.get("https://huge.example/", &at), None);
+    assert_eq!(cache.bytes(), 3 * quarter);
 }
 
 fn unfurl_server() -> (TestServer, TempDir) {

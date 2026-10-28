@@ -218,8 +218,7 @@ impl State {
         }
         let user_id = self.client_user(c).unwrap_or_default();
         self.admit_post_locked(&user_id)?;
-        self.embed_number += 1;
-        let id = format!("embed_{}", self.embed_number);
+        let id = self.next_embed_id();
         self.new_write_locked(c, &id, "upload", "");
         let e = self.embeds.get_mut(&id).expect("just registered");
         e.avatar_for = Some(user_id);
