@@ -31,6 +31,7 @@ services:
       - --max-connections=300
       - --max-listener-connections=600
       - --max-private-rooms=20
+      - --role=admin=guest_1
   web:
     build:
       context: .
