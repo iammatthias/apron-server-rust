@@ -434,6 +434,15 @@ impl State {
             self.unread_changed_locked(&user_id, &room_id);
         }
         self.wake_locked(&message_id, &snapshot, previous.as_ref());
+        if !deleted {
+            self.unfurl_locked(
+                &user_id,
+                &c.base_url,
+                &message_id,
+                previous.as_ref(),
+                &snapshot,
+            );
+        }
         let mut result = obj! {"message_id" => message_id.as_str()};
         if !written.is_empty() {
             result.insert("embeds".into(), written.into());

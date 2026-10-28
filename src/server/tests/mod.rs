@@ -15,5 +15,6 @@ mod push_test;
 mod reference_test;
 mod server_test;
 mod status_test;
+mod unfurl_test;
 mod webauthn_test;
 mod webpush_test;

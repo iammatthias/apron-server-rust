@@ -351,7 +351,7 @@ impl State {
         self.uploads
             .iter()
             .filter_map(|(_, id)| self.embeds.get(id))
-            .filter(|e| e.message_id == message_id && e.avatar_for.is_none())
+            .filter(|e| e.message_id == message_id && e.kind == "upload" && e.avatar_for.is_none())
             .map(|e| e.size)
             .sum()
     }

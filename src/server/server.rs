@@ -23,6 +23,7 @@ use super::protocol::*;
 use super::push::{PushDeliverer, PushRegistration};
 use super::rooms::RoomState;
 use super::status::optional_statuses;
+use super::unfurl::{self, Fetcher, Unfurler};
 use super::users::{DedupEntry, UserState};
 use super::webauthn::{PasskeyCeremony, Sessions, WebAuthn};
 use super::webpush::VapidKey;
@@ -127,6 +128,11 @@ pub struct Config {
     /// `<team ID>.<bundle ID>`, that /.well-known/apple-app-site-association
     /// lists for passkeys (`webcredentials`). Empty serves no such route.
     pub apple_app_ids: Vec<String>,
+    /// An extension Go lacks (docs/DEVIATIONS.md): unfurls the links of
+    /// messages into `link` embeds with og (§4.8.1).
+    pub unfurl: bool,
+    /// Lets unfurls reach internal addresses, for tests.
+    pub unfurl_allow_internal: bool,
 }
 
 impl Default for Config {
@@ -177,6 +183,8 @@ pub fn default_config() -> Config {
         client_ip_header: String::new(),
         email_link_url: String::new(),
         apple_app_ids: Vec::new(),
+        unfurl: false,
+        unfurl_allow_internal: false,
     }
 }
 
@@ -622,6 +630,8 @@ pub struct State {
     pub badge_delay: Duration,
     pub badges: WaitGroup,
     pub push: Arc<PushDeliverer>,
+    /// Set with `Config.unfurl`.
+    pub unfurler: Option<Arc<Unfurler>>,
 }
 
 /// The Apron server. Go's `Server`, shared by the HTTP handlers, the
@@ -725,6 +735,14 @@ pub fn open(config: Config) -> Result<Arc<Server>, store::StoreError> {
         subject = config.public_url.clone();
     }
     let push = PushDeliverer::new(config.allow_insecure_push, subject);
+    let unfurler = config.unfurl.then(|| {
+        let check: unfurl::DialCheck = if config.unfurl_allow_internal {
+            Arc::new(|_: &str| true)
+        } else {
+            unfurl::public_dial_check()
+        };
+        Unfurler::new(Fetcher::new(check, unfurl::FETCH_TIMEOUT))
+    });
     let badges = WaitGroup::new();
     let store: Arc<dyn Store> = match config.store.take() {
         Some(store) => store,
@@ -781,6 +799,7 @@ pub fn open(config: Config) -> Result<Arc<Server>, store::StoreError> {
                 badge_delay: super::unread::BADGE_DELAY,
                 badges: badges.clone(),
                 push: push.clone(),
+                unfurler: unfurler.clone(),
             }),
             store,
             store_writes: Mutex::new(Some(tx)),
@@ -958,6 +977,10 @@ impl Server {
             server.badges.wait();
             server.push.wait();
             server.mailing.wait();
+            let unfurler = server.lock().unfurler.clone();
+            if let Some(unfurler) = unfurler {
+                unfurler.pending.wait();
+            }
             {
                 let mut st = server.lock();
                 server.close_store_locked(&mut st);
