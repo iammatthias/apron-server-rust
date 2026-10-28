@@ -306,6 +306,13 @@ fn test_fetcher_size_caps() {
             respond("image/png", b"<html><script>1</script></html>".to_vec()),
         ),
         (
+            "/jpg-image",
+            html(
+                r#"<meta property="og:title" content="T"><meta property="og:image" content="/i.jpg">"#,
+            ),
+        ),
+        ("/i.jpg", respond("image/jpg", test_png())),
+        (
             "/text",
             respond(
                 "text/plain",
@@ -329,6 +336,11 @@ fn test_fetcher_size_caps() {
         );
     }
     assert_eq!(f.preview(&page.url("/text")), None, "not HTML");
+    let mislabeled = f.preview(&page.url("/jpg-image")).unwrap().image.unwrap();
+    assert_eq!(
+        (mislabeled.content_type.as_str(), mislabeled.width),
+        ("image/png", 3)
+    );
 }
 
 #[test]
