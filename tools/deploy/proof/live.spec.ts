@@ -16,21 +16,20 @@ async function send(page: Page, text: string): Promise<void> {
 	await page.getByRole('button', { name: button, exact: true }).click();
 }
 
-/** The code blocks of the newest notice that says `phrase`, read in the page so no assertion prints them. */
-async function noticeCodeBlocks(page: Page, phrase: string): Promise<string[]> {
+/** The code block of the newest notice that says `phrase`, read in the page so no assertion prints it. */
+async function noticeCodeBlock(page: Page, phrase: string): Promise<string> {
 	return page.evaluate((phrase) => {
 		const hits = [...document.querySelectorAll('pre')].filter((pre) => {
 			let node: Element | null = pre;
 			while (node && !node.textContent?.includes(phrase)) node = node.parentElement;
 			return node !== null;
 		});
-		let container: Element | null = hits.at(-1) ?? null;
-		while (container && container.querySelectorAll('pre').length < 2) container = container.parentElement;
-		return container ? [...container.querySelectorAll('pre')].slice(-2).map((pre) => (pre.querySelector('code') ?? pre).textContent!.trim()) : [];
+		const pre = hits.at(-1);
+		return pre ? (pre.querySelector('code') ?? pre).textContent!.trim() : '';
 	}, phrase);
 }
 
-test('a passkey account made in the web client signs Ladle in through /add-device', async ({ page, context, baseURL }) => {
+test('a passkey account made in the web client signs Ladle in through /invite-device', async ({ page, context, baseURL }) => {
 	const cdp = await context.newCDPSession(page);
 	await cdp.send('WebAuthn.enable');
 	const { authenticatorId } = await cdp.send('WebAuthn.addVirtualAuthenticator', { options: {
@@ -65,14 +64,12 @@ test('a passkey account made in the web client signs Ladle in through /add-devic
 	await send(page, webMessage);
 	await expect(messageByText(page, webMessage)).toBeVisible();
 
-	await send(page, '/add-device phone');
-	await expect(page.getByText(/^Sign in on “phone” as .* with this token/).last()).toBeVisible();
-	const blocks = await noticeCodeBlocks(page, 'with this token');
-	expect(blocks.length, 'the notice has a token block and an origin block').toBe(2);
-	const [token, origin] = blocks;
-	expect(/^\S{20,}$/.test(token), 'the first block is a token').toBe(true);
-	expect(origin).toBe(new URL(baseURL!).origin);
-	console.log(`/add-device notice: a token (${token.length} characters) for origin ${origin}`);
+	await send(page, '/invite-device phone');
+	await expect(page.getByText(/^This token signs in as you .* on your device phone/).last()).toBeVisible();
+	const token = await noticeCodeBlock(page, 'on your device');
+	expect(/^apron_device_[A-Za-z0-9_-]{43}$/.test(token), 'the code block is a device token').toBe(true);
+	const origin = new URL(baseURL!).origin;
+	console.log(`/invite-device notice: a token (${token.length} characters)`);
 
 	const ladleMessage = `ladle session proof ${Date.now()}`;
 	let output: string;

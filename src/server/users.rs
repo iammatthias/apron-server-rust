@@ -53,8 +53,6 @@ pub struct UserState {
     /// Limits the user's new messages, room_set requests, and /avatar
     /// commands to messages_per_minute; `None` when unlimited.
     pub posts: Option<Limiter>,
-    /// Limits the account's /add-device tokens; `None` until its first.
-    pub device_adds: Option<Limiter>,
 
     /// The chosen status, set with `me` (§4.5.1); `mute` and `room_mutes`
     /// their mutes; `shown` the shown status as last noted, and `offline_at`
@@ -102,7 +100,6 @@ impl UserState {
             dedup: DedupCache::default(),
             passkey: None,
             posts: None,
-            device_adds: None,
             chosen: STATUS_ONLINE.into(),
             mute: MuteState::default(),
             room_mutes: BTreeMap::new(),

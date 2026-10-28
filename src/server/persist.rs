@@ -15,6 +15,8 @@
 //! message  message_id
 //! user     user_id      guests too, retired at the next start
 //! session  hex SHA-256 of the bearer token
+//! device   hex SHA-256 of the /invite-device token (an extension; Go
+//!          ignores the kind)
 //! embed    embed_id
 //! push     user_id, a space, and url
 //! ```
@@ -31,6 +33,7 @@ use rust_stdlib::path;
 use rust_stdlib::time::{self, Time};
 use rust_stdlib_derive::{MarshalTo, UnmarshalFrom};
 
+use super::devices::DeviceToken;
 use super::embeds::{EmbedState, StreamBuffer};
 use super::messages::{MessageState, ReactionSet};
 use super::protocol::*;
@@ -51,6 +54,7 @@ pub const ENTRY_ROOM: &str = "room";
 pub const ENTRY_MESSAGE: &str = "message";
 pub const ENTRY_USER: &str = "user";
 pub const ENTRY_SESSION: &str = "session";
+pub const ENTRY_DEVICE: &str = "device";
 pub const ENTRY_EMBED: &str = "embed";
 pub const ENTRY_PUSH: &str = "push";
 
@@ -64,6 +68,7 @@ pub struct DirtySet {
     pub messages: BTreeSet<String>,
     pub users: BTreeSet<String>,
     pub sessions: BTreeSet<[u8; 32]>,
+    pub devices: BTreeSet<[u8; 32]>,
     pub embeds: BTreeSet<String>,
     pub pushes: BTreeSet<String>,
     pub used_ids: Vec<String>,
@@ -230,6 +235,16 @@ pub struct StoredSession {
     pub expires: Time,
 }
 
+#[derive(Clone, Debug, Default, MarshalTo, UnmarshalFrom)]
+pub struct StoredDevice {
+    #[json("user")]
+    pub user: String,
+    #[json("name")]
+    pub name: String,
+    #[json("created")]
+    pub created: Time,
+}
+
 /// The store ID of a session: the hex SHA-256 of its bearer token.
 pub fn session_id(key: &[u8; 32]) -> String {
     hex::encode(key)
@@ -355,6 +370,21 @@ impl State {
                     },
                 ),
                 None => batch.push(Entry::delete(ENTRY_SESSION, &session_id(key))),
+            }
+        }
+        for key in &d.devices {
+            match self.devices.get(key) {
+                Some(device) => put(
+                    &mut batch,
+                    ENTRY_DEVICE,
+                    &session_id(key),
+                    &StoredDevice {
+                        user: device.user.clone(),
+                        name: device.name.clone(),
+                        created: device.created.clone(),
+                    },
+                ),
+                None => batch.push(Entry::delete(ENTRY_DEVICE, &session_id(key))),
             }
         }
         for id in &d.embeds {
@@ -815,6 +845,34 @@ impl Server {
             } else {
                 st.touch_session(key);
             }
+        }
+
+        let mut devices = Vec::new();
+        for (id, raw) in of(ENTRY_DEVICE) {
+            let Some(key) = hex::decode(id)
+                .ok()
+                .and_then(|key| <[u8; 32]>::try_from(key).ok())
+            else {
+                continue;
+            };
+            let stored = decode::<StoredDevice>(ENTRY_DEVICE, id, raw)?;
+            if st.users.get(&stored.user).is_some_and(|u| u.account()) {
+                devices.push((key, stored));
+            } else {
+                st.touch_device(key);
+            }
+        }
+        // Each account's tokens are kept oldest first.
+        devices.sort_by_key(|(_, stored)| stored.created.unix_nano());
+        for (key, stored) in devices {
+            st.devices.insert(
+                key,
+                DeviceToken {
+                    user: stored.user,
+                    name: stored.name,
+                    created: stored.created,
+                },
+            );
         }
 
         // Nothing is connected yet: guests are retired as if their last

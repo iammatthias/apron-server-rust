@@ -46,7 +46,7 @@ in rust-stdlib.
 
 [docs/DEVIATIONS.md](docs/DEVIATIONS.md) lists every known difference a
 client can see, including two extensions the Go server lacks:
-`--apple.app-id` and the `/add-device` command.
+`--apple.app-id` and the `/invite-device` command.
 [docs/PORT.md](docs/PORT.md) holds the port plan, the gate results, and the
 decision log.
 

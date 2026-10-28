@@ -10,6 +10,7 @@ use rust_stdlib::encoding::json::jsontext::Value;
 use rust_stdlib::time::{self, Duration, Time};
 use rust_stdlib_crypto::{rand, sha256};
 
+use super::devices::DEVICE_TOKEN_PREFIX;
 use super::protocol::*;
 use super::server::{Client, State};
 use super::users::normalize_name;
@@ -520,6 +521,9 @@ impl State {
         if token.is_empty() {
             return Err(invalid_params("token must be a non-empty string"));
         }
+        if token.starts_with(DEVICE_TOKEN_PREFIX) {
+            return self.authenticate_device_locked(c, req, &token);
+        }
         self.prune_sessions_locked(&now);
         let key = sha256::sum256(token.as_bytes());
         let Some(user_id) = self
@@ -556,7 +560,7 @@ impl State {
         self.clients.get(&c.id).map_or([0; 32], |conn| conn.token)
     }
 
-    fn set_conn_token(&mut self, c: &Client, key: [u8; 32]) {
+    pub(super) fn set_conn_token(&mut self, c: &Client, key: [u8; 32]) {
         if let Some(conn) = self.clients.get_mut(&c.id) {
             conn.token = key;
         }
