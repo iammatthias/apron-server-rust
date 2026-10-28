@@ -17,7 +17,7 @@ use rust_stdlib_crypto::{rand, sha256};
 
 use super::email::web_socket_url;
 use super::protocol::*;
-use super::server::{Client, State};
+use super::server::{Client, ClientId, State};
 use super::users::{normalize_name, UserState};
 use super::webauthn::SessionKey;
 
@@ -190,24 +190,24 @@ impl State {
         Ok(Object::new())
     }
 
-    /// Closes the bot's connections that signed in with the replaced token,
-    /// then forgets the bot's push registrations, as a replaced device token
+    /// Closes and signs out the bot's connections that signed in with the
+    /// replaced token, then forgets the bot's push registrations, as a replaced device token
     /// does.
     fn revoke_bot_locked(&mut self, bot_id: &str, old: &SessionKey) {
-        let clients = self
+        let revoked: Vec<ClientId> = self
             .users
             .get(bot_id)
             .map(|u| &u.clients)
             .into_iter()
-            .flatten();
-        for id in clients {
-            let conn = &self.clients[id];
-            if conn.token == *old {
-                conn.client.close_with_error(RpcError::new(
-                    CODE_DENIED,
-                    "Bot token replaced; sign in with the new one",
-                ));
-            }
+            .flatten()
+            .filter(|id| self.clients[*id].token == *old)
+            .copied()
+            .collect();
+        for id in revoked {
+            self.revoke_connection_locked(
+                id,
+                RpcError::new(CODE_DENIED, "Bot token replaced; sign in with the new one"),
+            );
         }
         for key in self.sorted_pushes(bot_id) {
             self.remove_push_locked(&key);

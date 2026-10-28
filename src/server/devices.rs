@@ -12,7 +12,7 @@ use rust_stdlib_crypto::{rand, sha256};
 
 use super::email::web_socket_url;
 use super::protocol::*;
-use super::server::{Client, State};
+use super::server::{Client, ClientId, State};
 use super::webauthn::SessionKey;
 
 /// Device tokens an account may hold at once, each under its own name.
@@ -184,19 +184,25 @@ impl State {
         Ok(Object::new())
     }
 
-    /// Closes the account's connections, other than the asking one, that
-    /// signed in with the replaced token, then forgets the account's push
+    /// Closes and signs out the account's connections, other than the asking
+    /// one, that signed in with the replaced token, then forgets the account's push
     /// registrations, so the replaced device stops getting its messages.
     /// Its other devices register again on their next connection.
     fn revoke_device_locked(&mut self, c: &Client, user_id: &str, old: &SessionKey) {
-        for id in &self.users[user_id].clients {
-            let conn = &self.clients[id];
-            if *id != c.id && conn.token == *old {
-                conn.client.close_with_error(RpcError::new(
+        let revoked: Vec<ClientId> = self.users[user_id]
+            .clients
+            .iter()
+            .filter(|id| **id != c.id && self.clients[*id].token == *old)
+            .copied()
+            .collect();
+        for id in revoked {
+            self.revoke_connection_locked(
+                id,
+                RpcError::new(
                     CODE_DENIED,
                     "Device token replaced; sign in with the new one",
-                ));
-            }
+                ),
+            );
         }
         for key in self.sorted_pushes(user_id) {
             self.remove_push_locked(&key);
