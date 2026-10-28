@@ -35,6 +35,8 @@ pub struct Options {
     pub tls: TlsOptions,
     pub apple: AppleOptions,
     pub unfurl: UnfurlOptions,
+    pub guest: GuestOptions,
+    pub history: HistoryOptions,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -90,6 +92,18 @@ pub struct AppleOptions {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct UnfurlOptions {
     pub enable: bool,
+}
+
+/// An extension Go lacks (docs/DEVIATIONS.md).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct GuestOptions {
+    pub read_only: bool,
+}
+
+/// An extension Go lacks (docs/DEVIATIONS.md).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct HistoryOptions {
+    pub retention: String,
 }
 
 /// A borrowed option field. `Int` is Go's `int` and `Int64` its `int64`;
@@ -231,6 +245,20 @@ pub static GROUPS: &[Group] = &[
         namespace: "unfurl",
         options: &[
             spec!("enable", Bool, unfurl.enable, [], [], "Fetch the pages that messages link to and attach their OpenGraph previews, with images hosted here; the server then requests any public http(s) URL a user posts (off by default; not in the Go aprond)"),
+        ],
+    },
+    Group {
+        name: "Guests",
+        namespace: "guest",
+        options: &[
+            spec!("read-only", Bool, guest.read_only, [], [], "Guests may read but not post, react, join, leave, or make rooms; server.ext.settings says so (off by default; not in the Go aprond)"),
+        ],
+    },
+    Group {
+        name: "History",
+        namespace: "history",
+        options: &[
+            spec!("retention", Str, history.retention, [], [], "Delete messages, reactions, and their uploads older than this, such as 168h, checking hourly; emptied threads go, other rooms stay (default: keep forever; not in the Go aprond)"),
         ],
     },
 ];

@@ -25,7 +25,7 @@ use super::push::{PushDeliverer, PushRegistration};
 use super::rooms::RoomState;
 use super::status::optional_statuses;
 use super::unfurl::{self, Fetcher, Unfurler};
-use super::users::{DedupEntry, UserState};
+use super::users::{guest_write, DedupEntry, UserState, GUEST_READ_ONLY};
 use super::webauthn::{PasskeyCeremony, Sessions, WebAuthn};
 use super::webpush::VapidKey;
 use crate::obj;
@@ -134,6 +134,12 @@ pub struct Config {
     pub unfurl: bool,
     /// Lets unfurls reach internal addresses, for tests.
     pub unfurl_allow_internal: bool,
+    /// An extension Go lacks (docs/DEVIATIONS.md): false keeps guests
+    /// read-only, as apron-server-cloudflare's `GUEST_POSTING` does.
+    pub guest_posting: bool,
+    /// An extension Go lacks (docs/DEVIATIONS.md): how long history is
+    /// kept; `None` keeps it forever.
+    pub retention: Option<Duration>,
 }
 
 impl Default for Config {
@@ -186,6 +192,8 @@ pub fn default_config() -> Config {
         apple_app_ids: Vec::new(),
         unfurl: false,
         unfurl_allow_internal: false,
+        guest_posting: true,
+        retention: None,
     }
 }
 
@@ -1297,6 +1305,11 @@ impl Server {
                 }
                 return;
             };
+            if guest_write(&req.method) && st.read_only_guest(&user_id) {
+                drop(st);
+                c.send_error(&req, RpcError::new(CODE_DENIED, GUEST_READ_ONLY));
+                return;
+            }
             // Requests deduplicate per user (§1.2): a duplicate waits for the
             // original, even one running on another connection, and replies
             // with its outcome, brought up to date with the current state.
@@ -1502,15 +1515,19 @@ impl State {
         if !self.config.welcome.is_empty() {
             params.insert("welcome".into(), self.config.welcome.as_str().into());
         }
+        // ext:settings, the extension apron-web defines (its EXT.md §3):
+        // private_rooms is a number, where its other keys are booleans that
+        // an absent key makes true, so only false ones are sent.
+        let mut settings = Object::new();
+        if !self.config.guest_posting {
+            settings.insert("guest_posting".into(), false.into());
+        }
         if self.config.max_private_rooms > 0 {
-            // ext:settings, the extension apron-web defines (its EXT.md §3):
-            // private_rooms is a number, where its other keys are booleans
-            // that an absent key makes true, as they are here.
+            settings.insert("private_rooms".into(), self.config.max_private_rooms.into());
+        }
+        if !settings.is_empty() {
             capabilities.push("ext:settings".into());
-            params.insert(
-                "ext".into(),
-                obj! {"settings" => obj! {"private_rooms" => self.config.max_private_rooms}}.into(),
-            );
+            params.insert("ext".into(), obj! {"settings" => settings}.into());
         }
         params.insert("capabilities".into(), capabilities.into());
         if signup != auth_schemes {

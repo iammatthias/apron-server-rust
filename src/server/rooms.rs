@@ -1125,6 +1125,11 @@ impl State {
         let read_id = parse_string(&req.params, "read_message_id", false)?;
         let has_read = req.params.contains_key("read_message_id");
         let user_id = self.user_of(c)?;
+        let result = Object::new();
+        // A read-only guest's typing and read cursors would reach others.
+        if self.read_only_guest(&user_id) {
+            return Ok((result.into(), false));
+        }
         let in_room = typing.is_some() || has_read;
         let visible = self.visible_room_locked(&user_id, &room_id).is_some();
         if in_room && !visible {
@@ -1138,7 +1143,6 @@ impl State {
         }
         // The relays this request causes are queued before process_frame
         // sends its result (§1).
-        let result = Object::new();
         if !in_room {
             return Ok((result.into(), false));
         }
