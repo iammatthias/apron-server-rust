@@ -148,6 +148,10 @@ pub struct PushRegistration {
     /// A relay's bearer token.
     pub token: String,
     pub push_id: String,
+    /// The SHA-256 of the /invite-device token the registering connection
+    /// signed in with, zero for none, so replacing that token removes only
+    /// the registrations it made.
+    pub device: [u8; 32],
     /// For webpush and optionally relay, encrypt the payload.
     pub keys: Option<PushKeys>,
     pub wake: WakeScope,
@@ -179,6 +183,7 @@ impl Default for PushRegistration {
             url: String::new(),
             token: String::new(),
             push_id: String::new(),
+            device: [0; 32],
             keys: None,
             wake: WakeScope::NONE,
             renewed: time::now(),
@@ -1127,6 +1132,7 @@ impl Server {
         let Some(user_id) = st.client_user(c) else {
             return Err(RpcError::new(CODE_DENIED, "Not authenticated"));
         };
+        let device = st.clients[&c.id].device;
         let now = time::now();
         st.expire_pushes_locked(&user_id, &now);
         let keys_held = st.sorted_pushes(&user_id);
@@ -1147,6 +1153,7 @@ impl Server {
             url: endpoint,
             token,
             push_id,
+            device,
             keys,
             wake,
             renewed: now,

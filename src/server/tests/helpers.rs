@@ -850,9 +850,9 @@ pub fn post_embeds(c: &mut TestClient, id: &str, params: Object) -> Object {
     result
 }
 
-/// The connection signed in as user_id whose bearer token's SHA-256 is or,
-/// with `is` false, is not that of token, from the server's state, for
-/// checks on a connection the test client cannot reach.
+/// The connection signed in as user_id that holds or, with `is` false, does
+/// not hold token as its session, bot or device token, from the server's
+/// state, for checks on a connection the test client cannot reach.
 pub fn token_connection(
     server: &TestServer,
     user_id: &str,
@@ -863,7 +863,9 @@ pub fn token_connection(
     let st = server.app.lock();
     st.clients
         .values()
-        .find(|conn| conn.user.as_deref() == Some(user_id) && (conn.token == key) == is)
+        .find(|conn| {
+            conn.user.as_deref() == Some(user_id) && (conn.token == key || conn.device == key) == is
+        })
         .map(|conn| conn.client.clone())
         .unwrap_or_else(|| panic!("no such connection of {user_id}"))
 }

@@ -95,9 +95,11 @@ impl State {
     }
 
     /// Mints a device token for the sender's account under the one name in
-    /// args, replacing that name's last token: the account's other
-    /// connections that signed in with it close. The token goes to this
-    /// connection only, in a ~private notice before the result (§1).
+    /// args. The same name again replaces its token: the old one no longer
+    /// signs in, and the account's other connections that signed in with it
+    /// close and its push registrations go. A passkey or session token
+    /// someone got while signed in with the old token stays. The token goes
+    /// to this connection only, in a ~private notice before the result (§1).
     pub(super) fn invite_device_command(
         &mut self,
         c: &Arc<Client>,
@@ -158,7 +160,7 @@ impl State {
         );
         self.touch_device(key);
         if let Some(old) = previous {
-            self.revoke_device_locked(c, &user_id, &old);
+            self.revoke_device_locked(c, &user_id, &old, &key);
         }
         let replaced = if previous.is_some() {
             ", and replaces its earlier token"
@@ -185,14 +187,28 @@ impl State {
     }
 
     /// Closes and signs out the account's connections, other than the asking
-    /// one, that signed in with the replaced token, then forgets the account's push
-    /// registrations, so the replaced device stops getting its messages.
-    /// Its other devices register again on their next connection.
-    fn revoke_device_locked(&mut self, c: &Client, user_id: &str, old: &SessionKey) {
+    /// one, that signed in with the replaced token; the asking connection
+    /// now counts as signed in with the replacement, so a later replacement
+    /// closes it. The push registrations made by connections signed in with
+    /// the old token go too, the asking connection's among them.
+    fn revoke_device_locked(
+        &mut self,
+        c: &Client,
+        user_id: &str,
+        old: &SessionKey,
+        replacement: &SessionKey,
+    ) {
+        if let Some(conn) = self
+            .clients
+            .get_mut(&c.id)
+            .filter(|conn| conn.device == *old)
+        {
+            conn.device = *replacement;
+        }
         let revoked: Vec<ClientId> = self.users[user_id]
             .clients
             .iter()
-            .filter(|id| **id != c.id && self.clients[*id].token == *old)
+            .filter(|id| **id != c.id && self.clients[*id].device == *old)
             .copied()
             .collect();
         for id in revoked {
@@ -205,7 +221,9 @@ impl State {
             );
         }
         for key in self.sorted_pushes(user_id) {
-            self.remove_push_locked(&key);
+            if self.pushes[&key].device == *old {
+                self.remove_push_locked(&key);
+            }
         }
     }
 
@@ -224,7 +242,9 @@ impl State {
                 "This device token is not valid; get a new one with /invite-device on a signed-in device",
             ));
         };
-        self.set_conn_token(c, key);
+        if let Some(conn) = self.clients.get_mut(&c.id) {
+            conn.device = key;
+        }
         let sign_in = self.client_user(c).as_deref() != Some(&user_id);
         Ok(self
             .switch_user_locked(c, req, &user_id, Object::new(), sign_in, false)

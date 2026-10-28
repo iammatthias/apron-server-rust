@@ -191,8 +191,7 @@ impl State {
     }
 
     /// Closes and signs out the bot's connections that signed in with the
-    /// replaced token, then forgets the bot's push registrations, as a replaced device token
-    /// does.
+    /// replaced token, then forgets the bot's push registrations.
     fn revoke_bot_locked(&mut self, bot_id: &str, old: &SessionKey) {
         let revoked: Vec<ClientId> = self
             .users

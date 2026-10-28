@@ -397,9 +397,13 @@ pub struct Conn {
     pub idle: bool,
     /// The pending passkey ceremony, if any (§4.10).
     pub ceremony: Option<PasskeyCeremony>,
-    /// The SHA-256 of the bearer token the connection signed in with, zero
-    /// without one.
+    /// The SHA-256 of the session or bot token the connection last signed
+    /// in or resumed with, which a later sign-in forgets; zero without one.
     pub token: [u8; 32],
+    /// The SHA-256 of the /invite-device token the connection signed in
+    /// with, zero for none. A later session token leaves it, so replacing
+    /// the device token still closes the connection.
+    pub device: [u8; 32],
     /// Limits the email proposals made on the connection (email.rs).
     pub email_sends: Option<Limiter>,
     /// The connection's latest proposal, which may have been dropped since.
@@ -1051,6 +1055,7 @@ impl Server {
                     idle: false,
                     ceremony: None,
                     token: [0; 32],
+                    device: [0; 32],
                     email_sends: None,
                     proposal: None,
                 },

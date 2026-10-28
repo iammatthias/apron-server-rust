@@ -11,6 +11,7 @@ use super::persist_test::start_with_store;
 use super::webauthn_test::*;
 use crate::obj;
 use crate::server::protocol::*;
+use crate::server::push::PushRegistration;
 use crate::server::{default_config, Config};
 use crate::store::{self, Store};
 
@@ -267,50 +268,115 @@ fn test_invite_device_holds_three_names() {
     invite_device(&mut ada, &ada_id, "tablet", true);
 }
 
-#[test]
-fn test_invite_device_same_name_revokes_old_token() {
-    let server = passkey_test_server();
-    let (mut ada, ada_id) = account(&server);
-    ada.result(
-        "push_register",
-        "push",
-        obj! {"kind" => "relay", "url" => "https://relay.example/ada"},
-    );
-    let old = invite_device(&mut ada, &ada_id, "phone", false);
-    let tablet = invite_device(&mut ada, &ada_id, "tablet", false);
-    let (phone, _) = device(&server, OTHER_ORIGIN, &old);
-    let (mut asker, _) = device(&server, "", &old);
-    let (mut other, _) = device(&server, "", &tablet);
-    ada.drain();
-    assert_eq!(server.app.lock().pushes.len(), 1, "ada's registration");
+/// The urls of a user's push registrations, sorted.
+fn push_urls(server: &TestServer, user_id: &str) -> Vec<String> {
+    let mut urls: Vec<String> = server
+        .app
+        .lock()
+        .pushes
+        .values()
+        .filter(|p| p.user_id == user_id)
+        .map(|p| p.url.clone())
+        .collect();
+    urls.sort();
+    urls
+}
 
-    let new = invite_device(&mut asker, &ada_id, "phone", true);
-    let failure = phone.read();
+/// Registers https://push.example/<name>, with name as the request id,
+/// which a user may use once.
+fn register_push(c: &mut TestClient, name: &str) {
+    c.result(
+        "push_register",
+        name,
+        obj! {"kind" => "relay", "url" => format!("https://push.example/{name}")},
+    );
+}
+
+/// Checks that c got the replacement's close error, and closed.
+fn expect_replaced(c: &TestClient, what: &str) {
     assert_eq!(
-        failure,
+        c.read(),
         obj! {"error" => obj! {
             "code" => CODE_DENIED,
             "message" => "Device token replaced; sign in with the new one",
         }},
-        "connection that signed in with the old token"
+        "{what}"
     );
-    assert!(
-        phone.read_raw(time::SECOND).is_err(),
-        "the old token's connection stayed open"
-    );
-    // The asking connection, though it signed in with the old token, the
-    // tablet's, and the passkey's stay open.
-    for c in [&mut asker, &mut other, &mut ada] {
-        c.drain();
-    }
-    assert!(
-        server.app.lock().pushes.is_empty(),
-        "the replaced device keeps getting pushes"
+    assert!(c.read_raw(time::SECOND).is_err(), "{what} stayed open");
+}
+
+#[test]
+fn test_invite_device_same_name_revokes_old_token() {
+    let server = passkey_test_server();
+    let (mut ada, ada_id) = account(&server);
+    let old = invite_device(&mut ada, &ada_id, "phone", false);
+    let tablet = invite_device(&mut ada, &ada_id, "tablet", false);
+    let (mut phone, _) = device(&server, OTHER_ORIGIN, &old);
+    let (mut other, _) = device(&server, "", &tablet);
+    ada.drain();
+    register_push(&mut ada, "ada");
+    register_push(&mut phone, "phone");
+    register_push(&mut other, "tablet");
+
+    let current = invite_device(&mut ada, &ada_id, "phone", true);
+    expect_replaced(&phone, "connection that signed in with the old token");
+    ada.expect_quiet();
+    other.expect_quiet();
+    assert_eq!(
+        push_urls(&server, &ada_id),
+        ["https://push.example/ada", "https://push.example/tablet"],
+        "push registrations after a replacement"
     );
     let (_, frame) = device(&server, OTHER_ORIGIN, &old);
     assert_eq!(frame.get("error"), Some(&invalid_token()), "old token");
-    let (_, frame) = device(&server, OTHER_ORIGIN, &new);
-    assert!(frame.contains_key("result"), "new token: {frame:?}");
+
+    // The asking connection stays open when it signed in with the token it
+    // replaces, and counts as signed in with the new one, so the next
+    // replacement closes it.
+    let (mut phone, _) = device(&server, "", &current);
+    invite_device(&mut phone, &ada_id, "phone", true);
+    phone.expect_quiet();
+    invite_device(&mut ada, &ada_id, "phone", true);
+    expect_replaced(&phone, "the asking connection, at the next replacement");
+    other.expect_quiet();
+}
+
+#[test]
+fn test_invite_device_closes_a_device_that_got_a_session_token() {
+    let server = passkey_test_server();
+    let (mut ada, ada_id) = account(&server);
+    let token = invite_device(&mut ada, &ada_id, "phone", false);
+    let (mut phone, _) = device(&server, TEST_PASSKEY_ORIGIN, &token);
+    ada.drain();
+
+    // Whoever holds a device token can add a passkey, which gives the
+    // connection a session token.
+    let options = passkey_result(&passkey_call(
+        &mut phone,
+        "register-start",
+        "register",
+        "begin",
+        Object::new(),
+    ));
+    let credential = new_test_authenticator().registration(&options, TEST_PASSKEY_ORIGIN);
+    let registered = passkey_result(&passkey_call(
+        &mut phone,
+        "register-end",
+        "register",
+        "finish",
+        obj! {"credential" => credential},
+    ));
+    assert!(
+        registered
+            .get("token")
+            .is_some_and(|t| t.as_str().is_some())
+            && you_of(&registered)["user_id"] == Json::from(ada_id.as_str()),
+        "register on a device connection: {registered:?}"
+    );
+    phone.drain();
+
+    invite_device(&mut ada, &ada_id, "phone", true);
+    expect_replaced(&phone, "the device connection with a session token");
 }
 
 /// The old token's connection, signed out at the replacement, runs nothing
@@ -393,8 +459,19 @@ fn test_invite_device_tokens_survive_restart() {
     let mut server = start_with_store(open(), &upload_dir);
     let (mut ada, ada_id) = account(&server);
     let phone = invite_device(&mut ada, &ada_id, "phone", false);
-    invite_device(&mut ada, &ada_id, "tablet", false);
+    let tablet = invite_device(&mut ada, &ada_id, "tablet", false);
     invite_device(&mut ada, &ada_id, "laptop", false);
+    for (name, token) in [("phone", &phone), ("tablet", &tablet)] {
+        let (mut c, _) = device(&server, "", token);
+        register_push(&mut c, name);
+    }
+    // A registration stored before registrations recorded their device
+    // token has none.
+    server.app.lock().add_push_locked(PushRegistration {
+        user_id: ada_id.clone(),
+        url: "https://push.example/untagged".into(),
+        ..PushRegistration::default()
+    });
     drop(ada);
     server.stop();
 
@@ -412,5 +489,15 @@ fn test_invite_device_tokens_survive_restart() {
             "message" => "You have 3 device tokens (`phone`, `tablet`, `laptop`); run /invite-device with one of those names to replace its token",
         }),
         "names restored oldest first"
+    );
+    let (mut c, _) = device(&server, OTHER_ORIGIN, &tablet);
+    invite_device(&mut c, &ada_id, "phone", true);
+    assert_eq!(
+        push_urls(&server, &ada_id),
+        [
+            "https://push.example/tablet",
+            "https://push.example/untagged"
+        ],
+        "push registrations after a restart and a replacement"
     );
 }
