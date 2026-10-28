@@ -11,6 +11,7 @@ use rust_stdlib::time::{self, Duration};
 
 use super::helpers::*;
 use crate::obj;
+use crate::server::embeds::MAX_EMBEDS_PER_MESSAGE;
 use crate::server::outbound::{public_only, DialCheck};
 use crate::server::protocol::*;
 use crate::server::unfurl::*;
@@ -140,6 +141,42 @@ fn test_message_urls() {
             *want,
             "{text:?} {format:?}"
         );
+    }
+}
+
+#[test]
+fn test_message_urls_bounds_its_work() {
+    let many: String = (0..25_000).map(|i| format!("http://a{i} ")).collect();
+    assert!(many.len() > 200_000);
+    let started = time::now();
+    let urls = message_urls(Some(&body(&many, "")));
+    let took = time::since(&started);
+    let want: Vec<String> = (0..MAX_EMBEDS_PER_MESSAGE)
+        .map(|i| format!("http://a{i}"))
+        .collect();
+    assert_eq!(urls, want);
+    assert!(took < Duration::from_millis(500), "took {took:?}");
+
+    let late = format!("{} https://late.example/", "x".repeat(MAX_SCANNED_BYTES));
+    assert_eq!(message_urls(Some(&body(&late, ""))), Vec::<String>::new());
+    let straddling = format!(
+        "{}é https://late.example/",
+        "x".repeat(MAX_SCANNED_BYTES - 1)
+    );
+    assert_eq!(
+        message_urls(Some(&body(&straddling, ""))),
+        Vec::<String>::new()
+    );
+
+    for adversarial in [
+        "http".repeat(60_000),
+        format!("http://a{}", ")".repeat(250_000)),
+        "`` ` ".repeat(50_000),
+    ] {
+        let started = time::now();
+        message_urls(Some(&body(&adversarial, "markdown")));
+        let took = time::since(&started);
+        assert!(took < Duration::from_millis(500), "took {took:?}");
     }
 }
 
@@ -543,6 +580,56 @@ fn test_unfurl_limits() {
     c.expect_quiet();
     assert_eq!(fetched, UNFURLS_PER_MINUTE - 3);
     assert_eq!(page.hits("/text-only") as i64, UNFURLS_PER_MINUTE - 3);
+    server.stop();
+}
+
+#[test]
+fn test_unfurl_edit_adds_one_url() {
+    let pages: Vec<(&'static str, Route)> = ["/1", "/2", "/3", "/4"]
+        .into_iter()
+        .map(|p| (p, html(r#"<title>Page</title>"#)))
+        .collect();
+    let page = fixture(pages);
+    let (mut server, _dir) = unfurl_server();
+    let mut c = dial_test_client(&server);
+    let first = [page.url("/1"), page.url("/2"), page.url("/3")].join(" ");
+    let message_id = post(&mut c, &first, "");
+    settle(&server);
+    let embeds: Vec<Json> = embeds_of(&c.notification("message"))
+        .into_iter()
+        .map(|e| obj! {"embed_id" => e["embed_id"].clone(), "kind" => "link"}.into())
+        .collect();
+    assert_eq!(embeds.len(), 3);
+
+    let id = c.next_id("edit");
+    let (before, _) = c.request(
+        "message",
+        &id,
+        obj! {
+            "message_id" => message_id.as_str(),
+            "body" => obj! {"text" => format!("{first} {}", page.url("/4")), "embeds" => embeds},
+        },
+    );
+    assert_eq!(
+        embeds_of(&notification_params(&before[0], "message")).len(),
+        3
+    );
+    settle(&server);
+    let linked: Vec<String> = embeds_of(&c.notification("message"))
+        .iter()
+        .map(|e| e["url"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(
+        linked,
+        vec![
+            page.url("/1"),
+            page.url("/2"),
+            page.url("/3"),
+            page.url("/4")
+        ]
+    );
+    let hits: Vec<usize> = ["/1", "/2", "/3", "/4"].map(|p| page.hits(p)).to_vec();
+    assert_eq!(hits, vec![1, 1, 1, 1]);
     server.stop();
 }
 

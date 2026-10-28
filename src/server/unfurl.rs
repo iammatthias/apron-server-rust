@@ -5,7 +5,7 @@
 //! og:image is downloaded and hosted as an upload, so clients load it from
 //! the server's own origin.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::io::Read;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Weak};
@@ -29,6 +29,8 @@ use crate::obj;
 use crate::rate::{every, Limiter};
 
 pub const MAX_URLS_PER_MESSAGE: usize = 3;
+/// The part of a message's text searched for URLs.
+pub const MAX_SCANNED_BYTES: usize = 8 << 10;
 /// Bounds each user's unfurled URLs: a burst of this many, refilled evenly
 /// over a minute.
 pub const UNFURLS_PER_MINUTE: i64 = 10;
@@ -114,26 +116,30 @@ impl Preview {
     }
 }
 
-/// The http(s) URLs in a message body's text, in order, without repeats.
-/// In markdown, URLs in code spans and fenced code blocks are skipped.
+/// The http(s) URLs in the first MAX_SCANNED_BYTES of a message body's
+/// text, in order, without repeats, and at most MAX_EMBEDS_PER_MESSAGE of
+/// them. In markdown, URLs in code spans and fenced code blocks are skipped.
 pub fn message_urls(body: Option<&Object>) -> Vec<String> {
-    let Some(body) = body else {
-        return Vec::new();
-    };
-    let text = body.get("text").and_then(Json::as_str).unwrap_or("");
-    let markdown = body.get("format").and_then(Json::as_str) == Some("markdown");
-    let text = if markdown {
-        without_code(text)
-    } else {
-        text.to_owned()
-    };
-    let mut urls: Vec<String> = Vec::new();
-    for url in scan_urls(&text) {
-        if !urls.contains(&url) {
-            urls.push(url);
-        }
+    let (text, markdown) = text_of(body);
+    let mut end = text.len().min(MAX_SCANNED_BYTES);
+    while !text.is_char_boundary(end) {
+        end -= 1;
     }
-    urls
+    let text = &text[..end];
+    if markdown {
+        scan_urls(&without_code(text), MAX_EMBEDS_PER_MESSAGE)
+    } else {
+        scan_urls(text, MAX_EMBEDS_PER_MESSAGE)
+    }
+}
+
+/// A body's text, and whether it is markdown.
+fn text_of(body: Option<&Object>) -> (&str, bool) {
+    let field = |name: &str| body.and_then(|b| b.get(name)).and_then(Json::as_str);
+    (
+        field("text").unwrap_or(""),
+        field("format") == Some("markdown"),
+    )
 }
 
 /// Replaces markdown code (fenced blocks and code spans) with spaces.
@@ -203,23 +209,28 @@ fn without_code_spans(text: &str) -> String {
     out
 }
 
-/// Finds the http(s) URLs in text. A URL starts at a word boundary and ends
-/// at whitespace or a delimiter; trailing punctuation, and a closing bracket
-/// it did not open, are left out.
-fn scan_urls(text: &str) -> Vec<String> {
+/// Finds the first `limit` distinct http(s) URLs in text. A URL starts at
+/// a word boundary and ends at whitespace or a delimiter; trailing
+/// punctuation, and a closing bracket it did not open, are left out.
+fn scan_urls(text: &str, limit: usize) -> Vec<String> {
     let lower = text.to_ascii_lowercase();
     let mut urls = Vec::new();
+    let mut seen = HashSet::new();
     let mut from = 0;
-    while let Some(found) = ["http://", "https://"]
-        .iter()
-        .filter_map(|scheme| lower[from..].find(scheme))
-        .min()
-    {
+    while urls.len() < limit {
+        let Some(found) = lower[from..].find("http") else {
+            break;
+        };
         let start = from + found;
+        let scheme = &lower[start + "http".len()..];
+        if !scheme.starts_with("://") && !scheme.starts_with("s://") {
+            from = start + "http".len();
+            continue;
+        }
         let end = text[start..]
             .find(|c: char| c.is_whitespace() || matches!(c, '<' | '>' | '"' | '`'))
             .map_or(text.len(), |n| start + n);
-        from = end.max(start + 1);
+        from = end;
         let boundary = text[..start]
             .chars()
             .next_back()
@@ -227,34 +238,48 @@ fn scan_urls(text: &str) -> Vec<String> {
         if !boundary {
             continue;
         }
-        let mut candidate = &text[start..end];
-        loop {
-            let trimmed =
-                candidate.trim_end_matches(['.', ',', ';', ':', '!', '?', '\'', '*', '_', '~']);
-            let trimmed = match trimmed.chars().last() {
-                Some(close @ (')' | ']')) => {
-                    let open = if close == ')' { '(' } else { '[' };
-                    if trimmed.matches(close).count() > trimmed.matches(open).count() {
-                        &trimmed[..trimmed.len() - 1]
-                    } else {
-                        trimmed
-                    }
-                }
-                _ => trimmed,
-            };
-            if trimmed.len() == candidate.len() {
-                break;
-            }
-            candidate = trimmed;
-        }
+        let candidate = trim_url(&text[start..end]);
         let Ok(parsed) = url::parse(candidate) else {
             continue;
         };
-        if matches!(parsed.scheme.as_str(), "http" | "https") && !parsed.hostname().is_empty() {
+        if matches!(parsed.scheme.as_str(), "http" | "https")
+            && !parsed.hostname().is_empty()
+            && seen.insert(candidate)
+        {
             urls.push(candidate.to_owned());
         }
     }
     urls
+}
+
+/// Drops trailing punctuation, and closing brackets beyond those opened.
+fn trim_url(candidate: &str) -> &str {
+    let count = |c: char| candidate.matches(c).count();
+    let mut unopened = [
+        count(')').saturating_sub(count('(')),
+        count(']').saturating_sub(count('[')),
+    ];
+    let mut candidate = candidate;
+    loop {
+        let trimmed =
+            candidate.trim_end_matches(['.', ',', ';', ':', '!', '?', '\'', '*', '_', '~']);
+        let bracket = match trimmed.chars().last() {
+            Some(')') => Some(0),
+            Some(']') => Some(1),
+            _ => None,
+        };
+        let trimmed = match bracket {
+            Some(b) if unopened[b] > 0 => {
+                unopened[b] -= 1;
+                &trimmed[..trimmed.len() - 1]
+            }
+            _ => trimmed,
+        };
+        if trimmed.len() == candidate.len() {
+            return candidate;
+        }
+        candidate = trimmed;
+    }
 }
 
 /// Reads a page's OpenGraph metadata from its `<meta>` tags, with the
@@ -712,6 +737,10 @@ fn remove_files(hosted: Vec<Hosted>) {
     }
 }
 
+fn body_of(snapshot: &Object) -> Option<&Object> {
+    snapshot.get("body").and_then(Json::as_object)
+}
+
 /// The URLs of the link embeds in a body.
 fn linked_urls(body: Option<&Object>) -> Vec<String> {
     body.and_then(|b| b.get("embeds"))
@@ -740,15 +769,20 @@ impl State {
         let Some(unfurler) = self.unfurler.clone() else {
             return;
         };
-        let body = |s: &Object| s.get("body").and_then(Json::as_object).cloned();
-        let before = message_urls(previous.and_then(body).as_ref());
-        let body = body(snapshot);
-        let linked = linked_urls(body.as_ref());
-        let mut urls: Vec<String> = message_urls(body.as_ref())
+        let (before, after) = (previous.and_then(body_of), body_of(snapshot));
+        if text_of(before) == text_of(after) {
+            return;
+        }
+        let old = message_urls(before);
+        let linked = linked_urls(after);
+        let mut urls: Vec<String> = message_urls(after)
             .into_iter()
+            .filter(|u| !old.contains(u) && !linked.contains(u))
             .take(MAX_URLS_PER_MESSAGE)
-            .filter(|u| !before.contains(u) && !linked.contains(u))
             .collect();
+        if urls.is_empty() {
+            return;
+        }
         let Some(u) = self.users.get_mut(user_id) else {
             return;
         };
@@ -781,7 +815,7 @@ impl State {
     /// hosted uploads of the message.
     pub fn attach_previews_locked(&mut self, job: &Job, hosted: Vec<Hosted>) {
         let snapshot = self.snapshot(&job.message_id);
-        let body = snapshot.get("body").and_then(Json::as_object);
+        let body = body_of(&snapshot);
         if self.closed || !self.messages.contains_key(&job.message_id) || body.is_none() {
             remove_files(hosted);
             return;
