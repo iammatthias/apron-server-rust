@@ -121,6 +121,35 @@ fn joined_general(frame: &Object) -> Json {
     member["user"].clone()
 }
 
+/// A passkey account's user_id is `<slug>_<4 digits>` from its name, so
+/// its bot is `bot_<slug>_<4 digits>`.
+#[test]
+fn test_bot_of_a_named_registration() {
+    let server = passkey_test_server();
+    let (mut ada, _) = dial_origin(&server, TEST_PASSKEY_ORIGIN);
+    register_passkey_named(
+        &mut ada,
+        &mut new_test_authenticator(),
+        Some("Ada Lovelace"),
+    );
+    let ada_id = ada.user_id.clone();
+    assert!(
+        rust_stdlib::regexp::Regexp::new(r"^ada_lovelace_[0-9]{4}$")
+            .unwrap()
+            .match_string(&ada_id),
+        "registered as {ada_id}"
+    );
+    ada.drain();
+    let bot_id = format!("bot_{ada_id}");
+    let (token, _) = invite_bot(&mut ada, &bot_id, "Bot of Ada Lovelace", NO_URL);
+    let (_, frame) = bot(&server, TEST_PASSKEY_ORIGIN, &token);
+    assert_eq!(
+        you_of(&passkey_result(&frame))["user_id"],
+        Json::from(bot_id.as_str()),
+        "bot signs in as"
+    );
+}
+
 #[test]
 fn test_invite_bot_creates_a_bot_in_general() {
     let server = passkey_test_server();
