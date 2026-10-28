@@ -58,6 +58,8 @@ pub struct UserState {
     /// Limits the user's new messages, room_set requests, and /avatar
     /// commands to messages_per_minute; `None` when unlimited.
     pub posts: Option<Limiter>,
+    /// Bounds the URLs of the user's messages that are unfurled.
+    pub unfurls: Option<Limiter>,
 
     /// The chosen status, set with `me` (§4.5.1); `mute` and `room_mutes`
     /// their mutes; `shown` the shown status as last noted, and `offline_at`
@@ -106,6 +108,7 @@ impl UserState {
             passkey: None,
             owner: None,
             posts: None,
+            unfurls: None,
             chosen: STATUS_ONLINE.into(),
             mute: MuteState::default(),
             room_mutes: BTreeMap::new(),
