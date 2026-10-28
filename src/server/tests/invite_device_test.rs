@@ -11,6 +11,7 @@ use super::persist_test::start_with_store;
 use super::webauthn_test::*;
 use crate::obj;
 use crate::server::protocol::*;
+use crate::server::{default_config, Config};
 use crate::store::{self, Store};
 
 const OTHER_ORIGIN: &str = "http://127.0.0.1:5173";
@@ -53,6 +54,18 @@ fn private_reply(c: &mut TestClient, text: &str) -> String {
 /// Runs /invite-device name and returns the token its notice carries, after
 /// checking the whole notice text.
 fn invite_device(c: &mut TestClient, user_id: &str, name: &str, replaces: bool) -> String {
+    invite_device_linked(c, user_id, name, replaces, "")
+}
+
+/// invite_device on a server that writes link_server, already escaped, in
+/// the notice's sign-in link; "" for none.
+fn invite_device_linked(
+    c: &mut TestClient,
+    user_id: &str,
+    name: &str,
+    replaces: bool,
+    link_server: &str,
+) -> String {
     let text = private_reply(c, &format!("/invite-device {name}"));
     let token = text
         .split("```\n")
@@ -65,10 +78,15 @@ fn invite_device(c: &mut TestClient, user_id: &str, name: &str, replaces: bool) 
     } else {
         ""
     };
+    let link = if link_server.is_empty() {
+        String::new()
+    } else {
+        format!("Or open this link on **{name}**, which signs you in there with any Apron app: <https://link.apron.chat/#server={link_server}&token={token}>\n\n")
+    };
     assert_eq!(
         text,
         format!(
-            "This token signs in as you (`{user_id}`) on your device **{name}**{replaced}. It does not expire, and anyone who has it can sign in as you, so keep it secret. `/invite-device {name}` again replaces it.\n\n```\n{token}\n```\n\nTo sign in, authenticate with the token scheme: `{{\"method\": \"auth\", \"params\": {{\"scheme\": \"token\", \"token\": \"{token}\"}}}}`"
+            "This token signs in as you (`{user_id}`) on your device **{name}**{replaced}. It does not expire, and anyone who has it can sign in as you, so keep it secret. `/invite-device {name}` again replaces it.\n\n```\n{token}\n```\n\n{link}To sign in, authenticate with the token scheme: `{{\"method\": \"auth\", \"params\": {{\"scheme\": \"token\", \"token\": \"{token}\"}}}}`"
         ),
         "invite-device notice"
     );
@@ -131,6 +149,51 @@ fn test_invite_device_signs_in_from_any_origin() {
     }
     let (_, frame) = device(&server, OTHER_ORIGIN, "apron_device_not-a-token");
     assert_eq!(frame.get("error"), Some(&invalid_token()), "unknown token");
+}
+
+#[test]
+fn test_invite_device_links_the_public_url() {
+    let server = new_test_server(Config {
+        web_authn: Some(test_web_authn()),
+        public_url: "https://chat.example:8443/apron+chat/".into(),
+        ..default_config()
+    });
+    let (mut ada, ada_id) = account(&server);
+    let token = invite_device_linked(
+        &mut ada,
+        &ada_id,
+        "phone",
+        false,
+        "wss://chat.example:8443/apron%2Bchat/ws",
+    );
+    let (_, frame) = device(&server, OTHER_ORIGIN, &token);
+    assert_eq!(
+        you_of(&passkey_result(&frame))["user_id"],
+        Json::from(ada_id.as_str()),
+        "the linked token signs in"
+    );
+}
+
+#[test]
+fn test_invite_device_has_no_link_without_a_public_url() {
+    let server = passkey_test_server();
+    let (mut ada, _) = account(&server);
+    let text = private_reply(&mut ada, "/invite-device phone");
+    assert!(!text.contains("link.apron.chat"), "notice: {text:?}");
+}
+
+/// Expected values are apron-server-cloudflare's `apronLink(server, {token})`
+/// run under Node.
+#[test]
+fn test_apron_link_escapes_as_cloudflare_does() {
+    use crate::server::devices::apron_link;
+    assert_eq!(
+        apron_link(
+            "wss://chat.example:8443/a b+!'()*&=#%é~._-/ws",
+            "apron_device_Az09-_~.:/ ?"
+        ),
+        "https://link.apron.chat/#server=wss://chat.example:8443/a%20b%2B%21%27%28%29%2A%26%3D%23%25%C3%A9~._-/ws&token=apron_device_Az09-_~.:/%20%3F"
+    );
 }
 
 #[test]

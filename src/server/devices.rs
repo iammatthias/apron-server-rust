@@ -10,6 +10,7 @@ use rust_stdlib::encoding::base64::URL_SAFE_NO_PAD;
 use rust_stdlib::time::{self, Time};
 use rust_stdlib_crypto::{rand, sha256};
 
+use super::email::web_socket_url;
 use super::protocol::*;
 use super::server::{Client, State};
 use super::webauthn::SessionKey;
@@ -164,8 +165,17 @@ impl State {
         } else {
             ""
         };
+        let server = web_socket_url(&self.config.public_url);
+        let link = if server.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "Or open this link on **{name}**, which signs you in there with any Apron app: <{}>\n\n",
+                apron_link(&server, &token)
+            )
+        };
         let text = format!(
-            "This token signs in as you (`{user_id}`) on your device **{name}**{replaced}. It does not expire, and anyone who has it can sign in as you, so keep it secret. `/invite-device {name}` again replaces it.\n\n```\n{token}\n```\n\nTo sign in, authenticate with the token scheme: `{{\"method\": \"auth\", \"params\": {{\"scheme\": \"token\", \"token\": \"{token}\"}}}}`"
+            "This token signs in as you (`{user_id}`) on your device **{name}**{replaced}. It does not expire, and anyone who has it can sign in as you, so keep it secret. `/invite-device {name}` again replaces it.\n\n```\n{token}\n```\n\n{link}To sign in, authenticate with the token scheme: `{{\"method\": \"auth\", \"params\": {{\"scheme\": \"token\", \"token\": \"{token}\"}}}}`"
         );
         c.enqueue(&super::commands::private_notice(
             &self.rooms[room_id],
@@ -214,4 +224,28 @@ impl State {
             .switch_user_locked(c, req, &user_id, Object::new(), sign_in, false)
             .into())
     }
+}
+
+/// A link that any Apron app opens to sign in to `server` with `token`
+/// (link.apron.chat SPEC.md section 2.1), spelled as apron-server-cloudflare's
+/// `apronLink` spells it: the keys go in the fragment, and every byte other
+/// than a letter, a digit or one of `-._~:/` is percent-encoded.
+pub fn apron_link(server: &str, token: &str) -> String {
+    format!(
+        "https://link.apron.chat/#server={}&token={}",
+        link_escape(server),
+        link_escape(token)
+    )
+}
+
+fn link_escape(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || b"-._~:/".contains(&byte) {
+            escaped.push(byte as char);
+        } else {
+            escaped.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    escaped
 }
