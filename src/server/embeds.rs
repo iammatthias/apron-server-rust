@@ -18,6 +18,7 @@ use rust_stdlib_crypto::{rand, subtle};
 
 use super::protocol::*;
 use super::server::{Client, Server, State};
+use super::unfurl::Preview;
 use crate::obj;
 
 /// HTTP paths for embed content (§4.8.3, §4.8.5). Write URLs carry a
@@ -33,13 +34,16 @@ pub const MAX_EMBEDS_PER_MESSAGE: usize = 32;
 /// Bounds how long one upload body may take to arrive.
 pub const UPLOAD_READ_TIMEOUT: Duration = Duration::from_mins(15);
 
+pub const LINK_KIND: &str = "link";
+
 /// Names upload files, so stale ones can be told apart from anything else in
 /// the directory.
 pub const UPLOAD_SUFFIX: &str = ".upload";
 
-/// A server-hosted embed: an upload or a stream. Other embed kinds are body
-/// content with only an embed_id. An embed that is no longer in
-/// `State.embeds` was removed; its write, file, and stream URLs are dead.
+/// A server-hosted embed: an upload, a stream, or a link preview
+/// (`unfurl`). Other embed kinds are body content with only an embed_id.
+/// An embed that is no longer in `State.embeds` was removed; its write,
+/// file, and stream URLs are dead.
 #[derive(Debug, Default)]
 pub struct EmbedState {
     pub id: String,
@@ -71,6 +75,11 @@ pub struct EmbedState {
 }
 
 impl EmbedState {
+    /// A link preview, whose image is hosted like an upload.
+    pub fn is_link(&self) -> bool {
+        self.kind == LINK_KIND
+    }
+
     pub fn end_stream(&self) {
         if let Some(stream) = &self.stream {
             stream.end();
@@ -134,6 +143,69 @@ pub fn replace_embed(body: &mut Object, id: &str, update: Option<&dyn Fn(&mut Ob
 }
 
 impl State {
+    pub fn next_embed_id(&mut self) -> String {
+        self.embed_number += 1;
+        format!("embed_{}", self.embed_number)
+    }
+
+    /// Records `path`, of `size` bytes, as the finished file of hosted embed
+    /// `id`, newest in the eviction order, and returns its file URL.
+    pub fn host_file_locked(&mut self, id: &str, path: String, size: i64) -> String {
+        self.upload_seq += 1;
+        let seq = self.upload_seq;
+        let e = self.embeds.get_mut(id).expect("a registered embed");
+        e.finished = true;
+        e.path = path;
+        e.size = size;
+        e.seq = seq;
+        let url = e.file_url();
+        self.uploads.insert((seq, id.to_owned()));
+        self.upload_bytes += size;
+        self.touch_embed(id);
+        url
+    }
+
+    /// Registers a link preview of `url` as a hosted embed of a message,
+    /// with `file` holding the preview's image, and returns the embed to
+    /// append to the message's body.
+    pub fn add_link_embed_locked(
+        &mut self,
+        message_id: &str,
+        base_url: &str,
+        url: &str,
+        preview: &Preview,
+        file: Option<String>,
+    ) -> Object {
+        let id = self.next_embed_id();
+        self.embeds.insert(
+            id.clone(),
+            EmbedState {
+                id: id.clone(),
+                kind: LINK_KIND.into(),
+                message_id: message_id.to_owned(),
+                base_url: base_url.to_owned(),
+                secret: rand::text(),
+                started: true,
+                finished: true,
+                ..EmbedState::default()
+            },
+        );
+        let image_url = match (file, &preview.image) {
+            (Some(path), Some(image)) => {
+                let e = self.embeds.get_mut(&id).expect("just registered");
+                e.content_type = image.content_type.clone();
+                Some(self.host_file_locked(&id, path, image.bytes.len() as i64))
+            }
+            _ => None,
+        };
+        let owned = obj! {"url" => url, "og" => preview.og(image_url.as_deref())};
+        self.embeds.get_mut(&id).expect("just registered").owned = owned.clone();
+        self.touch_embed(&id);
+        let mut embed = obj! {"embed_id" => id.as_str(), "kind" => LINK_KIND};
+        embed.extend(owned);
+        embed
+    }
+
     /// Applies embed identity (§4.8.2) to a submitted body. An embed with
     /// embed_id keeps that embed of the current snapshot, with its kind and
     /// server-owned fields restored from the server's records; one without
@@ -198,8 +270,7 @@ impl State {
                 .and_then(Json::as_str)
                 .unwrap_or("")
                 .to_owned();
-            self.embed_number += 1;
-            let id = format!("embed_{}", self.embed_number);
+            let id = self.next_embed_id();
             let alt = og_image_alt(embed.get("og"));
             embed.remove("og");
             embed.remove("write_url");
@@ -351,7 +422,7 @@ impl State {
         self.uploads
             .iter()
             .filter_map(|(_, id)| self.embeds.get(id))
-            .filter(|e| e.message_id == message_id && e.kind == "upload" && e.avatar_for.is_none())
+            .filter(|e| e.message_id == message_id && !e.is_link() && e.avatar_for.is_none())
             .map(|e| e.size)
             .sum()
     }
@@ -464,12 +535,23 @@ pub fn avatar_type(content_type: &str) -> bool {
     )
 }
 
-/// `image.DecodeConfig` on the file's first 1 GiB, with WebP registered.
-fn decode_image_config(file: &File) -> Option<(image::Config, String)> {
+/// `image.DecodeConfig`, with WebP registered: an image's format and
+/// dimensions, from its header.
+pub(crate) fn image_config(r: impl Read) -> Option<(image::Config, String)> {
     crate::webp::register();
+    image::decode_config(r).ok()
+}
+
+/// `image_config` of the file's first 1 GiB.
+fn decode_image_config(file: &File) -> Option<(image::Config, String)> {
     let mut file = file;
     file.seek(SeekFrom::Start(0)).ok()?;
-    image::decode_config(file.take(1 << 30)).ok()
+    image_config(file.take(1 << 30))
+}
+
+/// A new, empty file in the upload directory.
+pub(crate) fn new_upload_file(dir: &str) -> io::Result<File> {
+    os::create_temp(dir, &format!("*{UPLOAD_SUFFIX}"))
 }
 
 /// Checks that an avatar upload's content decodes as the image type it
@@ -742,24 +824,12 @@ impl Server {
             );
             return;
         };
-        st.upload_seq += 1;
-        let seq = st.upload_seq;
-        let file_url = {
-            let e = st.embeds.get_mut(id).expect("checked above");
-            e.finished = true;
-            e.path = file_name;
-            e.size = size;
-            e.seq = seq;
-            let url = e.file_url();
-            e.owned = obj! {"url" => url.as_str()};
-            if let Some(og) = og {
-                e.owned.insert("og".into(), og.into());
-            }
-            url
-        };
-        st.uploads.insert((seq, id.to_owned()));
-        st.upload_bytes += size;
-        st.touch_embed(id);
+        let file_url = st.host_file_locked(id, file_name, size);
+        let e = st.embeds.get_mut(id).expect("checked above");
+        e.owned = obj! {"url" => file_url.as_str()};
+        if let Some(og) = og {
+            e.owned.insert("og".into(), og.into());
+        }
         if let Some(user_id) = avatar_for {
             if st.users.contains_key(&user_id) {
                 st.set_avatar_embed_locked(&user_id, Some(id.to_owned()));
@@ -805,7 +875,7 @@ impl Server {
             return (None, 0, Some(UploadError::TooLarge));
         }
         let dir = self.lock().upload_dir.clone();
-        let file = match os::create_temp(&dir, &format!("*{UPLOAD_SUFFIX}")) {
+        let file = match new_upload_file(&dir) {
             Ok(file) => file,
             Err(e) => {
                 slog::error(
