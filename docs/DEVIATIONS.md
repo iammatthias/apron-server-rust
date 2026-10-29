@@ -682,37 +682,16 @@ of 0 to 60 seconds (`--limit.status-coalesce-seconds`,
 ### Push registration (§4.9)
 
 **Reference.** apron-server-cloudflare allows 10 `push_register` requests a
-user in any 60 seconds. It refuses a `wake` of more than 16 names with
-`denied` and a name over 64 characters with `too_large`. It refuses a `url`
-that carries credentials or a port, an IP address, a single-label host, or
-a host under an internal suffix such as `.local` or `.internal`. Its texts
-include `Unknown push kind; this server offers webpush`, `url is at most
-512 bytes`, `push_id must be 1 to 64 letters, digits, _ or -`, `url must be
-an https URL` and `url must name a public push service`.
+user in any 60 seconds.
 
-**This server.** Has the same numbers: 5 registrations a user, expiry after
-7 days, URLs of at most 512 bytes, and 10 requests a minute. These differ:
+**This server.** Has the same numbers, checks and texts: 5 registrations a
+user, expiry after 7 days, URLs of at most 512 bytes, and 10 requests a
+minute. The 10 requests are a bucket that refills one every 6 seconds, so a
+user can make about 20 in the first minute. `retry_after` names the wait
+for the next one.
 
-- The 10 requests are a bucket that refills one every 6 seconds, so a user
-  can make about 20 in the first minute. `retry_after` names the wait for
-  the next one.
-- A `wake` past 16 names, or a name past 64 bytes, is not refused. The
-  extra names are ignored.
-- A `url` may name a port or a public IP address. Only credentials, a
-  trailing dot, internal address literals and `localhost` are refused. With
-  the default `--push.hosts`, only the port can reach a push.
-- The texts differ. An unknown kind is `Unknown push kind "<kind>"; this
-  server supports relay and webpush`. A long `url` is `url is at most 512
-  bytes and token at most 4096`. A bad `push_id` is `push_id is 1 to 64
-  letters, digits, _ or -`. A bad `url` is `url must be an absolute URL`,
-  `url must use https`, `url must name a host without a trailing dot` or
-  `url must name a public host`. A bad `keys.p256dh` is `keys.p256dh must
-  be an uncompressed P-256 point in base64url` or `keys.p256dh is not a
-  point on P-256`.
-
-**Why.** The checks and texts are apron-server-go's, kept from the port.
-The host list, not the
-address checks, keeps pushes to the browsers' push services.
+**Why.** The bucket is the limiter shape the server uses for every
+per-user allowance (`crate::rate`).
 
 ### Push wakes (§4.9)
 
@@ -854,8 +833,11 @@ scope and no `unread` count.
 `badge`, and every payload carries `unread`, the user's count of messages
 after their read positions. A `badge` registration of kind `relay` gets a
 low-urgency push without a message on each change of that count.
-`--push.allow-insecure`, for tests only, admits `http` and internal
-addresses, but not hosts the list leaves out.
+An unknown kind is `Unknown push kind; this server offers relay and
+webpush`, and a `token` past 4,096 bytes is `too_large` with `token is at
+most 4096 bytes`. `--push.allow-insecure`, for tests only, admits `http`,
+ports, address literals and internal hosts, but not hosts the list leaves
+out.
 
 **Why.** Native iOS pushes and badges (Ladle) go through an operator's
 relay. Browsers ignore both.

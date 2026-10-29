@@ -494,3 +494,57 @@ fn test_push_register_rate_limit() {
         "{data:?}"
     );
 }
+
+/// push_register refuses in Cloudflare's order with Cloudflare's texts:
+/// kind, wake, push_id, the url's size, then the url, then the keys.
+#[test]
+fn test_push_register_refusals() {
+    let server = push_test_server();
+    let mut c = push_client(&server);
+    let (_, keys) = test_subscription();
+    let url = "https://push.example.net/p";
+    let long = format!(
+        "https://push.example.net/{}",
+        "x".repeat(MAX_PUSH_URL_BYTES)
+    );
+    let refusals = [
+        (
+            obj! {"kind" => "apns", "url" => url},
+            CODE_INVALID_PARAMS,
+            "Unknown push kind; this server offers relay and webpush",
+        ),
+        (
+            obj! {"kind" => "webpush", "url" => long.as_str(), "push_id" => "a b"},
+            CODE_INVALID_PARAMS,
+            "push_id must be 1 to 64 letters, digits, _ or -",
+        ),
+        (
+            obj! {"kind" => "webpush", "url" => long.as_str(), "keys" => keys.clone()},
+            CODE_TOO_LARGE,
+            "url is at most 512 bytes",
+        ),
+        (
+            obj! {"kind" => "relay", "url" => "https://push.example.net/p", "token" => "t".repeat(MAX_PUSH_TOKEN_LEN + 1)},
+            CODE_TOO_LARGE,
+            "token is at most 4096 bytes",
+        ),
+        (
+            obj! {"kind" => "webpush", "url" => url, "keys" => obj! {"p256dh" => 7i64, "auth" => "x"}},
+            CODE_INVALID_PARAMS,
+            "keys.p256dh must be an uncompressed P-256 public key in base64url",
+        ),
+        (
+            obj! {"kind" => "webpush", "url" => url, "keys" => obj! {"p256dh" => keys["p256dh"].clone(), "auth" => "AAAA"}},
+            CODE_INVALID_PARAMS,
+            "keys.auth must be 16 bytes in base64url",
+        ),
+    ];
+    for (i, (params, code, message)) in refusals.into_iter().enumerate() {
+        let frame = c.call("push_register", &format!("r{i}"), params);
+        assert_eq!(
+            frame.get("error"),
+            Some(&Json::from(obj! {"code" => code, "message" => message})),
+            "{message}"
+        );
+    }
+}

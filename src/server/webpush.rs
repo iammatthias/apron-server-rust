@@ -56,19 +56,26 @@ pub fn encode_base64_url(data: &[u8]) -> String {
     URL_SAFE_NO_PAD.encode(data)
 }
 
+/// Cloudflare's refusals of a subscription's keys.
+pub const BAD_P256DH: &str = "keys.p256dh must be an uncompressed P-256 public key in base64url";
+pub const BAD_AUTH: &str = "keys.auth must be 16 bytes in base64url";
+
 /// Checks a subscription's keys: p256dh an uncompressed point on P-256,
 /// which its length alone does not show, and auth 16 bytes.
 pub fn parse_push_keys(p256dh: &str, auth: &str) -> Result<PushKeys, String> {
     let point = match decode_base64_url(p256dh) {
-        Some(point) if point.len() == P256_POINT_BYTES && point[0] == 4 => point,
-        _ => return Err("keys.p256dh must be an uncompressed P-256 point in base64url".into()),
+        Some(point)
+            if point.len() == P256_POINT_BYTES
+                && point[0] == 4
+                && ecdh::p256().public_key_from_bytes(&point).is_ok() =>
+        {
+            point
+        }
+        _ => return Err(BAD_P256DH.into()),
     };
-    if ecdh::p256().public_key_from_bytes(&point).is_err() {
-        return Err("keys.p256dh is not a point on P-256".into());
-    }
     let secret = match decode_base64_url(auth) {
         Some(secret) if secret.len() == AUTH_SECRET_BYTES => secret,
-        _ => return Err("keys.auth must be 16 bytes in base64url".into()),
+        _ => return Err(BAD_AUTH.into()),
     };
     Ok(PushKeys {
         p256dh: point,
