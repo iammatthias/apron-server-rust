@@ -595,7 +595,6 @@ fn decode_image_config(file: &File) -> Option<(image::Config, String)> {
     image_config(file.take(1 << 30))
 }
 
-/// A new, empty file in the upload directory.
 pub(crate) fn new_upload_file(dir: &str) -> io::Result<File> {
     os::create_temp(dir, &format!("*{UPLOAD_SUFFIX}"))
 }

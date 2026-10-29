@@ -14,7 +14,6 @@ pub const MAX_CACHED: usize = 256;
 /// Bounds the image bytes the cache holds.
 pub const MAX_CACHED_BYTES: usize = 32 << 20;
 
-/// What unfurling a URL gave.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Unfurled {
     Preview(Arc<Preview>),
