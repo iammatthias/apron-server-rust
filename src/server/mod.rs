@@ -1,6 +1,7 @@
 //! The Apron server: the WebSocket protocol handlers and the state they
 //! share, ported file by file from `internal/server`.
 
+pub mod activity;
 pub mod admin;
 pub mod bots;
 pub mod client;
@@ -13,6 +14,7 @@ pub mod dispatch;
 pub mod email;
 pub mod embeds;
 pub mod emoji;
+pub mod history;
 pub mod invites;
 pub mod limits;
 pub mod messages;
@@ -26,6 +28,8 @@ pub mod push;
 pub mod remap;
 pub mod rename;
 pub mod retention;
+pub mod room_list;
+pub mod room_set;
 pub mod rooms;
 #[allow(clippy::module_inception)]
 pub mod server;
