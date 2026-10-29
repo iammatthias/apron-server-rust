@@ -423,8 +423,8 @@ impl State {
     /// Hands a payload carrying the count unread to the deliverer, unless
     /// the user has had MAX_PUSHES_PER_USER_DAY pushes today. A push the
     /// endpoint accepts, with a 2xx, counts toward them and records unread
-    /// as the count the endpoint has; one answered 404 or 410 forgets the
-    /// registration. A badge push replaces one still waiting for the same
+    /// as the count the endpoint has; one answered 403, 404 or 410 forgets
+    /// the registration. A badge push replaces one still waiting for the same
     /// registration.
     pub fn deliver_push_locked(
         &mut self,
@@ -455,7 +455,9 @@ impl State {
         let done_key = key.to_owned();
         let done: DoneFn = Box::new(move |status: u16| {
             let accepted = (200..300).contains(&status);
-            let gone = status == 404 || status == 410;
+            // 404 and 410: the subscription is gone (RFC 8030 §7.3). 403:
+            // the endpoint refuses this server's key, as after a key change.
+            let gone = matches!(status, 403 | 404 | 410);
             let Some(server) = server.upgrade() else {
                 return;
             };
