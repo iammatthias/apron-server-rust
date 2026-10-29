@@ -15,6 +15,7 @@ mod invite_bot_test;
 mod invite_device_test;
 mod limits_test;
 mod outbound_test;
+mod passkeys_test;
 mod persist_test;
 mod push_fixture_test;
 mod push_test;

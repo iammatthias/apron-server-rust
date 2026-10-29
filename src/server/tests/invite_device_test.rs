@@ -374,6 +374,12 @@ fn test_invite_device_closes_a_device_that_got_a_session_token() {
         "register on a device connection: {registered:?}"
     );
     phone.drain();
+    // The account's other connection is told of the new passkey.
+    let told = ada.drain();
+    assert!(
+        format!("{told:?}").contains("A passkey was added to your account"),
+        "ada: {told:?}"
+    );
 
     invite_device(&mut ada, &ada_id, "phone", true);
     expect_replaced(&phone, "the device connection with a session token");
@@ -439,7 +445,7 @@ fn test_help_lists_invite_device_for_accounts() {
     assert_eq!(
         private_reply(&mut ada, "/help"),
         format!(
-            "- `/help`: list the commands you can use here\n- `/avatar`: with one image attached: set your avatar\n{listed}\n- `/invite-bot`: get a token that signs in as your bot, named after you; again, it replaces the token and renames the bot"
+            "- `/help`: list the commands you can use here\n- `/avatar`: with one image attached: set your avatar\n{listed}\n- `/invite-bot`: get a token that signs in as your bot, named after you; again, it replaces the token and renames the bot\n- `/passkeys [remove <n>]`: list your account's passkeys, or remove one of them"
         ),
         "account's help"
     );

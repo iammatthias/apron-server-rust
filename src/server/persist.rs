@@ -50,8 +50,8 @@ use super::rooms::{ReadCursor, RoomState};
 use super::server::{LogRecord, RecordKind, Server, State};
 use super::status::*;
 use super::users::{valid_role, UserState, MAX_ROLES};
-use super::webauthn::{PasskeyUser, Session};
-use super::webpush::{encode_base64_url, parse_push_keys, VapidKey};
+use super::webauthn::{PasskeyTimes, PasskeyUser, Session};
+use super::webpush::{decode_base64_url, encode_base64_url, parse_push_keys, VapidKey};
 use crate::store::{Entry, StoreError};
 use crate::webauthn::Credential;
 
@@ -243,6 +243,18 @@ pub struct StoredPasskey {
     pub handle: Bytes,
     #[json("credentials")]
     pub credentials: Vec<Credential>,
+    /// `PasskeyUser.times` by the base64url credential ID. Go's decoder
+    /// skips the member.
+    #[json("times,omitzero")]
+    pub times: BTreeMap<String, StoredPasskeyTimes>,
+}
+
+#[derive(Clone, Debug, Default, MarshalTo, UnmarshalFrom)]
+pub struct StoredPasskeyTimes {
+    #[json("added")]
+    pub added: i64,
+    #[json("used")]
+    pub used: i64,
 }
 
 #[derive(Clone, Debug, Default, MarshalTo, UnmarshalFrom)]
@@ -630,6 +642,17 @@ pub fn stored_user_of(u: &UserState) -> StoredUser {
         passkey: u.passkey.as_ref().map(|p| StoredPasskey {
             handle: Bytes(p.handle.clone()),
             credentials: p.credentials.clone(),
+            times: p
+                .times
+                .iter()
+                .map(|(id, t)| {
+                    let times = StoredPasskeyTimes {
+                        added: t.added,
+                        used: t.used,
+                    };
+                    (encode_base64_url(id), times)
+                })
+                .collect(),
         }),
         email: u.email.clone(),
         bot: u.owner.clone().unwrap_or_default(),
@@ -884,6 +907,17 @@ impl Server {
                 u.passkey = Some(PasskeyUser {
                     handle: passkey.handle.0.clone(),
                     credentials: passkey.credentials.clone(),
+                    times: passkey
+                        .times
+                        .iter()
+                        .filter_map(|(id, t)| {
+                            let times = PasskeyTimes {
+                                added: t.added,
+                                used: t.used,
+                            };
+                            Some((decode_base64_url(id)?, times))
+                        })
+                        .collect(),
                 });
             }
             st.users.insert(id.clone(), u);

@@ -107,6 +107,14 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         run: State::invite_bot_command,
     },
     ServerCommand {
+        name: "passkeys",
+        usage: "/passkeys [remove <n>]",
+        help: "list your account's passkeys, or remove one of them",
+        audience: Audience::Accounts,
+        writes: true,
+        run: State::passkeys_command,
+    },
+    ServerCommand {
         name: "kick",
         usage: "/kick @user [reason]",
         help: "remove someone from this room (its creator or a moderator)",
