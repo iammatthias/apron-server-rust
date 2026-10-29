@@ -169,8 +169,8 @@ fn test_probe_reports_the_ip_cap_without_admitting() {
         response.header.get("Retry-After"),
         Some(RETRY_AFTER_SECONDS.to_string().as_str())
     );
-    // The probe spent no admission: another address's one is untouched,
-    // and this address's next one is refused only for its cap.
+    // With the held connection gone, the cap no longer applies, and the
+    // next connection is refused for the admission rate instead.
     drop(held);
     wait_for(|| server.app.lock().clients.is_empty());
     let (c, _) = dial_from(&server, "198.51.100.5");
