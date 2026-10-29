@@ -19,12 +19,11 @@ use crate::rate::{every, Limiter};
 
 mod cache;
 mod fetch;
-mod page;
+pub(crate) mod page;
 mod text;
 
 pub use cache::*;
 pub use fetch::*;
-pub use page::*;
 pub use text::*;
 
 pub const MAX_URLS_PER_MESSAGE: usize = 3;
