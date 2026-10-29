@@ -3,14 +3,12 @@
 //! SPEC.md, section 5, Admins, and store.ts `renameIdentity`).
 
 use std::collections::BTreeSet;
-use std::sync::Arc;
 
 use super::admin::ADMIN_USER_ID;
-use super::client::{Client, Frame};
-use super::commands::private_notice;
+use super::client::Frame;
+use super::commands::{no_user, private_notice, user_id_args, CommandCtx};
 use super::invites::{issuable, NOT_ISSUABLE};
 use super::protocol::*;
-use super::purge::truncate_chars;
 use super::remap::Remap;
 use super::server::State;
 use crate::obj;
@@ -25,19 +23,14 @@ impl State {
     /// connections get `user` `you`, and those who share a room with them
     /// `user` `new` with `old` (§3.3). The sender gets a ~private notice
     /// before the result (§1).
-    pub(super) fn rename_command(
-        &mut self,
-        c: &Arc<Client>,
-        room_id: &str,
-        _body: &Object,
-        args: &str,
-    ) -> Result<Object, RpcError> {
-        let words: Vec<&str> = args.split_whitespace().collect();
-        let [from, to] = words.as_slice() else {
-            return Err(invalid_params("Usage: /rename <old_user_id> <new_user_id>"));
-        };
-        let from = from.strip_prefix('@').unwrap_or(from);
-        let to = to.strip_prefix('@').unwrap_or(to);
+    pub(super) fn rename_command(&mut self, cx: &CommandCtx) -> Result<Object, RpcError> {
+        let CommandCtx {
+            client: c,
+            room_id,
+            args,
+            ..
+        } = *cx;
+        let [from, to] = user_id_args(args, "Usage: /rename <old_user_id> <new_user_id>")?;
         if from == ADMIN_USER_ID {
             return Err(RpcError::new(
                 CODE_DENIED,
@@ -52,9 +45,7 @@ impl State {
             return Err(invalid_params(NOT_ISSUABLE));
         }
         let Some(u) = self.users.get(from).filter(|u| u.persists()) else {
-            let mut message = format!("No registered user has the user_id {from}");
-            truncate_chars(&mut message, 200);
-            return Err(invalid_params(message));
+            return Err(no_user("registered user", from));
         };
         if u.bot() {
             return Err(RpcError::new(CODE_DENIED, "A bot's user_id is fixed"));

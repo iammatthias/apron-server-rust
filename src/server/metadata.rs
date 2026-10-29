@@ -9,7 +9,7 @@ use rust_stdlib::net::url;
 use rust_stdlib_derive::{MarshalTo, UnmarshalFrom};
 
 use super::client::Client;
-use super::commands::private_notice;
+use super::commands::{private_notice, CommandCtx};
 use super::embeds::EmbedPurpose;
 use super::protocol::*;
 use super::server::{State, DEFAULT_ROOM_ID};
@@ -265,13 +265,14 @@ impl State {
     /// answers with its write URL, and the image becomes the avatar when the
     /// write finishes; alone, it clears the avatar and deletes its image. A
     /// change sends every connection a new `server` frame.
-    pub(super) fn server_command(
-        &mut self,
-        c: &Arc<Client>,
-        room_id: &str,
-        body: &Object,
-        args: &str,
-    ) -> Result<Object, RpcError> {
+    pub(super) fn server_command(&mut self, cx: &CommandCtx) -> Result<Object, RpcError> {
+        let CommandCtx {
+            client: c,
+            room_id,
+            body,
+            args,
+            ..
+        } = *cx;
         let (field, rest) = args.split_once(char::is_whitespace).unwrap_or((args, ""));
         let value = rest.trim();
         let field = field.to_lowercase();

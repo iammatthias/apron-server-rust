@@ -141,6 +141,14 @@ pub struct UserState {
     pub held: Vec<super::wake::HeldWake>,
 }
 
+/// The kinds of identity (`UserState::kind`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Identity {
+    Guest,
+    Account,
+    Bot,
+}
+
 impl UserState {
     pub fn new(id: &str, name: &str, generation: u64) -> UserState {
         UserState {
@@ -198,11 +206,23 @@ impl UserState {
         value
     }
 
-    /// Reports whether the user is an account: it signed in with a
-    /// passkey, an email address or an account token, so it persists
-    /// across connections and restarts, and it is no guest or bot.
+    /// What kind of identity the user is: a bot (`bot`), an account, which
+    /// signed in with a passkey, an email address or an account token, or a
+    /// guest, who does not outlive their connections.
+    pub fn kind(&self) -> Identity {
+        if self.bot() {
+            Identity::Bot
+        } else if self.persists() {
+            Identity::Account
+        } else {
+            Identity::Guest
+        }
+    }
+
+    /// Reports whether the user is an account, so it persists across
+    /// connections and restarts, and it is no guest or bot.
     pub fn account(&self) -> bool {
-        (self.passkey.is_some() || !self.email.is_empty() || self.invited) && !self.bot()
+        self.kind() == Identity::Account
     }
 
     /// Reports whether the user is a bot, which signs in only with its
@@ -253,16 +273,6 @@ impl UserState {
 
 /// Denies a read-only guest's writes (Config.guest_posting).
 pub const GUEST_READ_ONLY: &str = "Guests can only read here; sign in to post or join rooms";
-
-/// Reports whether a read-only guest is denied the method outright;
-/// `command` and `activity` decide per request, and push registration
-/// refuses every guest with its own message.
-pub fn guest_write(method: &str) -> bool {
-    matches!(
-        method,
-        "message" | "reactions" | "room_set" | "room_join" | "room_leave"
-    )
-}
 
 impl State {
     /// Reports whether the user is a guest on a server whose guests only

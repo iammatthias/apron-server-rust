@@ -11,8 +11,8 @@ use super::metadata::one_upload;
 use super::protocol::*;
 use super::rooms::RoomState;
 use super::server::{Server, State, DEFAULT_ROOM_ID};
-use super::toggles::{Feature, UPLOADS_OFF};
-use super::users::{UserState, ADMIN_ROLE, EMOJI_ROLES, GUEST_READ_ONLY};
+use super::toggles::Feature;
+use super::users::{Identity, UserState, ADMIN_ROLE, EMOJI_ROLES, GUEST_READ_ONLY};
 use crate::obj;
 
 /// Scoped system identities (Appendix A.1). user_ids starting with `~` are
@@ -21,9 +21,19 @@ pub const ROOM_NOTICE_ID: &str = "~room";
 pub const PRIVATE_NOTICE_ID: &str = "~private";
 pub const PRIVATE_NOTICE_NAME: &str = "System message to you";
 
-/// Executes a command for the sender in a room, with the message body and
-/// the arguments after the command word.
-type CommandFn = fn(&mut State, &Arc<Client>, &str, &Object, &str) -> Result<Object, RpcError>;
+/// What a command runs with: the connection and user that sent it, the room
+/// it runs in, the message body, and the arguments after the command word.
+#[derive(Clone, Copy)]
+pub(super) struct CommandCtx<'a> {
+    pub client: &'a Arc<Client>,
+    pub user_id: &'a str,
+    pub room_id: &'a str,
+    pub body: &'a Object,
+    pub args: &'a str,
+}
+
+/// Executes a command.
+type CommandFn = fn(&mut State, &CommandCtx) -> Result<Object, RpcError>;
 
 /// Who may run a command, as apron-server-cloudflare names them.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -45,19 +55,22 @@ impl Audience {
 
     /// The error that refuses u the command `name`, if any.
     fn refusal(self, u: &UserState, name: &str) -> Option<RpcError> {
-        let message = match self {
-            Audience::Everyone => return None,
-            Audience::Accounts if u.account() => return None,
-            Audience::Accounts if u.bot() => format!("A bot can't use /{name}"),
-            Audience::Accounts => format!("Sign in with a passkey to use /{name}"),
-            Audience::Admins if u.account() && u.has_role(ADMIN_ROLE) => return None,
-            Audience::Admins => format!("Only an admin can use /{name}"),
-            Audience::Roles(roles) if u.has_any_role(roles) => return None,
-            Audience::Roles(_) if u.bot() => format!("A bot can't use /{name}"),
-            Audience::Roles(roles) if u.account() => {
+        let allowed = match self {
+            Audience::Everyone => true,
+            Audience::Accounts => u.kind() == Identity::Account,
+            Audience::Admins => u.kind() == Identity::Account && u.has_role(ADMIN_ROLE),
+            Audience::Roles(roles) => u.has_any_role(roles),
+        };
+        if allowed {
+            return None;
+        }
+        let message = match (self, u.kind()) {
+            (Audience::Admins, _) => format!("Only an admin can use /{name}"),
+            (_, Identity::Bot) => format!("A bot can't use /{name}"),
+            (Audience::Roles(roles), Identity::Account) => {
                 format!("/{name} needs one of the roles {}", roles.join(", "))
             }
-            Audience::Roles(_) => format!("Sign in with a passkey to use /{name}"),
+            _ => format!("Sign in with a passkey to use /{name}"),
         };
         Some(RpcError::new(CODE_DENIED, message))
     }
@@ -71,6 +84,9 @@ struct ServerCommand {
     audience: Audience,
     /// Whether it changes anything, which a read-only guest may not do.
     writes: bool,
+    /// The feature it needs on (`/toggle`); while it is off, /help leaves
+    /// the command out and running it is refused.
+    feature: Option<Feature>,
     /// Whether its `invalid_params` (a usage or user_id error) are errors to
     /// show, not policy violations, since people mistype.
     forgives_params: bool,
@@ -88,6 +104,7 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         audience: Audience::Everyone,
         forgives_params: false,
         writes: false,
+        feature: None,
         run: State::help_command,
     },
     ServerCommand {
@@ -97,6 +114,7 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         audience: Audience::Accounts,
         forgives_params: false,
         writes: true,
+        feature: Some(Feature::Uploads),
         run: State::avatar_command,
     },
     ServerCommand {
@@ -106,6 +124,7 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         audience: Audience::Accounts,
         forgives_params: true,
         writes: true,
+        feature: None,
         run: State::invite_device_command,
     },
     ServerCommand {
@@ -115,6 +134,7 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         audience: Audience::Accounts,
         forgives_params: false,
         writes: true,
+        feature: None,
         run: State::invite_bot_command,
     },
     ServerCommand {
@@ -124,6 +144,7 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         audience: Audience::Accounts,
         forgives_params: true,
         writes: true,
+        feature: None,
         run: State::passkeys_command,
     },
     ServerCommand {
@@ -133,6 +154,7 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         audience: Audience::Admins,
         forgives_params: true,
         writes: true,
+        feature: None,
         run: State::kick_command,
     },
     ServerCommand {
@@ -142,6 +164,7 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         audience: Audience::Admins,
         forgives_params: true,
         writes: true,
+        feature: None,
         run: State::admin_command,
     },
     ServerCommand {
@@ -151,6 +174,7 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         audience: Audience::Admins,
         forgives_params: true,
         writes: true,
+        feature: None,
         run: State::role_command,
     },
     ServerCommand {
@@ -160,6 +184,7 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         audience: Audience::Admins,
         forgives_params: true,
         writes: true,
+        feature: None,
         run: State::rename_command,
     },
     ServerCommand {
@@ -169,6 +194,7 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         audience: Audience::Admins,
         forgives_params: true,
         writes: true,
+        feature: None,
         run: State::invite_token_command,
     },
     ServerCommand {
@@ -178,6 +204,7 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         audience: Audience::Admins,
         forgives_params: true,
         writes: true,
+        feature: None,
         run: State::invite_command,
     },
     ServerCommand {
@@ -187,6 +214,7 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         audience: Audience::Roles(EMOJI_ROLES),
         forgives_params: true,
         writes: true,
+        feature: None,
         run: State::emoji_command,
     },
     ServerCommand {
@@ -196,6 +224,7 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         audience: Audience::Admins,
         forgives_params: true,
         writes: true,
+        feature: None,
         run: State::server_command,
     },
     ServerCommand {
@@ -205,6 +234,7 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         audience: Audience::Admins,
         forgives_params: true,
         writes: true,
+        feature: None,
         run: State::toggle_command,
     },
     ServerCommand {
@@ -214,9 +244,34 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         audience: Audience::Admins,
         forgives_params: true,
         writes: true,
+        feature: None,
         run: State::purge_command,
     },
 ];
+
+/// A user_id as a command takes it: a leading `@` is allowed, as a client's
+/// mention sends it (Appendix A.3).
+pub(super) fn target(word: &str) -> &str {
+    word.strip_prefix('@').unwrap_or(word)
+}
+
+/// The N user_ids a command takes (`target`), or `usage` as its error.
+pub(super) fn user_id_args<'a, const N: usize>(
+    args: &'a str,
+    usage: &str,
+) -> Result<[&'a str; N], RpcError> {
+    let words: Vec<&str> = args.split_whitespace().map(target).collect();
+    words.try_into().map_err(|_| invalid_params(usage))
+}
+
+/// Refuses a command a user_id no `who` has, cut to 200 characters.
+pub(super) fn no_user(who: &str, user_id: &str) -> RpcError {
+    let mut message = format!("No {who} has the user_id {user_id}");
+    if let Some((at, _)) = message.char_indices().nth(200) {
+        message.truncate(at);
+    }
+    invalid_params(message)
+}
 
 /// Renders a notice for the one connection it is queued on: unlogged,
 /// without message_id or log_id (Appendix A.1).
@@ -285,14 +340,23 @@ impl State {
                 if let Some(refusal) = command.audience.refusal(&self.users[&user_id], &name) {
                     return Err(refusal);
                 }
-                let result =
-                    (command.run)(self, c, &room_id, &body, args.trim()).map_err(|err| {
-                        if command.forgives_params && err.code == CODE_INVALID_PARAMS {
-                            err.forgiven()
-                        } else {
-                            err
-                        }
-                    })?;
+                if let Some(feature) = command.feature.filter(|f| !self.feature_on(*f)) {
+                    return Err(RpcError::new(CODE_DENIED, feature.off_message()));
+                }
+                let cx = CommandCtx {
+                    client: c,
+                    user_id: &user_id,
+                    room_id: &room_id,
+                    body: &body,
+                    args: args.trim(),
+                };
+                let result = (command.run)(self, &cx).map_err(|err| {
+                    if command.forgives_params && err.code == CODE_INVALID_PARAMS {
+                        err.forgiven()
+                    } else {
+                        err
+                    }
+                })?;
                 c.send_result(req, result.clone().into());
                 return Ok((result.into(), true));
             }
@@ -331,21 +395,18 @@ impl State {
 
     /// Replies with a ~private notice listing the commands available to the
     /// sender in the room.
-    fn help_command(
-        &mut self,
-        c: &Arc<Client>,
-        room_id: &str,
-        _body: &Object,
-        _args: &str,
-    ) -> Result<Object, RpcError> {
-        let user_id = self.client_user(c).unwrap_or_default();
+    fn help_command(&mut self, cx: &CommandCtx) -> Result<Object, RpcError> {
+        let CommandCtx {
+            client: c, room_id, ..
+        } = *cx;
+        let user_id = cx.user_id.to_owned();
         let (u, r) = (&self.users[&user_id], &self.rooms[room_id]);
         let read_only = self.read_only_guest(&user_id);
         let lines: Vec<String> = SERVER_COMMANDS
             .iter()
             .filter(|command| !(command.writes && read_only))
             .filter(|command| command.audience.lists(u))
-            .filter(|command| command.name != "avatar" || self.feature_on(Feature::Uploads))
+            .filter(|command| command.feature.is_none_or(|f| self.feature_on(f)))
             .map(|command| format!("- `{}`: {}", command.usage, command.help))
             .collect();
         c.enqueue(&private_notice(r, &lines.join("\n")));
@@ -354,23 +415,17 @@ impl State {
 
     /// Takes exactly one upload embed, whose file becomes the sender's avatar
     /// when its write finishes (§4.8.6). The result carries the write URL.
-    fn avatar_command(
-        &mut self,
-        c: &Arc<Client>,
-        _room_id: &str,
-        body: &Object,
-        _args: &str,
-    ) -> Result<Object, RpcError> {
+    fn avatar_command(&mut self, cx: &CommandCtx) -> Result<Object, RpcError> {
+        let CommandCtx {
+            client: c, body, ..
+        } = *cx;
         let embeds = body.get("embeds").map(Json::as_list).unwrap_or(&[]);
-        if !self.feature_on(Feature::Uploads) {
-            return Err(RpcError::new(CODE_DENIED, UPLOADS_OFF));
-        }
         if !one_upload(embeds) {
             return Err(invalid_params(
                 "/avatar takes exactly one upload embed: attach an image",
             ));
         }
-        let user_id = self.client_user(c).unwrap_or_default();
+        let user_id = cx.user_id.to_owned();
         self.charge_uploads_locked(&user_id, 1)?;
         Ok(self.new_image_write_locked(c, EmbedPurpose::Avatar(user_id)))
     }
@@ -378,16 +433,16 @@ impl State {
     /// `/kick <user_id>` removes a user, an account or a guest, from the
     /// room of the command, as if they had left it (§4.2.2), and tells the
     /// admin who ran it with a ~private notice.
-    fn kick_command(
-        &mut self,
-        c: &Arc<Client>,
-        room_id: &str,
-        _body: &Object,
-        args: &str,
-    ) -> Result<Object, RpcError> {
-        let user_id = self.client_user(c).unwrap_or_default();
-        let target = args.strip_prefix('@').unwrap_or(args);
-        if target.is_empty() || target.contains(char::is_whitespace) {
+    fn kick_command(&mut self, cx: &CommandCtx) -> Result<Object, RpcError> {
+        let CommandCtx {
+            client: c,
+            room_id,
+            args,
+            ..
+        } = *cx;
+        let user_id = cx.user_id.to_owned();
+        let [target] = user_id_args(args, "Usage: /kick <user_id>")?;
+        if target.is_empty() {
             return Err(invalid_params("Usage: /kick <user_id>"));
         }
         if target == user_id {

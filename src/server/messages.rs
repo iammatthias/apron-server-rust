@@ -9,7 +9,7 @@ use super::emoji::{is_emoji_key, normalize_entries, same_entries};
 use super::limits::{refused, Allowance, Category, Charge, Poster, Principal, Scope};
 use super::protocol::*;
 use super::server::{LogRecord, RecordKind, Server, State, DEFAULT_ROOM_ID};
-use super::users::{json_equal, MODERATOR_ROLES};
+use super::users::{json_equal, Identity, MODERATOR_ROLES};
 use crate::obj;
 
 #[derive(Clone, Debug, Default)]
@@ -614,9 +614,9 @@ impl State {
         category: Option<Category>,
     ) -> Result<(), RpcError> {
         self.note_bot_active_locked(user_id);
-        let poster = match self.users.get(user_id) {
-            Some(u) if u.persists() && !u.bot() && !u.roles.is_empty() => Poster::Trusted,
-            Some(u) if u.persists() => Poster::Account,
+        let poster = match self.users.get(user_id).map(|u| (u.kind(), u)) {
+            Some((Identity::Account, u)) if !u.roles.is_empty() => Poster::Trusted,
+            Some((Identity::Account | Identity::Bot, _)) => Poster::Account,
             _ => Poster::Guest,
         };
         let own = if poster == Poster::Guest {

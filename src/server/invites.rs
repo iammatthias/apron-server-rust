@@ -13,7 +13,7 @@ use rust_stdlib_crypto::{rand, sha256};
 
 use super::admin::ADMIN_USER_ID;
 use super::client::Client;
-use super::commands::private_notice;
+use super::commands::{private_notice, user_id_args, CommandCtx};
 use super::devices::apron_link;
 use super::email::web_socket_url;
 use super::protocol::*;
@@ -168,18 +168,14 @@ impl State {
     /// with that user_id and no passkey, named after it, in the default room,
     /// and sends the sender its bearer token in a ~private notice before the
     /// result (§1), as is and in a link any Apron app opens (Appendix A.4).
-    pub(super) fn invite_token_command(
-        &mut self,
-        c: &Arc<Client>,
-        room_id: &str,
-        _body: &Object,
-        args: &str,
-    ) -> Result<Object, RpcError> {
-        let mut words = args.split_whitespace();
-        let (Some(word), None) = (words.next(), words.next()) else {
-            return Err(invalid_params("Usage: /invite-token <user_id>"));
-        };
-        let user_id = word.strip_prefix('@').unwrap_or(word);
+    pub(super) fn invite_token_command(&mut self, cx: &CommandCtx) -> Result<Object, RpcError> {
+        let CommandCtx {
+            client: c,
+            room_id,
+            args,
+            ..
+        } = *cx;
+        let [user_id] = user_id_args(args, "Usage: /invite-token <user_id>")?;
         let taken = invalid_params(format!("The user_id {user_id} is taken"));
         if user_id.eq_ignore_ascii_case(ADMIN_USER_ID) {
             return Err(taken);
@@ -232,13 +228,13 @@ impl State {
     /// signs up to `uses` new accounts within a week, and revokes the last
     /// one; `/invite 0` only revokes. The token goes to this connection only,
     /// in a ~private notice before the result (§1).
-    pub(super) fn invite_command(
-        &mut self,
-        c: &Arc<Client>,
-        room_id: &str,
-        _body: &Object,
-        args: &str,
-    ) -> Result<Object, RpcError> {
+    pub(super) fn invite_command(&mut self, cx: &CommandCtx) -> Result<Object, RpcError> {
+        let CommandCtx {
+            client: c,
+            room_id,
+            args,
+            ..
+        } = *cx;
         let digits = (1..=3).contains(&args.len()) && args.bytes().all(|b| b.is_ascii_digit());
         let Some(uses) = digits.then(|| args.parse::<i64>().ok()).flatten() else {
             return Err(invalid_params(format!(

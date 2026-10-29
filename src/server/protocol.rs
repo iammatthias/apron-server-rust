@@ -9,6 +9,8 @@ use rust_stdlib::encoding::json::v2::{
 };
 use rust_stdlib_derive::{MarshalTo, UnmarshalFrom};
 
+use super::dispatch::notification_only;
+
 pub const CODE_PARSE_ERROR: i64 = -32700;
 pub const CODE_INVALID_REQUEST: i64 = -32600;
 pub const CODE_UNSUPPORTED: i64 = -32601;
@@ -425,13 +427,6 @@ pub fn parse_request(payload: &[u8], limits: &FrameLimits) -> (Request, Option<R
         }
     }
     (req, None)
-}
-
-/// The methods clients send only as notifications (§1.1). A server may
-/// ignore the id of one and handle the frame as a notification (§1.1), and
-/// this one does: nothing about it is answered.
-pub fn notification_only(method: &str) -> bool {
-    matches!(method, "ping" | "activity")
 }
 
 fn canonical_params(params: &Params) -> String {

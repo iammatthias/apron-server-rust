@@ -10,8 +10,7 @@ use rust_stdlib::net::http::{self, Request as HttpRequest, ResponseWriter};
 use rust_stdlib_crypto::sha256;
 use rust_stdlib_derive::{MarshalTo, UnmarshalFrom};
 
-use super::client::Client;
-use super::commands::private_notice;
+use super::commands::{private_notice, CommandCtx};
 use super::embeds::EmbedPurpose;
 use super::emoji::is_emoji_key;
 use super::metadata::one_upload;
@@ -148,13 +147,14 @@ impl State {
     /// :name:`, for the holders of `EMOJI_ROLES`. An add's result carries the
     /// embed's write URL, and the image becomes the key's when the write
     /// finishes. A removal answers with a `~private` notice.
-    pub(super) fn emoji_command(
-        &mut self,
-        c: &Arc<Client>,
-        room_id: &str,
-        body: &Object,
-        args: &str,
-    ) -> Result<Object, RpcError> {
+    pub(super) fn emoji_command(&mut self, cx: &CommandCtx) -> Result<Object, RpcError> {
+        let CommandCtx {
+            client: c,
+            room_id,
+            body,
+            args,
+            ..
+        } = *cx;
         let words: Vec<&str> = args.split_whitespace().collect();
         let (action, key) = match words[..] {
             [action @ ("add" | "remove"), key] => (action, key),
@@ -206,7 +206,7 @@ impl State {
                 format!("This server keeps at most {most} custom emoji; remove one first"),
             ));
         }
-        let user_id = self.client_user(c).unwrap_or_default();
+        let user_id = cx.user_id.to_owned();
         self.charge_uploads_locked(&user_id, 1)?;
         Ok(self.new_image_write_locked(c, EmbedPurpose::Emoji(key.to_owned())))
     }

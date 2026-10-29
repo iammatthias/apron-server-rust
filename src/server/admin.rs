@@ -8,7 +8,7 @@ use rust_stdlib_crypto::{sha256, subtle};
 
 use super::bots::BOT_ROLE;
 use super::client::Client;
-use super::commands::private_notice;
+use super::commands::{private_notice, target, CommandCtx};
 use super::protocol::*;
 use super::server::State;
 use super::users::{valid_role, ADMIN_ROLE, INVALID_ROLE, MAX_ROLES};
@@ -71,23 +71,17 @@ struct RoleChange {
     who: String,
 }
 
-/// A user_id as an admin command takes it: a leading `@` is allowed, as a
-/// client's mention sends it (Appendix A.3).
-fn target(word: &str) -> &str {
-    word.strip_prefix('@').unwrap_or(word)
-}
-
 impl State {
     /// `/admin <user_id>` gives an account the admin role, and
     /// `/admin remove <user_id>` takes it away. The sender gets a ~private
     /// notice before the result (§1).
-    pub(super) fn admin_command(
-        &mut self,
-        c: &Arc<Client>,
-        room_id: &str,
-        _body: &Object,
-        args: &str,
-    ) -> Result<Object, RpcError> {
+    pub(super) fn admin_command(&mut self, cx: &CommandCtx) -> Result<Object, RpcError> {
+        let CommandCtx {
+            client: c,
+            room_id,
+            args,
+            ..
+        } = *cx;
         let words: Vec<&str> = args.split_whitespace().collect();
         let (remove, user_id) = match words.as_slice() {
             ["remove", user_id] => (true, target(user_id)),
@@ -114,13 +108,13 @@ impl State {
     /// name is a label shown in `roles` (§3.3); `admin` also runs the admin
     /// commands, `admin` and `mod` remove others from rooms, and `bot` makes
     /// the user a bot. The sender gets a ~private notice before the result.
-    pub(super) fn role_command(
-        &mut self,
-        c: &Arc<Client>,
-        room_id: &str,
-        _body: &Object,
-        args: &str,
-    ) -> Result<Object, RpcError> {
+    pub(super) fn role_command(&mut self, cx: &CommandCtx) -> Result<Object, RpcError> {
+        let CommandCtx {
+            client: c,
+            room_id,
+            args,
+            ..
+        } = *cx;
         let words: Vec<&str> = args.split_whitespace().collect();
         let text = match words.as_slice() {
             [user_id] => {
