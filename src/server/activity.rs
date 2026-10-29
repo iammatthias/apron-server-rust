@@ -7,6 +7,7 @@ use super::client::Client;
 use super::protocol::*;
 use super::rooms::ReadCursor;
 use super::server::{Server, State, DEFAULT_ROOM_ID};
+use super::wake::Seen;
 use crate::obj;
 
 /// The longest typing a relay carries, in seconds (Cloudflare's
@@ -188,8 +189,12 @@ impl State {
                     read = true;
                 }
                 // Reading lowers the unread count the user's other devices
-                // show.
+                // show, and what waits or is held to push for the room up to
+                // the cursor is not needed (§4.9.4).
                 self.unread_changed_locked(&user_id, &room_id);
+                let seen = Seen::Through(&room_id, id);
+                self.drop_wakes_locked(&user_id, seen);
+                self.drop_held_locked(&user_id, seen);
             }
         }
         let mut typed = false;
