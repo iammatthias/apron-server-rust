@@ -384,6 +384,7 @@ fn test_roles_and_welcome() {
         Some(&admin_moderator),
         "resumed account's roles: {resumed:?}"
     );
+    expect_joined_wake(&ada);
     // `me` cannot set roles, nor clear them.
     let you = you_of(&ada.result(
         "me",

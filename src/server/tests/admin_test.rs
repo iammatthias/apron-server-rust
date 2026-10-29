@@ -142,6 +142,7 @@ fn test_admin_token_signs_in_as_admin() {
         }},
         "admin sign-in"
     );
+    expect_joined_wake(&c);
     expect_joined_default(&c, "admin");
     expect_membership(&watcher, "general", "admin", true);
     c.user_id = "admin".into();
@@ -217,6 +218,7 @@ fn test_admin_user_persists() {
     let (mut c, _) = dial_raw(&server);
     let result = passkey_result(&token_auth(&mut c, ADMIN_TOKEN));
     assert_eq!(you_of(&result)["roles"], strings(&["admin"]));
+    expect_joined_wake(&c);
     // Already in general: no join follows.
     c.expect_quiet();
 }

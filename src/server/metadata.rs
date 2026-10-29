@@ -203,10 +203,45 @@ impl State {
 
     /// Sends every connection a new `server` frame, which fully replaces
     /// the one it had (§3.1).
-    pub fn announce_server_locked(&self) {
-        for conn in self.clients.values() {
-            let client = &conn.client;
-            client.enqueue(&obj! {"method" => "server", "params" => self.server_params(client)});
+    pub fn announce_server_locked(&mut self) {
+        let clients: Vec<_> = self
+            .clients
+            .values()
+            .map(|conn| conn.client.clone())
+            .collect();
+        for client in clients {
+            self.send_server_locked(&client);
+        }
+    }
+
+    /// Sends a connection its `server` frame, noting whether it listed
+    /// wake scope `joined`.
+    pub fn send_server_locked(&mut self, client: &Client) {
+        let params = self.server_params(client);
+        let joined = params
+            .get("push")
+            .and_then(Json::as_object)
+            .is_some_and(|push| push["wake"].as_list().contains(&Json::from("joined")));
+        client.enqueue(&obj! {"method" => "server", "params" => params});
+        if let Some(conn) = self.clients.get_mut(&client.id) {
+            conn.wake_joined = joined;
+        }
+    }
+
+    /// After a sign-in or a role change: a new `server` frame for a
+    /// connection whose wake scopes changed, so its clients offer `joined`
+    /// exactly while it works. Other connections get nothing.
+    pub fn sync_server_locked(&mut self, client: &Client) {
+        let Some(conn) = self.clients.get(&client.id) else {
+            return;
+        };
+        let joined = !self.config.disable_push
+            && conn
+                .user
+                .as_deref()
+                .is_some_and(|user_id| self.wakes_joined(user_id));
+        if joined != conn.wake_joined {
+            self.send_server_locked(client);
         }
     }
 

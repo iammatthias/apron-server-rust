@@ -308,12 +308,22 @@ pub fn push_key(user_id: &str, url: &str) -> String {
     format!("{user_id} {url}")
 }
 
+/// The roles whose holders may wake for `joined` (§4.9.4), every message
+/// in a room they joined: moderators, as apron-server-cloudflare's
+/// JOINED_WAKE_ROLES.
+pub const JOINED_WAKE_ROLES: [&str; 2] = ["admin", "mod"];
+
 /// The `push` object of the server frame (§3.1), sent only with push
-/// enabled.
-pub fn server_push_params(st: &State) -> Object {
+/// enabled. `joined` is listed only where the connection's user may wake
+/// for it, since a server advertises only the scopes it implements.
+pub fn server_push_params(st: &State, joined: bool) -> Object {
+    let mut wake = WakeScope::URGENT | WakeScope::BADGE;
+    if joined {
+        wake |= WakeScope::JOINED;
+    }
     let mut push = obj! {
         "relay" => Object::new(),
-        "wake" => (WakeScope::URGENT | WakeScope::JOINED | WakeScope::BADGE).names(),
+        "wake" => wake.names(),
     };
     if let Some(vapid) = &st.vapid {
         push.insert(
@@ -337,6 +347,14 @@ impl UserState {
 }
 
 impl State {
+    /// Whether a user may be woken for `joined`: an account holding one of
+    /// JOINED_WAKE_ROLES, and no bot.
+    pub fn wakes_joined(&self, user_id: &str) -> bool {
+        self.users
+            .get(user_id)
+            .is_some_and(|u| u.persists() && u.has_any_role(&JOINED_WAKE_ROLES))
+    }
+
     /// The keys of a user's registrations, ordered by url.
     pub fn sorted_pushes(&self, user_id: &str) -> Vec<String> {
         let prefix = format!("{user_id} ");
@@ -451,7 +469,7 @@ impl State {
                 }
                 let members: Vec<String> = self.rooms[&room_id].members.iter().cloned().collect();
                 for id in members {
-                    if self.user_has_pushes(&id) {
+                    if self.user_has_pushes(&id) && self.wakes_joined(&id) {
                         *reasons.entry(id).or_default() |= WakeScope::JOINED;
                     }
                 }
@@ -1185,6 +1203,10 @@ impl Server {
             wake = parse_wake_names(&names);
         }
 
+        // joined is kept only for those who may wake for it.
+        if !st.wakes_joined(&user_id) {
+            wake = WakeScope(wake.0 & !WakeScope::JOINED.0);
+        }
         let device = st.clients[&c.id].device;
         let now = time::now();
         st.expire_pushes_locked(&user_id, &now);
