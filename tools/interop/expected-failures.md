@@ -8,9 +8,9 @@ coalescing and read-only guests. The tests below still fail, and they are the
 expected result.
 
 Last full run: 2026-10-28, after Track E (E1 to E9): 30 passed, 14 failed,
-all of them listed here. Before Track E, with the same shim flags that
-existed then (`--guest.posting`, `--push.hosts=*`), the five tests marked
-"before Track E" failed in the same way.
+all of them listed here. The five tests marked "before Track E" failed in
+the same way at 2d60b94, with `--guest.posting` and `--push.hosts=*` added
+to that commit's shim.
 
 | Test | Why it fails |
 |---|---|
