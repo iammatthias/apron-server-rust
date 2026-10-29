@@ -651,6 +651,7 @@ impl State {
             }
         }
         self.announce_status_locked(user_id);
+        self.sync_server_locked(c);
     }
 
     /// Forgets a closed connection, retiring its guest identity.

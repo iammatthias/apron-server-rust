@@ -220,6 +220,14 @@ impl State {
         u.active = rust_stdlib::time::now().unix_milli();
         self.touch_user(user_id);
         self.notify_profile_locked(user_id, None, &ExtObject::new(), &[]);
+        let clients: Vec<_> = self.users[user_id]
+            .clients
+            .iter()
+            .filter_map(|id| self.clients.get(id).map(|conn| conn.client.clone()))
+            .collect();
+        for client in clients {
+            self.sync_server_locked(&client);
+        }
         change.changed = true;
         Ok(change)
     }

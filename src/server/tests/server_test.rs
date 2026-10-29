@@ -99,7 +99,8 @@ fn test_server_frame() {
         params.get("signup")
     );
     // push offers relay and webpush, with the server's VAPID key, and the
-    // wake scopes it implements (§4.9).
+    // wake scopes it implements (§4.9): before sign-in, without joined,
+    // which only admins and mods wake for.
     let push = params["push"].as_object().expect("push");
     let webpush = push["webpush"].as_object().expect("push.webpush");
     let point = webpush["key"]
@@ -112,7 +113,7 @@ fn test_server_frame() {
     );
     assert!(
         push["relay"] == Json::from(Object::new())
-            && push["wake"] == strings(&["mentions", "replies", "private", "joined", "badge"])
+            && push["wake"] == strings(&["mentions", "replies", "private", "badge"])
             && push.len() == 3,
         "push: {push:?}"
     );

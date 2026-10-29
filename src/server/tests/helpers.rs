@@ -1041,6 +1041,29 @@ pub fn make_account(server: &TestServer, user_id: &str) {
         .invited = true;
 }
 
+/// The wake scopes of a `server` frame's push, failing on any other frame.
+pub fn server_wake(frame: &Object) -> Vec<String> {
+    assert_eq!(
+        frame.get("method"),
+        Some(&Json::from("server")),
+        "want server: {frame:?}"
+    );
+    frame["params"].as_object().unwrap()["push"]
+        .as_object()
+        .unwrap()["wake"]
+        .as_list()
+        .iter()
+        .map(|scope| scope.as_str().unwrap().to_owned())
+        .collect()
+}
+
+/// Reads the `server` frame a moderator's sign-in sends after its result,
+/// which lists wake scope `joined`.
+pub fn expect_joined_wake(c: &TestClient) {
+    let wake = server_wake(&c.read());
+    assert!(wake.iter().any(|s| s == "joined"), "wake scopes {wake:?}");
+}
+
 /// Lifts user_id's limit on push_register requests, for tests that make
 /// more than a minute's.
 pub fn unlimit_push_registers(server: &TestServer, user_id: &str) {

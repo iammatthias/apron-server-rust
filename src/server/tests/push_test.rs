@@ -588,6 +588,8 @@ fn test_push_wake_scopes() {
     let mut a = push_client(&server);
     make_account(&server, &a.user_id);
     add_account(&server, "carol", &[&a]);
+    // Only admins and mods wake for joined.
+    grant_role(&server, "carol", "mod");
     for (name, wake) in [
         ("default", WakeScope::DEFAULT),
         ("joined", WakeScope::JOINED),
@@ -698,6 +700,7 @@ fn test_push_respects_mutes() {
     let mut clients = push_group(&server, 2);
     let mut b = clients.pop().unwrap();
     let mut a = clients.pop().unwrap();
+    grant_role(&server, &b.user_id, "mod");
     b.result(
         "push_register",
         "all",
@@ -853,6 +856,7 @@ fn test_badge_pushes_coalesce() {
     let mut clients = push_group(&server, 2);
     let mut b = clients.pop().unwrap();
     make_account(&server, &b.user_id);
+    grant_role(&server, &b.user_id, "mod");
     let mut a = clients.pop().unwrap();
     b.result(
         "push_register",
@@ -1222,6 +1226,7 @@ fn test_push_unread_and_badge() {
     let mut clients = push_group(&server, 2);
     let mut b = clients.pop().unwrap();
     make_account(&server, &b.user_id);
+    grant_role(&server, &b.user_id, "mod");
     let mut a = clients.pop().unwrap();
     b.result(
         "push_register",
@@ -2652,4 +2657,97 @@ fn test_push_checks_hosts_again_before_each_push() {
         strs(&["/kept"]),
         "deliveries"
     );
+}
+
+/// joined is for admins and mods (apron-server-cloudflare's
+/// JOINED_WAKE_ROLES): a registration keeps it only for them, a wake checks
+/// the role as it is now, and a connection's server frame lists it only
+/// where its user may wake for it, with a new frame when that changes.
+#[test]
+fn test_joined_only_for_admins_and_mods() {
+    let relay = new_test_relay();
+    let mut config = default_config();
+    config.allow_insecure_push = true;
+    config.push_hosts = PushHosts::Any;
+    config.admin_token = super::admin_test::admin_config().admin_token;
+    let server = new_test_server(config);
+    let mut admin = super::admin_test::admin_on(&server, "http://localhost:5173");
+    let mut regular = push_client(&server);
+    let mut moderator = push_client(&server);
+    grant_role(&server, &moderator.user_id, "mod");
+    for c in [&mut regular, &mut moderator] {
+        c.drain();
+        let id = c.user_id.clone();
+        c.result(
+            "push_register",
+            "joined",
+            obj! {"kind" => "relay", "url" => format!("{}/{id}", relay.url), "wake" => list(&["joined", "mentions"])},
+        );
+    }
+    let wake_of = |user_id: &str| {
+        server.app.lock().pushes[&push_key(user_id, &format!("{}/{user_id}", relay.url))].wake
+    };
+    assert_eq!(
+        wake_of(&regular.user_id),
+        WakeScope::MENTIONS,
+        "a regular user's"
+    );
+    assert_eq!(
+        wake_of(&moderator.user_id),
+        WakeScope::MENTIONS | WakeScope::JOINED,
+        "a mod's"
+    );
+    // A registration that kept joined wakes for it only while the role does.
+    add_push(
+        &server,
+        &regular.user_id,
+        relay_push(format!("{}/kept", relay.url), WakeScope::JOINED),
+    );
+    go_idle(&mut regular);
+    go_idle(&mut moderator);
+    admin.drain();
+    save(
+        &mut admin,
+        "chatter",
+        obj! {"body" => obj! {"text" => "chatter"}},
+    );
+    let woken = paths(&relay.pushes(&server, &mut admin));
+    assert_eq!(
+        woken,
+        vec![format!("/{}", moderator.user_id)],
+        "joined wakes"
+    );
+
+    // A sign-in of a mod sends a server frame listing joined after the
+    // result; a regular user's sends none.
+    let joined = strs(&["mentions", "replies", "private", "joined", "badge"]);
+    let plain = strs(&["mentions", "replies", "private", "badge"]);
+    assert_eq!(admin.user_id, "admin");
+    let (mut again, frame) = dial_origin(&server, "http://localhost:5173");
+    assert_eq!(server_wake(&frame), plain, "before sign-in");
+    super::admin_test::token_auth(&mut again, super::admin_test::ADMIN_TOKEN);
+    assert_eq!(
+        server_wake(&again.read()),
+        joined,
+        "after an admin's sign-in"
+    );
+
+    // A role change sends `you`, then the server frame with the scopes it
+    // now gives.
+    let regular_id = regular.user_id.clone();
+    regular.drain();
+    super::admin_test::private_reply(&mut admin, &format!("/role {regular_id} mod"));
+    let you = regular.read();
+    assert!(
+        notification_params(&you, "user").contains_key("you"),
+        "{you:?}"
+    );
+    assert_eq!(server_wake(&regular.read()), joined, "after the grant");
+    super::admin_test::private_reply(&mut admin, &format!("/role {regular_id} mod"));
+    regular.notification("user");
+    assert_eq!(server_wake(&regular.read()), plain, "after the revocation");
+    // Another role changes no scopes, so no server frame follows.
+    super::admin_test::private_reply(&mut admin, &format!("/role {regular_id} friend"));
+    regular.notification("user");
+    regular.expect_quiet();
 }

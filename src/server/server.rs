@@ -470,6 +470,9 @@ pub struct Conn {
     pub email_sends: Option<Limiter>,
     /// The connection's latest proposal, which may have been dropped since.
     pub proposal: Option<ProposalId>,
+    /// Whether the last `server` frame it got listed wake scope `joined`
+    /// (push.rs, `wakes_joined`).
+    pub wake_joined: bool,
 }
 
 impl Client {
@@ -1250,6 +1253,7 @@ impl Server {
                     device: [0; 32],
                     email_sends: None,
                     proposal: None,
+                    wake_joined: false,
                 },
             );
             // The server announcement and the welcome are queued before the
@@ -1712,7 +1716,15 @@ impl State {
             params.insert("status".into(), optional_statuses().into());
         }
         if !self.config.disable_push {
-            params.insert("push".into(), super::push::server_push_params(self).into());
+            let joined = self
+                .clients
+                .get(&client.id)
+                .and_then(|conn| conn.user.as_deref())
+                .is_some_and(|user_id| self.wakes_joined(user_id));
+            params.insert(
+                "push".into(),
+                super::push::server_push_params(self, joined).into(),
+            );
         }
         params.insert("welcome".into(), self.welcome(origin).into());
         self.insert_server_metadata(&mut params);

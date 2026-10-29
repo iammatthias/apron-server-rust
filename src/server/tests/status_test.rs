@@ -817,6 +817,8 @@ fn test_after_auth_mutes_and_statuses() {
         "frames before the auth result: {before:?}"
     );
     owner.expect_quiet();
+    // A moderator's sign-in first sends a server frame listing joined.
+    expect_joined_wake(&c);
     let frames = c.drain();
     assert!(frames.len() == 5, "frames after auth: {frames:?}");
     check_mute(&frames[0], "", &Json::from(true));
