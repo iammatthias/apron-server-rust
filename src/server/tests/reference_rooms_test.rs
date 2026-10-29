@@ -425,7 +425,8 @@ fn test_read_cursors() {
     b.expect_quiet();
     a.expect_quiet();
     // activity is a notification: one sent with an id is processed as one,
-    // unanswered, and an unknown cursor changes nothing (§1).
+    // unanswered (§1); this cursor names no message and is behind the kept
+    // one, so it changes nothing.
     a.write(&obj! {"method" => "activity", "id" => "unknown", "params" => obj! {"room_id" => "general", "read_message_id" => "999"}});
     a.expect_quiet();
     b.expect_quiet();
