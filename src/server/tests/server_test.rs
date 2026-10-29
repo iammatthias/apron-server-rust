@@ -1978,3 +1978,85 @@ fn test_reaction_caps_and_tombstones() {
     );
     assert!(frame.contains_key("result"), "{frame:?}");
 }
+
+/// body.mentions keeps the user_ids as sent, once each, each at most 256
+/// bytes (apron-server-cloudflare's "stores body.mentions as sent").
+#[test]
+fn test_mentions_are_user_ids() {
+    let server = new_test_server(default_config());
+    let mut c = dial_test_client(&server);
+    let me = c.user_id.clone();
+    let (_, plain) = save(
+        &mut c,
+        "plain",
+        obj! {"body" => obj! {"text" => format!("@{me} hello")}},
+    );
+    assert!(
+        !plain["body"].as_object().unwrap().contains_key("mentions"),
+        "{plain:?}"
+    );
+    let (_, listed) = save(
+        &mut c,
+        "listed",
+        obj! {"body" => obj! {"text" => "no at signs", "mentions" => strings(&[&me, "bob", &me])}},
+    );
+    assert_eq!(
+        listed["body"].as_object().unwrap()["mentions"],
+        strings(&[&me, "bob"])
+    );
+    let long = "b".repeat(257);
+    let frame = reply(
+        &mut c,
+        "message",
+        "long",
+        obj! {"body" => obj! {"text" => "x", "mentions" => strings(&[&long])}},
+    );
+    assert_eq!(error_code(&frame), Some(CODE_TOO_LARGE), "{frame:?}");
+    let (_, fits) = save(
+        &mut c,
+        "fits",
+        obj! {"body" => obj! {"text" => "x", "mentions" => strings(&[&"b".repeat(256)])}},
+    );
+    assert!(fits.contains_key("body"));
+}
+
+/// A sender's `og` keeps only its title, description and site_name, each
+/// one plain line within its length; media go (apron-server-cloudflare's
+/// withCleanOg).
+#[test]
+fn test_client_og_is_kept_as_text() {
+    let server = new_test_server(default_config());
+    let mut c = dial_test_client(&server);
+    let og = obj! {
+        "title" => "  Release\u{7}notes\u{202e}\n",
+        "description" => "d".repeat(600),
+        "site_name" => 7i64,
+        "image" => obj! {"url" => "https://tracker.example/pixel.png"},
+    };
+    let (id, snapshot) = save(
+        &mut c,
+        "card",
+        obj! {"body" => obj! {"text" => "see", "embeds" => vec![Json::from(obj! {"kind" => "link", "url" => "https://example.com/", "og" => og})]}},
+    );
+    let want = obj! {"title" => "Release notes", "description" => format!("{}…", "d".repeat(511))};
+    let embed = embeds_of(&snapshot)[0].clone();
+    assert_eq!(embed["og"], Json::from(want.clone()), "{embed:?}");
+    // An edit that resubmits it keeps it; one with nothing left drops it.
+    let (_, edited) = save(
+        &mut c,
+        "edit",
+        obj! {"message_id" => id.as_str(), "body" => obj! {"text" => "see", "embeds" => vec![Json::from(embed.clone())]}},
+    );
+    assert_eq!(embeds_of(&edited)[0]["og"], Json::from(want));
+    let mut bare = embed;
+    bare.insert(
+        "og".into(),
+        obj! {"image" => obj! {"url" => "https://x.example/"}}.into(),
+    );
+    let (_, dropped) = save(
+        &mut c,
+        "drop",
+        obj! {"message_id" => id.as_str(), "body" => obj! {"text" => "see", "embeds" => vec![Json::from(bare)]}},
+    );
+    assert!(!embeds_of(&dropped)[0].contains_key("og"));
+}
