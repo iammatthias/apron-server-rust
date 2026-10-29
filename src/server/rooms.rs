@@ -269,6 +269,11 @@ impl State {
         }
     }
 
+    /// Reports whether the room, or a room it is a thread of, is private.
+    pub fn is_private(&self, room_id: &str) -> bool {
+        !self.audience(room_id).0
+    }
+
     /// Reports whether a record in `from`, such as a move snapshot naming
     /// another room, would reach someone who cannot see `to`.
     pub fn reveals_to(&self, from: &str, to: &str) -> bool {
