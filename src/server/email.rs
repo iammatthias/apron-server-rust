@@ -541,7 +541,7 @@ impl State {
         let now = time::now();
         let busy = || {
             retry_after(
-                "Too many sign-ins in progress; try again shortly",
+                "Email sign-in limit reached for the server",
                 EMAIL_RESEND_INTERVAL,
             )
         };
@@ -551,14 +551,11 @@ impl State {
             let n = address.sends.len();
             let wait = address.sends[n - 1].add(EMAIL_RESEND_INTERVAL).sub(&now);
             if wait.as_nanos() > 0 {
-                return Err(retry_after(
-                    "An email was just sent to this address; try again shortly",
-                    wait,
-                ));
+                return Err(retry_after("Email limit reached for this address", wait));
             }
             if n >= MAX_EMAIL_SENDS_PER_WINDOW {
                 return Err(retry_after(
-                    "Too many emails were sent to this address; try again later",
+                    "Email limit reached for this address",
                     address.sends[0].add(EMAIL_WINDOW).sub(&now),
                 ));
             }
@@ -568,10 +565,7 @@ impl State {
         };
         let delay = wait(&mut budget.sends, &now);
         if delay.as_nanos() > 0 {
-            return Err(retry_after(
-                "Too many sign-ins proposed; try again later",
-                delay,
-            ));
+            return Err(retry_after("Sign-in limit reached for this network", delay));
         }
         let conn = self.conn_mut(c)?;
         let sends = conn.email_sends.get_or_insert_with(|| {
@@ -579,10 +573,7 @@ impl State {
         });
         let delay = wait(sends, &now);
         if delay.as_nanos() > 0 {
-            return Err(retry_after(
-                "Too many sign-ins proposed; try again later",
-                delay,
-            ));
+            return Err(retry_after("Sign-in limit reached", delay));
         }
         let account = conn.user.clone();
         let deliver = match &account {
@@ -621,7 +612,7 @@ impl State {
         }
         if self.email.slots.load(Ordering::SeqCst) >= MAX_CONCURRENT_EMAIL_SENDS {
             return Err(retry_after(
-                "Too many emails are being sent; try again shortly",
+                "Email sending limit reached for the server",
                 EMAIL_RESEND_INTERVAL,
             ));
         }

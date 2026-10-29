@@ -1219,6 +1219,11 @@ fn test_status_rate_limit() {
         obj! {"room_id" => "general", "mute" => true},
     ] {
         let failure = b.status_error(params.clone(), CODE_RETRY_AFTER);
+        assert_eq!(
+            failure.get("message"),
+            Some(&Json::from("Status changes limited")),
+            "the refusal names the limit, not its rate"
+        );
         let wait = failure
             .get("data")
             .and_then(Json::as_object)

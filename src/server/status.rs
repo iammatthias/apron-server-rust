@@ -126,7 +126,7 @@ pub fn admit_status_locked(u: &mut UserState) -> Result<(), RpcError> {
     let delay = reservation.delay_from(&now);
     if delay.as_nanos() > 0 {
         limiter.cancel_at(&reservation, &now);
-        return Err(retry_after("Too many status changes; slow down", delay));
+        return Err(retry_after("Status changes limited", delay));
     }
     Ok(())
 }
