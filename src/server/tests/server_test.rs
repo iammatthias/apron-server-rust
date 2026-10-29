@@ -1889,3 +1889,92 @@ fn test_sign_in_notifications_follow_the_result() {
     check_status(&frames[2], &a.user_id, "online");
     b.expect_quiet();
 }
+
+/// A reaction set holds at most MAX_DISTINCT_EMOJI emoji, a message takes
+/// sets from at most MAX_REACTING_USERS users, and a tombstone takes none,
+/// though a set on it may still be cleared (apron-server-cloudflare's
+/// "rejects new reactions on tombstones and caps reacting users per
+/// message").
+#[test]
+fn test_reaction_caps_and_tombstones() {
+    use crate::server::messages::MAX_REACTING_USERS;
+    assert_eq!(
+        (MAX_DISTINCT_EMOJI, MAX_REACTING_USERS),
+        (8, 32),
+        "Cloudflare's reaction limits"
+    );
+    let server = new_test_server(default_config());
+    let mut author = dial_test_client(&server);
+    let (id, _) = save(
+        &mut author,
+        "post",
+        obj! {"body" => obj! {"text" => "popular"}},
+    );
+    let eight: Vec<String> = (0..MAX_DISTINCT_EMOJI).map(|i| format!("e{i}")).collect();
+    let eight: Vec<&str> = eight.iter().map(String::as_str).collect();
+    react(&mut author, "eight", &id, &eight);
+    let mut reactors = vec![author];
+    while reactors.len() < MAX_REACTING_USERS {
+        let mut c = dial_test_client(&server);
+        let frame = reply(
+            &mut c,
+            "reactions",
+            "one",
+            obj! {"message_id" => id.as_str(), "emojis" => strings(&["👍"])},
+        );
+        assert!(frame.contains_key("result"), "{frame:?}");
+        reactors.push(c);
+    }
+    let mut late = dial_test_client(&server);
+    let denied = |c: &mut TestClient, request: &str, emojis: &[&str], message: &str| {
+        let frame = reply(
+            c,
+            "reactions",
+            request,
+            obj! {"message_id" => id.as_str(), "emojis" => strings(emojis)},
+        );
+        assert_eq!(
+            frame["error"]
+                .as_object()
+                .map(|e| (e["code"].clone(), e["message"].clone())),
+            Some((Json::from(CODE_DENIED), Json::from(message))),
+            "{request}"
+        );
+    };
+    denied(
+        &mut late,
+        "late",
+        &["👍"],
+        "reaction limit reached for this message",
+    );
+    // Those who reacted may still change their set.
+    let frame = reply(
+        &mut reactors[1],
+        "reactions",
+        "change",
+        obj! {"message_id" => id.as_str(), "emojis" => strings(&["🎉"])},
+    );
+    assert!(frame.contains_key("result"), "{frame:?}");
+
+    let author = &mut reactors[0];
+    let frame = reply(
+        author,
+        "message",
+        "delete",
+        obj! {"message_id" => id.as_str(), "deleted" => true},
+    );
+    assert!(frame.contains_key("result"), "{frame:?}");
+    denied(
+        &mut reactors[1],
+        "on-tombstone",
+        &["👀"],
+        "cannot react to a deleted message",
+    );
+    let frame = reply(
+        &mut reactors[1],
+        "reactions",
+        "clear",
+        obj! {"message_id" => id.as_str(), "emojis" => strings(&[])},
+    );
+    assert!(frame.contains_key("result"), "{frame:?}");
+}
