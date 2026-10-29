@@ -3,8 +3,8 @@
 
 use super::helpers::*;
 use crate::obj;
+use crate::server::activity::{ACTIVITY_RELAYS_PER_MINUTE, MAX_TYPING_SECONDS};
 use crate::server::protocol::*;
-use crate::server::rooms::{ACTIVITY_RELAYS_PER_MINUTE, MAX_TYPING_SECONDS};
 
 fn activities(frames: &[Object]) -> Vec<Object> {
     frames
