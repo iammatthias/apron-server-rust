@@ -455,7 +455,6 @@ impl LimitTable {
             .collect()
     }
 
-    /// Forgets the rows of a user.
     pub fn forget_user(&mut self, user_id: &str) {
         self.rows
             .retain(|(_, principal), _| *principal != Principal::User(user_id.to_owned()));

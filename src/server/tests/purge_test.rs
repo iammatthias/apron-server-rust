@@ -43,7 +43,7 @@ pub(super) fn named_account(server: &TestServer, name: &str) -> (TestClient, Str
 }
 
 /// What `entangle` made: the user's message ids, the thread they created,
-/// their device tokens and their invite token.
+/// their device tokens and their bot's token.
 pub(super) struct Entangled {
     pub message: String,
     pub upload_message: String,
@@ -161,8 +161,7 @@ pub(super) fn entangle(
         );
         st.push_woken
             .insert((user_id.clone(), "general".into()), time::now());
-        let (token, key) = crate::server::invites::new_token("apron_invite_");
-        drop(token);
+        let (_, key) = crate::server::invites::new_token("apron_invite_");
         st.invites.insert(
             key,
             crate::server::invites::InviteToken {
