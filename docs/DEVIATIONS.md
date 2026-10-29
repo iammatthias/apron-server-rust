@@ -176,14 +176,16 @@ working.
 
 ### `/invite-bot` and bot users (§4.1, §3.2, §3.3)
 
-**Reference.** apron-server-cloudflare caps registrations, ends the token
-notice with a `Say hello when you join` line, closes a replaced token's
-connections with 1008, and makes a second bot, `bot_<new>`, for an owner
-renamed with `/rename`.
+**Reference.** apron-server-cloudflare counts a new bot against its
+registration limits, ends the token notice with a `Say hello when you join`
+line, closes a replaced token's connections with 1008, and makes a second
+bot, `bot_<new>`, for an owner renamed with `/rename`.
 
 **This server.**
 
-- No registration caps. One bot per account bounds the bots.
+- No registration limits (see
+  [Registration limits](#registration-limits-spec-6)). One bot per account
+  bounds the bots.
 - No `Say hello` line, so bots do not greet rooms.
 - A replaced token's connections close as described in
   [Closing a connection](#closing-a-connection).
@@ -220,14 +222,12 @@ connection with WebSocket close code 1008 and a reason.
 **This server.** Queues a connection-level error frame (no `id`, code
 `denied`, the reason as its message) and then closes the TCP connection
 without a close frame. Policy closes (frame rate, repeated violations,
-authentication timeout) still use close code 1008. Once the error is
-queued, the server ignores every frame the connection sends, and an `auth`
-already read is `denied`.
+authentication timeout) still use close code 1008. As on Cloudflare, the
+server runs no frame the connection sends after the error is queued.
 
 **Why.** The error frame tells the client why in the protocol. A close
 handshake would wait on a peer that may not be reading, behind up to 128
-queued batches. Ignoring later frames means a revoked token stops working
-at once, even for a request already read.
+queued batches.
 
 ### Liveness (§1; SPEC §3, Socket lifecycle)
 
@@ -565,6 +565,23 @@ its `auth`. There is no daily admission budget.
 **Why.** A client sees the reason in the protocol instead of a failed
 handshake. The daily budget guards Cloudflare's bill.
 
+### Registration limits (SPEC §6)
+
+**Reference.** apron-server-cloudflare counts each new account, bot and
+added passkey as a registration: 5 a UTC day per IP key and 300 a day for
+the server. Past either, the request is `retry_after` with `Registration
+limit reached for this network` or `Registration limit reached` until the
+day ends. A new account or bot past 10,000 identities is `denied` with
+`registration_closed`.
+
+**This server.** Has no registration limits. Passkey registration, email
+sign-in, `/invite-token`, `/invite` sign-ups and `/invite-bot` make
+accounts without a count.
+
+**Why.** Cloudflare's counts bound the rows sign-ups write against its
+storage budget, and this server has no storage budget (see
+[Budget stops](#budget-stops-storage-failures-and-admin-alerts-spec-6)).
+
 ### Posting limits (SPEC §6, Posting), `--limit.*posts*`
 
 **Reference.** apron-server-cloudflare keeps its limiter rows in SQLite, so
@@ -601,7 +618,11 @@ requests`.
 server-wide, Cloudflare's Paid number), each a flag (`--limit.frames-*`,
 `--limit.server-frames-per-minute`, `--limit.policy-violations`, 0 is
 unlimited). The refusal says `Server is busy with too many requests`. There
-are no leases, no daily budget and no pending-frame bound.
+are no leases, no daily budget and no pending-frame bound. A binary frame
+closes with 1003 `text frames required`, and a frame over the size limit
+closes with 1009 `read limited at <n> bytes`. Cloudflare's reasons are
+`Binary application frames are not supported` and `Frame exceeds the
+maximum size`.
 
 **Why.** A connection's frames are read one at a time and each runs to
 completion, so at most one is pending. Leases and the daily budget save
@@ -633,14 +654,15 @@ a 60-second retry would only delay clients.
 ### Request deduplication (§1.2; SPEC §8)
 
 **Reference.** apron-server-cloudflare keeps every accepted mutating
-request for 24 hours in SQLite, as a SHA-256 of its method and canonical
-params.
+request with its result for 24 hours in SQLite, keyed by user and request
+id, with a SHA-256 of its method and canonical params. It keeps a guest's
+requests the same way.
 
-**This server.** Keeps the same key and hash with the result. It stores an
+**This server.** Keeps the same key, hash and result. It stores an
 account's entries as `dedup` store entries, so a retry after a restart
-replays the result. A guest's live only in memory, since its identity ends
-with its connections. At most 1,024 a user are kept, and past that the
-oldest go early. Reads (`history`, `room_list`) are not kept.
+replays the result. A guest's entries stay only in memory, since its
+identity ends with its connections. At most 1,024 entries a user are kept,
+and past that the oldest go early.
 
 **Why.** The bound keeps a flooding client's ids from growing the store
 without end.
@@ -656,6 +678,37 @@ of 0 to 60 seconds (`--limit.status-coalesce-seconds`,
 
 **Why.** Cloudflare's granularity saves its SQL writes. The protocol has
 `seen` exact.
+
+### Push registration (§4.9)
+
+**Reference.** apron-server-cloudflare allows 10 `push_register` requests a
+user in any 60 seconds. It refuses a `wake` of more than 16 names with
+`denied` and a name over 64 characters with `too_large`. It refuses a `url`
+that carries credentials or a port, an IP address, a single-label host, or
+a host under an internal suffix such as `.local` or `.internal`.
+
+**This server.** Has the same numbers: 5 registrations a user, expiry after
+7 days, URLs of at most 512 bytes, and 10 requests a minute. These differ:
+
+- The 10 requests are a bucket that refills one every 6 seconds, so a user
+  can make about 20 in the first minute. `retry_after` names the wait for
+  the next one.
+- A `wake` past 16 names, or a name past 64 bytes, is not refused. The
+  extra names are ignored.
+- A `url` may name a port or a public IP address. Only credentials, a
+  trailing dot, internal address literals and `localhost` are refused. With
+  the default `--push.hosts`, only the port can reach a push.
+- The texts differ. An unknown kind is `Unknown push kind "<kind>"; this
+  server supports relay and webpush`. A long `url` is `url is at most 512
+  bytes and token at most 4096`. A bad `push_id` is `push_id is 1 to 64
+  letters, digits, _ or -`. A bad `url` is `url must be an absolute URL`,
+  `url must use https`, `url must name a host without a trailing dot` or
+  `url must name a public host`. A bad `keys.p256dh` is `keys.p256dh must
+  be an uncompressed P-256 point in base64url` or `keys.p256dh is not a
+  point on P-256`.
+
+**Why.** The checks and texts predate the reference. The host list, not the
+address checks, keeps pushes to the browsers' push services.
 
 ### Push wakes (§4.9)
 
@@ -673,7 +726,7 @@ held wakes, with these differences:
 - Coalescing times live in memory, so a restart forgets them.
 - Held wakes are kept per user.
 - No server, sender or recipient allowances. Each user gets at most 1,000
-  pushes a UTC day.
+  pushes a UTC day, counting only those the endpoint accepted.
 
 **Why.** The allowances bound a metered platform's spend. The per-user cap
 already bounds a flood here.
