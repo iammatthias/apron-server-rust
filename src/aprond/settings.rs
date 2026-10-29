@@ -55,7 +55,7 @@ pub struct Settings {
     pub apple_app_ids: Vec<String>,
     /// `--unfurl.enable`, an extension Go lacks.
     pub unfurl: bool,
-    /// The negation of `--guest.read-only`, an extension Go lacks.
+    /// `--guest.posting`, an extension Go lacks.
     pub guest_posting: bool,
     /// `--history.retention`, an extension Go lacks; `None` keeps history.
     pub retention: Option<Duration>,
@@ -160,7 +160,7 @@ pub fn server_settings(options: &Options) -> Result<Settings, String> {
     }
     config.apple_app_ids = options.apple.app_ids.clone();
     config.unfurl = options.unfurl.enable;
-    config.guest_posting = !options.guest.read_only;
+    config.guest_posting = options.guest.posting;
     config.retention = parse_retention(&options.history.retention)?;
     Ok(config)
 }

@@ -18,7 +18,7 @@ use super::webauthn_test::{
 use crate::obj;
 use crate::server::email::*;
 use crate::server::protocol::*;
-use crate::server::{default_config, Config, Server};
+use crate::server::{Config, Server};
 use crate::store::{self, Store};
 
 /// An EmailSender that keeps what it is asked to send.

@@ -7,7 +7,6 @@ use rust_stdlib::time::{self, Duration};
 
 use super::helpers::*;
 use crate::obj;
-use crate::server::default_config;
 use crate::server::messages::{MAX_DISTINCT_EMOJI, MAX_EMOJI_BYTES};
 use crate::server::protocol::*;
 use crate::server::rooms::MAX_DESCRIPTION_BYTES;
@@ -87,7 +86,8 @@ fn test_server_frame() {
             "embed:stream",
             "command",
             "status",
-            "ext"
+            "ext",
+            "ext:settings"
         ]),
         "capabilities"
     );
@@ -118,26 +118,29 @@ fn test_server_frame() {
             && push.len() == 3,
         "push: {push:?}"
     );
-    // ext is a capability (§4.12); by default the server frame carries no
-    // ext of its own.
-    assert!(
-        !params.contains_key("ext"),
-        "server.ext: {:?}",
-        params.get("ext")
+    // ext:settings always carries every key apron-server-cloudflare sends;
+    // the default config keeps guests read-only and bounds private rooms at
+    // 20, and this one lets guests post.
+    assert_eq!(
+        params["ext"],
+        Json::from(obj! {"settings" => obj! {
+            "guest_posting" => true, "read_cursors" => true, "add_members" => true,
+            "private_rooms" => f(20),
+        }}),
+        "server.ext"
     );
-    // A bound on the private rooms a user may be in is ext:settings'
-    // private_rooms.
-    let mut bounded = default_config();
-    bounded.max_private_rooms = 20;
-    let bounded_server = new_test_server(bounded);
-    let (_, frame) = dial_raw(&bounded_server);
+    // Without a bound, private_rooms is absent, as no stated limit is.
+    let mut unbounded = default_config();
+    unbounded.max_private_rooms = 0;
+    let unbounded_server = new_test_server(unbounded);
+    let (_, frame) = dial_raw(&unbounded_server);
     let params = frame["params"].as_object().unwrap();
-    assert!(
-        params["capabilities"]
-            .as_list()
-            .contains(&Json::from("ext:settings"))
-            && params["ext"] == Json::from(obj! {"settings" => obj! {"private_rooms" => f(20)}}),
-        "bounded private rooms: {params:?}"
+    assert_eq!(
+        params["ext"],
+        Json::from(obj! {"settings" => obj! {
+            "guest_posting" => true, "read_cursors" => true, "add_members" => true,
+        }}),
+        "unbounded private rooms"
     );
 
     // A token only signs in, so signup lists the other schemes.
@@ -198,16 +201,17 @@ fn test_guest_auth() {
         obj! {"scheme" => "guest", "name" => "Ada", "agent" => "apron-test/1"},
     );
     let you = you_of(&result);
+    // A requested name is not honored: the guest is named after its number.
     assert!(
         you["user_id"] == Json::from("guest_1")
-            && you["name"] == Json::from("Ada")
+            && you["name"] == Json::from("Guest 1")
             && before.is_empty(),
         "guest identity {you:?} after {before:?}"
     );
     let membership = check_joined_default(&c.read(), "guest_1");
     let want_membership = obj! {
         "log_id" => membership["log_id"].clone(), "room_id" => "general",
-        "members" => vec![Json::from(obj! {"user" => obj! {"user_id" => "guest_1", "name" => "Ada"}, "joined" => true})],
+        "members" => vec![Json::from(obj! {"user" => obj! {"user_id" => "guest_1", "name" => "Guest 1"}, "joined" => true})],
     };
     assert_eq!(membership, want_membership, "membership");
     // No room_update follows auth; the client lists the rooms it has joined.
@@ -233,7 +237,7 @@ fn test_guest_auth() {
 }
 
 #[test]
-fn test_auth_honors_requested_user_ids() {
+fn test_guest_auth_ignores_requested_identity() {
     let server = new_test_server(default_config());
     let mut held: Vec<TestClient> = Vec::new();
     let mut auth = |id: &str, mut params: Object| -> String {
@@ -241,73 +245,30 @@ fn test_auth_honors_requested_user_ids() {
         params.insert("scheme".into(), "guest".into());
         let (_, result) = c.request("auth", id, params);
         held.push(c);
-        you_of(&result)["user_id"].as_str().unwrap().to_owned()
+        let you = you_of(&result);
+        let user_id = you["user_id"].as_str().unwrap().to_owned();
+        assert_eq!(
+            you["name"],
+            Json::from(format!("Guest {}", &user_id["guest_".len()..])),
+            "{id}: {you:?}"
+        );
+        user_id
     };
-    // An honored request takes no guest number.
-    assert_eq!(
-        auth("ada", obj! {"user_id" => "ada", "name" => "Ada"}),
-        "ada",
-        "requested user_id"
-    );
-    // A used ID, in any case, a system identity, a room, IDs outside the
-    // suggested convention, and anything in the counter's guest_ namespace
-    // are not honored; each such auth takes the next guest number.
-    let mut next = 1;
-    for (i, requested) in [
-        "ada",
-        "ADA",
-        "@server",
-        "~server",
-        "~alice",
-        "general",
-        "General",
-        "1724803200042",
-        "ada@example.com",
-        "carol:b.example",
-        "trailing.",
-        "guest_1",
-        "guest_99",
-        "GUEST_98",
-        "Guest_7",
-        "guest_05",
-        "guest_abc",
-        "guest_",
-        "user_1",
-        "USER_x",
-    ]
-    .iter()
-    .enumerate()
+    // A requested user_id or name is not honored, as apron-server-cloudflare
+    // does not: every guest takes the next guest number, and its name.
+    for (i, requested) in ["ada", "guest_7", "guest_1", "user_1", "guest"]
+        .iter()
+        .enumerate()
     {
-        let want = format!("guest_{next}");
         assert_eq!(
-            auth(&format!("r{i}"), obj! {"user_id" => *requested}),
-            want,
-            "requested {requested:?}"
-        );
-        next += 1;
-    }
-    // Refused guest_<n> requests claimed nothing: the counter reaches those
-    // numbers in sequence.
-    for i in next..=99 {
-        assert_eq!(
-            auth(&format!("n{i}"), Object::new()),
-            format!("guest_{i}"),
-            "guest {i}"
-        );
-    }
-    // Prefixes that merely resemble the namespace are ordinary requests.
-    for requested in ["guest", "guest-1", "guests_1"] {
-        assert_eq!(
-            auth(requested, obj! {"user_id" => requested}),
-            requested,
+            auth(
+                &format!("r{i}"),
+                obj! {"user_id" => *requested, "name" => "Ada"}
+            ),
+            format!("guest_{}", i + 1),
             "requested {requested:?}"
         );
     }
-    assert_eq!(
-        auth("last", Object::new()),
-        "guest_100",
-        "counter after honored requests"
-    );
     // A user_id is never empty and has no whitespace or control characters
     // (§2.4): requesting one that could be no user_id is invalid_params,
     // with any scheme the server offers, and takes no guest number. A
@@ -341,7 +302,7 @@ fn test_auth_honors_requested_user_ids() {
     );
     assert_eq!(
         auth("after", Object::new()),
-        "guest_101",
+        "guest_6",
         "counter after invalid requests"
     );
 }
@@ -1123,8 +1084,8 @@ fn test_move_appears_in_both_rooms_and_carries_reactions() {
         "carried reactions record: {carried:?}"
     );
     let want_sets = Json::Array(vec![
-        obj! {"from" => obj! {"user_id" => "guest_1"}, "emojis" => strings(&["👍"])}.into(),
-        obj! {"from" => obj! {"user_id" => "guest_2"}, "emojis" => strings(&["🚀"])}.into(),
+        obj! {"from" => obj! {"user_id" => "guest_1", "name" => "Guest 1"}, "emojis" => strings(&["👍"])}.into(),
+        obj! {"from" => obj! {"user_id" => "guest_2", "name" => "Guest 2"}, "emojis" => strings(&["🚀"])}.into(),
     ]);
     assert_eq!(carried["reactions"], want_sets, "carried sets");
 
@@ -1211,7 +1172,7 @@ fn test_reactions() {
     let set = react(&mut c, "set", &id, &["👍", "🎉", "👍"]);
     let want = obj! {
         "log_id" => set["log_id"].clone(), "message_id" => id.as_str(), "room_id" => "general",
-        "reactions" => vec![Json::from(obj! {"from" => obj! {"user_id" => "guest_1"}, "emojis" => strings(&["👍", "🎉"])})],
+        "reactions" => vec![Json::from(obj! {"from" => obj! {"user_id" => "guest_1", "name" => "Guest 1"}, "emojis" => strings(&["👍", "🎉"])})],
     };
     assert_eq!(set, want, "reactions broadcast");
     // An unchanged set, in any order, logs nothing.
@@ -1361,7 +1322,7 @@ fn test_history_paginates_across_record_kinds() {
     let from = &defaulted["messages"].as_list()[0].as_object().unwrap()["from"];
     assert_eq!(
         *from,
-        Json::from(obj! {"user_id" => "guest_1"}),
+        Json::from(obj! {"user_id" => "guest_1", "name" => "Guest 1"}),
         "logged from changed"
     );
 
@@ -1791,7 +1752,7 @@ fn test_activity_relays_typing_with_inline_identity() {
     let (thread, _) = save_room(&mut c, "thread", obj! {"parent_room_id" => "general"});
     c.write(&obj! {"method" => "activity", "params" => obj! {"room_id" => thread.as_str(), "typing" => f(8), "from" => obj! {"user_id" => "forged"}}});
     let params = c.notification("activity");
-    let want = obj! {"room_id" => thread.as_str(), "from" => obj! {"user_id" => "guest_1"}, "typing" => f(8)};
+    let want = obj! {"room_id" => thread.as_str(), "from" => obj! {"user_id" => "guest_1", "name" => "Guest 1"}, "typing" => f(8)};
     assert_eq!(params, want, "activity");
     c.write(&obj! {"method" => "activity", "params" => obj! {"room_id" => thread.as_str(), "typing" => f(0)}});
     let stop = c.notification("activity");

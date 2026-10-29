@@ -97,7 +97,7 @@ pub struct UnfurlOptions {
 /// An extension Go lacks (docs/DEVIATIONS.md).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct GuestOptions {
-    pub read_only: bool,
+    pub posting: bool,
 }
 
 /// An extension Go lacks (docs/DEVIATIONS.md).
@@ -172,7 +172,7 @@ pub static GROUPS: &[Group] = &[
             spec!("max-listener-connections", Int, max_listener_connections, [], [], "Maximum concurrent TCP connections on the listener, HTTP included; 0 is unlimited"),
             spec!("messages-per-minute", Int, messages_per_minute, [], [], "Burst of new messages, room_set requests, and /avatar commands per user, refilled over a minute; 0 is unlimited"),
             spec!("max-listed-members", Int, max_listed_members, ["1000"], [], "Members listed per room in room_list and room_update; a larger room lists its most recently active ones and member_count. 0 is unlimited"),
-            spec!("max-private-rooms", Int, max_private_rooms, [], [], "Top-level private rooms one user may be in at once, created or added to, such as on a public deployment; 0 is unlimited"),
+            spec!("max-private-rooms", Int, max_private_rooms, ["20"], [], "Top-level private rooms one user may be in at once, created or added to, such as on a public deployment; 0 is unlimited"),
             spec!("debug-addr", Str, debug_addr, [], [], "Listen address for unauthenticated pprof and expvar under /debug/, such as 127.0.0.1:6060; empty disables"),
             spec!("store", Str, store, [], [], "Where state is kept: sqlite:<path> for a SQLite database, or memory to keep nothing across restarts"),
             spec!("client-ip-header", Str, client_ip_header, [], [], "Request header a reverse proxy puts the client's address in, such as X-Forwarded-For (its last entry) or X-Real-IP, for per-client limits; set only behind a proxy that sets it"),
@@ -251,7 +251,7 @@ pub static GROUPS: &[Group] = &[
         name: "Guests",
         namespace: "guest",
         options: &[
-            spec!("read-only", Bool, guest.read_only, [], [], "Guests may read but not post, react, join, leave, or make rooms; server.ext.settings says so (off by default; not in the Go aprond)"),
+            spec!("posting", Bool, guest.posting, [], [], "Let guests post, react, join, leave, and make rooms; without it they only read, and server.ext.settings says so (not in the Go aprond)"),
         ],
     },
     Group {

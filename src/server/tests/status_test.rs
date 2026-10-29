@@ -11,7 +11,6 @@ use rust_stdlib::time::{self, Time};
 use super::helpers::*;
 use crate::obj;
 use crate::rate::{every, Limiter};
-use crate::server::default_config;
 use crate::server::persist::{StoredUser, ENTRY_USER};
 use crate::server::protocol::*;
 use crate::server::status::*;
@@ -1293,10 +1292,11 @@ fn test_repeat_auth_is_no_sign_in() {
 fn test_listings_carry_status() {
     let server = new_test_server(default_config());
     let mut clients = dial_group(&server, 3);
-    set_status(&mut clients[1], "");
-    set_status(&mut clients[2], "invisible");
-    for c in &mut clients {
-        c.drain();
+    for (i, status) in [(1, ""), (2, "invisible")] {
+        set_status(&mut clients[i], status);
+        for c in &mut clients {
+            c.drain();
+        }
     }
     let others: Vec<&TestClient> = clients.iter().collect();
     add_account(&server, "away", &others);

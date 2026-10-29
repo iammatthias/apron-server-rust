@@ -80,6 +80,16 @@ impl Drop for TempDir {
     }
 }
 
+/// The server's defaults with guest posting on: the tests ported from Go sign
+/// in as guests to post, and `guest_posting_test` covers the read-only
+/// default.
+pub fn default_config() -> Config {
+    Config {
+        guest_posting: true,
+        ..crate::server::default_config()
+    }
+}
+
 pub fn new_test_server(config: Config) -> TestServer {
     let app = open(config).expect("open");
     let http = httptest::Server::new(app.handler()).expect("httptest server");

@@ -347,7 +347,7 @@ pub fn valid_avatar(value: &str) -> bool {
         && !value.contains([' ', '\t', '\r', '\n', '"', '\'', '<', '>'])
 }
 
-/// The shape of a user_id a guest may request: the suggested convention for
+/// The shape of a user_id a new email account may request: the suggested convention for
 /// user-chosen IDs (Appendix A.3), letters, digits, _, ., and -, starting
 /// with a letter, and ending with a letter, digit, or _.
 fn requestable_user_id() -> Regexp {
@@ -447,15 +447,13 @@ impl State {
     /// Honors a requested user_id when it is requestable and was never
     /// assigned, ignoring case, nor names a room; otherwise assigns the next
     /// unused guest_<n> (§3.2).
-    pub fn assign_user_id_locked(&mut self, requested: &str) -> String {
-        if requestable(requested) && self.claim_user_id_locked(requested) {
-            return requested.to_owned();
-        }
+    /// Claims the next free `guest_<n>` and returns it with its number.
+    pub fn next_guest_id_locked(&mut self) -> (String, u64) {
         loop {
             self.guest_number += 1;
             let id = format!("{GUEST_ID_PREFIX}{}", self.guest_number);
             if self.claim_user_id_locked(&id) {
-                return id;
+                return (id, self.guest_number);
             }
         }
     }
@@ -946,8 +944,6 @@ impl Server {
             "token" => return st.authenticate_token(c, req),
             _ => {}
         }
-        let name = parse_string(&req.params, "name", false)?;
-        let requested = parse_string(&req.params, "user_id", false)?;
         if let Some(user_id) = st.client_user(c) {
             // Guest auth on a signed-in connection answers with the identity
             // it has. It signs the connection in as no other user, so it is
@@ -956,8 +952,10 @@ impl Server {
             c.send_result(req, result.clone().into());
             return Ok(result.into());
         }
-        let id = st.assign_user_id_locked(&requested);
-        let user = st.new_user_locked(&id, &normalize_name(&name));
+        // A requested name or user_id is not honored (§3.2 lets the server
+        // assign identity), as apron-server-cloudflare's guests are not.
+        let (id, number) = st.next_guest_id_locked();
+        let user = st.new_user_locked(&id, &format!("Guest {number}"));
         st.users.insert(id.clone(), user);
         st.touch_user(&id);
         // A new guest joins the default room, so their room list is not

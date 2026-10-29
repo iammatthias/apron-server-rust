@@ -890,7 +890,7 @@ impl State {
         None
     }
 
-    /// Honors a requested user_id as `assign_user_id_locked` does, and
+    /// Honors a requested user_id that is `requestable` and free, and
     /// otherwise assigns the next unused user_<n>.
     pub fn assign_account_id_locked(&mut self, requested: &str) -> String {
         if requestable(requested) && self.claim_user_id_locked(requested) {

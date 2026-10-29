@@ -23,7 +23,7 @@ use crate::server::status::{
     MuteState, StatusUpdate, STATUS_DND, STATUS_INVISIBLE, STATUS_NONE, STATUS_ONLINE,
 };
 use crate::server::webpush::{decrypt_push, encode_base64_url, parse_push_keys, VapidKey};
-use crate::server::{default_config, open, Config};
+use crate::server::{open, Config};
 use crate::store::{self, Entry, Store};
 use crate::ws;
 
@@ -232,7 +232,7 @@ fn test_push_wakes_mentions_and_replies_of_idle_users() {
     let message = obj! {
         "message_id" => id.as_str(),
         "room_id" => "general",
-        "from" => obj! {"user_id" => "guest_1"},
+        "from" => obj! {"user_id" => "guest_1", "name" => "Guest 1"},
         "body" => obj! {"text" => text, "mentions" => list(&["alice"])},
     };
     assert_eq!(
@@ -721,9 +721,12 @@ fn test_push_respects_mutes() {
     // A dnd status silences like the mute.
     let you = b.result("me", "dnd", obj! {"status" => "dnd"});
     assert_eq!(you_of(&you)["status"], Json::from("dnd"), "you after dnd");
+    // The change reaches a as a named user object, not a bare status.
+    a.notification("user");
     post(&mut a, &b, mention());
     assert!(relay.pushes(&server, &mut a).is_empty(), "dnd user woken");
     b.result("me", "online", obj! {"status" => "online"});
+    a.notification("user");
     post(&mut a, &b, mention());
     assert_eq!(relay.pushes(&server, &mut a).len(), 1, "online user");
 
@@ -943,7 +946,7 @@ fn test_web_push_delivery() {
             "push_id" => format!("{}-1", request.path.trim_start_matches('/')),
             "unread" => 1i64,
             "message" => obj! {
-                "message_id" => message_id, "room_id" => "general", "from" => obj! {"user_id" => "guest_2"},
+                "message_id" => message_id, "room_id" => "general", "from" => obj! {"user_id" => "guest_2", "name" => "Guest 2"},
                 "body" => obj! {"text" => "hi @guest_1", "mentions" => list(&["guest_1"])},
             },
         };
@@ -1349,6 +1352,7 @@ fn test_push_unread_and_badge() {
     // So does what a dnd status silences.
     b.status(obj! {"mute" => false});
     b.result("me", "dnd", obj! {"status" => "dnd"});
+    a.notification("user");
     post(
         &mut a,
         &b,

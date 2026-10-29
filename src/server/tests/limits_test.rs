@@ -6,7 +6,6 @@ use rust_stdlib::path::filepath;
 
 use super::helpers::*;
 use crate::obj;
-use crate::server::default_config;
 use crate::server::embeds::{MAX_EMBEDS_PER_MESSAGE, UPLOAD_SUFFIX};
 use crate::server::messages::MAX_MENTIONS;
 use crate::server::protocol::*;

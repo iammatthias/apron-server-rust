@@ -12,7 +12,7 @@ use super::webauthn_test::*;
 use crate::obj;
 use crate::server::protocol::*;
 use crate::server::push::PushRegistration;
-use crate::server::{default_config, Config};
+use crate::server::Config;
 use crate::store::{self, Store};
 
 const OTHER_ORIGIN: &str = "http://127.0.0.1:5173";

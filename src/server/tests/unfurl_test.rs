@@ -571,7 +571,7 @@ fn test_cache_byte_budget() {
 }
 
 fn unfurl_server() -> (TestServer, TempDir) {
-    unfurl_server_with(Config::default())
+    unfurl_server_with(default_config())
 }
 
 fn unfurl_server_with(config: Config) -> (TestServer, TempDir) {
@@ -793,7 +793,7 @@ fn test_unfurl_edit_adds_one_url() {
 #[test]
 fn test_unfurl_off_by_default() {
     let page = fixture(vec![("/post", html(ARTICLE))]);
-    let mut server = new_test_server(Config::default());
+    let mut server = new_test_server(default_config());
     let mut c = dial_test_client(&server);
     post(&mut c, &page.url("/post"), "");
     c.expect_quiet();
@@ -862,7 +862,7 @@ fn test_shutdown_with_unfurl_in_flight() {
     let page = fixture(vec![("/slow", gated(&gate))]);
     let (mut server, dir) = unfurl_server_with(Config {
         unfurl_timeout: Duration::from_millis(200),
-        ..Config::default()
+        ..default_config()
     });
     let mut c = dial_test_client(&server);
     post(&mut c, &page.url("/slow"), "");
@@ -903,7 +903,7 @@ fn test_link_image_is_not_a_message_upload() {
     let page = article();
     let (mut server, _dir) = unfurl_server_with(Config {
         max_message_upload_bytes: 100,
-        ..Config::default()
+        ..default_config()
     });
     let mut c = dial_test_client(&server);
     let result = post_embeds(
@@ -929,7 +929,7 @@ fn test_eviction_keeps_link_card() {
     let page = article();
     let (mut server, dir) = unfurl_server_with(Config {
         max_upload_storage_bytes: 100 + test_png().len() as i64 - 1,
-        ..Config::default()
+        ..default_config()
     });
     let mut c = dial_test_client(&server);
     let result = post_embeds(

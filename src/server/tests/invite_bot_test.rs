@@ -11,7 +11,7 @@ use super::persist_test::start_with_store;
 use super::webauthn_test::*;
 use crate::obj;
 use crate::server::protocol::*;
-use crate::server::{default_config, Config};
+use crate::server::Config;
 use crate::store::{self, Store};
 
 const OTHER_ORIGIN: &str = "http://127.0.0.1:5173";
@@ -589,13 +589,14 @@ fn test_invite_bot_notice_only_to_the_asker() {
     other.drain();
 
     let bot_id = format!("bot_{ada_id}");
-    let name = format!("Bot of {ada_id}");
-    let (token, _) = invite_bot(&mut ada, &bot_id, &name, NO_URL);
+    // The account keeps the name of the guest that registered it.
+    let name = "Bot of Guest 1";
+    let (token, _) = invite_bot(&mut ada, &bot_id, name, NO_URL);
     let frames = other.drain();
     assert_eq!(frames.len(), 1, "the owner's other connection: {frames:?}");
     assert_eq!(
         joined_general(&frames[0]),
-        Json::from(obj! {"user_id" => bot_id.as_str(), "name" => name.as_str()}),
+        Json::from(obj! {"user_id" => bot_id.as_str(), "name" => name}),
         "the join"
     );
     assert!(

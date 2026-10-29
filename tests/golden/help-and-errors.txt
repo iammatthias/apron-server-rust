@@ -31,7 +31,8 @@ Application Options:
                                   unlimited (default: 1000)
       --max-private-rooms=        Top-level private rooms one user may be in at
                                   once, created or added to, such as on a
-                                  public deployment; 0 is unlimited
+                                  public deployment; 0 is unlimited (default:
+                                  20)
       --debug-addr=               Listen address for unauthenticated pprof and
                                   expvar under /debug/, such as 127.0.0.1:6060;
                                   empty disables
@@ -141,9 +142,10 @@ Link previews:
                                   default; not in the Go aprond)
 
 Guests:
-      --guest.read-only           Guests may read but not post, react, join,
-                                  leave, or make rooms; server.ext.settings
-                                  says so (off by default; not in the Go aprond)
+      --guest.posting             Let guests post, react, join, leave, and make
+                                  rooms; without it they only read, and
+                                  server.ext.settings says so (not in the Go
+                                  aprond)
 
 History:
       --history.retention=        Delete messages, reactions, and their uploads
@@ -190,7 +192,8 @@ Application Options:
                                   unlimited (default: 1000)
       --max-private-rooms=        Top-level private rooms one user may be in at
                                   once, created or added to, such as on a
-                                  public deployment; 0 is unlimited
+                                  public deployment; 0 is unlimited (default:
+                                  20)
       --debug-addr=               Listen address for unauthenticated pprof and
                                   expvar under /debug/, such as 127.0.0.1:6060;
                                   empty disables
@@ -300,9 +303,10 @@ Link previews:
                                   default; not in the Go aprond)
 
 Guests:
-      --guest.read-only           Guests may read but not post, react, join,
-                                  leave, or make rooms; server.ext.settings
-                                  says so (off by default; not in the Go aprond)
+      --guest.posting             Let guests post, react, join, leave, and make
+                                  rooms; without it they only read, and
+                                  server.ext.settings says so (not in the Go
+                                  aprond)
 
 History:
       --history.retention=        Delete messages, reactions, and their uploads
@@ -349,7 +353,8 @@ Application Options:
                                   unlimited (default: 1000)
       --max-private-rooms=        Top-level private rooms one user may be in at
                                   once, created or added to, such as on a
-                                  public deployment; 0 is unlimited
+                                  public deployment; 0 is unlimited (default:
+                                  20)
       --debug-addr=               Listen address for unauthenticated pprof and
                                   expvar under /debug/, such as 127.0.0.1:6060;
                                   empty disables
@@ -459,9 +464,10 @@ Link previews:
                                   default; not in the Go aprond)
 
 Guests:
-      --guest.read-only           Guests may read but not post, react, join,
-                                  leave, or make rooms; server.ext.settings
-                                  says so (off by default; not in the Go aprond)
+      --guest.posting             Let guests post, react, join, leave, and make
+                                  rooms; without it they only read, and
+                                  server.ext.settings says so (not in the Go
+                                  aprond)
 
 History:
       --history.retention=        Delete messages, reactions, and their uploads

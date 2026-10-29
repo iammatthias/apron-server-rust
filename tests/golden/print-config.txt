@@ -29,7 +29,7 @@ messages-per-minute = 0
 max-listed-members = 1000
 
 # Top-level private rooms one user may be in at once, created or added to, such as on a public deployment; 0 is unlimited
-max-private-rooms = 0
+max-private-rooms = 20
 
 # Listen address for unauthenticated pprof and expvar under /debug/, such as 127.0.0.1:6060; empty disables
 debug-addr = ""
@@ -137,8 +137,8 @@ enable = false
 
 [guest]
 
-# Guests may read but not post, react, join, leave, or make rooms; server.ext.settings says so (off by default; not in the Go aprond)
-read-only = false
+# Let guests post, react, join, leave, and make rooms; without it they only read, and server.ext.settings says so (not in the Go aprond)
+posting = false
 
 [history]
 
@@ -178,7 +178,7 @@ messages-per-minute = 0
 max-listed-members = 1000
 
 # Top-level private rooms one user may be in at once, created or added to, such as on a public deployment; 0 is unlimited
-max-private-rooms = 0
+max-private-rooms = 20
 
 # Listen address for unauthenticated pprof and expvar under /debug/, such as 127.0.0.1:6060; empty disables
 debug-addr = ""
@@ -286,8 +286,8 @@ enable = false
 
 [guest]
 
-# Guests may read but not post, react, join, leave, or make rooms; server.ext.settings says so (off by default; not in the Go aprond)
-read-only = false
+# Let guests post, react, join, leave, and make rooms; without it they only read, and server.ext.settings says so (not in the Go aprond)
+posting = false
 
 [history]
 
@@ -328,7 +328,7 @@ messages-per-minute = 0
 max-listed-members = 1000
 
 # Top-level private rooms one user may be in at once, created or added to, such as on a public deployment; 0 is unlimited
-max-private-rooms = 0
+max-private-rooms = 20
 
 # Listen address for unauthenticated pprof and expvar under /debug/, such as 127.0.0.1:6060; empty disables
 debug-addr = ""
@@ -436,8 +436,8 @@ enable = false
 
 [guest]
 
-# Guests may read but not post, react, join, leave, or make rooms; server.ext.settings says so (off by default; not in the Go aprond)
-read-only = false
+# Let guests post, react, join, leave, and make rooms; without it they only read, and server.ext.settings says so (not in the Go aprond)
+posting = false
 
 [history]
 
@@ -477,7 +477,7 @@ messages-per-minute = 0
 max-listed-members = 1000
 
 # Top-level private rooms one user may be in at once, created or added to, such as on a public deployment; 0 is unlimited
-max-private-rooms = 0
+max-private-rooms = 20
 
 # Listen address for unauthenticated pprof and expvar under /debug/, such as 127.0.0.1:6060; empty disables
 debug-addr = ""
@@ -585,8 +585,8 @@ enable = false
 
 [guest]
 
-# Guests may read but not post, react, join, leave, or make rooms; server.ext.settings says so (off by default; not in the Go aprond)
-read-only = false
+# Let guests post, react, join, leave, and make rooms; without it they only read, and server.ext.settings says so (not in the Go aprond)
+posting = false
 
 [history]
 
