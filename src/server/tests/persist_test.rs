@@ -1,6 +1,6 @@
 //! persist_test.go, test by test.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use super::helpers::*;
@@ -38,37 +38,38 @@ impl State {
     /// Renders the whole state as the entries a store holding it would have,
     /// for checking that every change reaches the store (Go's `dumpLocked`).
     pub fn dump_locked(&self) -> Vec<Entry> {
-        let mut all = DirtySet {
-            used_ids: self.used_ids.iter().cloned().collect(),
-            ..DirtySet::default()
-        };
-        all.records = self.records.keys().copied().collect();
+        let mut records: BTreeSet<i64> = self.records.keys().copied().collect();
         for r in self.rooms.values() {
-            all.rooms.insert(r.id.clone());
-            all.records.extend(r.log.iter().copied());
+            records.extend(r.log.iter().copied());
         }
-        all.messages = self.messages.keys().cloned().collect();
-        all.users = self.users.keys().cloned().collect();
-        all.sessions = self.sessions.keys().copied().collect();
-        all.devices = self.devices.keys().copied().collect();
-        all.bots = self.bots.keys().copied().collect();
-        all.invites = self.invites.keys().copied().collect();
-        all.embeds = self.embeds.keys().cloned().collect();
-        all.pushes = self.pushes.keys().cloned().collect();
-        all.dedup = self
-            .users
-            .values()
-            .filter(|u| u.persists())
-            .flat_map(|u| {
-                u.dedup
-                    .iter()
-                    .filter(|(_, e)| e.result().is_some())
-                    .map(|(id, _)| (u.id.clone(), id.clone()))
-            })
-            .collect();
-        all.vapid = self.vapid_stored;
-        all.server = self.server_meta != Default::default();
-        all.emoji = self.stored_emoji() != Default::default();
+        // Every field, so a new kind is dumped too.
+        let all = DirtySet {
+            records,
+            rooms: self.rooms.keys().cloned().collect(),
+            messages: self.messages.keys().cloned().collect(),
+            users: self.users.keys().cloned().collect(),
+            sessions: self.sessions.keys().copied().collect(),
+            devices: self.devices.keys().copied().collect(),
+            bots: self.bots.keys().copied().collect(),
+            invites: self.invites.keys().copied().collect(),
+            embeds: self.embeds.keys().cloned().collect(),
+            pushes: self.pushes.keys().cloned().collect(),
+            dedup: self
+                .users
+                .values()
+                .filter(|u| u.persists())
+                .flat_map(|u| {
+                    u.dedup
+                        .iter()
+                        .filter(|(_, e)| e.result().is_some())
+                        .map(|(id, _)| (u.id.clone(), id.clone()))
+                })
+                .collect(),
+            used_ids: self.used_ids.iter().cloned().collect(),
+            vapid: self.vapid_stored,
+            server: self.server_meta != Default::default(),
+            emoji: self.stored_emoji() != Default::default(),
+        };
         let mut entries = self.entries_for(&all);
         entries.push(Entry::put(
             ENTRY_META,

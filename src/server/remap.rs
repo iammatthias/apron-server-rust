@@ -374,8 +374,8 @@ impl State {
         }
 
         dirty.sessions.extend(sessions.remap(remap));
-        dirty.devices.extend(devices.remap(remap));
-        dirty.invites.extend(invites.remap(remap));
+        dirty.devices.extend(devices.remap_holders(remap));
+        dirty.invites.extend(invites.remap_holders(remap));
         dirty.bots.extend(bots.remap(remap));
         limits.remap(remap);
         super::wake::remap_wakes(pending_wakes, remap);

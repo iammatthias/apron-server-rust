@@ -38,6 +38,7 @@ pub mod server_frame;
 pub mod status;
 pub mod streams;
 pub mod toggles;
+pub mod tokens;
 pub(crate) mod unfurl;
 pub mod unread;
 pub mod uploads;

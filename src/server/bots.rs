@@ -9,7 +9,6 @@
 //! account does, but `account()` is false for it, so it gets no account
 //! commands, and it can never add a passkey or an email address.
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use rust_stdlib::time::{self, Duration, Time};
@@ -21,6 +20,7 @@ use super::email::web_socket_url;
 use super::protocol::*;
 use super::remap::{Fate, Remap};
 use super::server::State;
+use super::tokens::{Held, TokenTable};
 use super::user_ids::normalize_name;
 use super::users::UserState;
 use super::webauthn::SessionKey;
@@ -44,37 +44,23 @@ pub struct BotToken {
     pub created: Time,
 }
 
-/// The bot tokens by key, and each bot's one key.
-#[derive(Default)]
-pub struct BotTokens {
-    by_key: BTreeMap<SessionKey, BotToken>,
-    by_bot: BTreeMap<String, SessionKey>,
+/// The bot tokens, one a bot.
+pub type BotTokens = TokenTable<BotToken>;
+
+impl Held for BotToken {
+    const ONE_PER_HOLDER: bool = true;
+    fn holder(&self) -> &str {
+        &self.bot
+    }
+    fn set_holder(&mut self, to: &str) {
+        self.bot = to.to_owned();
+    }
 }
 
 impl BotTokens {
-    pub fn get(&self, key: &SessionKey) -> Option<&BotToken> {
-        self.by_key.get(key)
-    }
-
-    pub fn keys(&self) -> impl Iterator<Item = &SessionKey> {
-        self.by_key.keys()
-    }
-
-    /// The key of the bot's token, if it has one.
-    pub fn of_bot(&self, bot_id: &str) -> Option<SessionKey> {
-        self.by_bot.get(bot_id).copied()
-    }
-
-    /// Adds a token, whose bot must hold no other.
-    pub fn insert(&mut self, key: SessionKey, token: BotToken) {
-        self.by_bot.insert(token.bot.clone(), key);
-        self.by_key.insert(key, token);
-    }
-
     /// The keys of the tokens `owner` minted.
     pub fn owned_by(&self, owner: &str) -> Vec<SessionKey> {
-        self.by_key
-            .iter()
+        self.iter()
             .filter(|(_, token)| token.owner == owner)
             .map(|(key, _)| *key)
             .collect()
@@ -89,12 +75,12 @@ impl BotTokens {
             match remap.fate(from) {
                 Fate::Rename(to) => {
                     for key in self.owned_by(from) {
-                        self.by_key.get_mut(&key).expect("listed").owner = to.to_owned();
+                        self.get_mut(&key).expect("listed").owner = to.to_owned();
                         changed.push(key);
                     }
                 }
                 _ => {
-                    for key in self.of_bot(from).into_iter().chain(self.owned_by(from)) {
+                    for key in self.last_of(from).into_iter().chain(self.owned_by(from)) {
                         self.remove(&key);
                         changed.push(key);
                     }
@@ -102,14 +88,6 @@ impl BotTokens {
             }
         }
         changed
-    }
-
-    pub fn remove(&mut self, key: &SessionKey) -> Option<BotToken> {
-        let token = self.by_key.remove(key)?;
-        if self.by_bot.get(&token.bot) == Some(key) {
-            self.by_bot.remove(&token.bot);
-        }
-        Some(token)
     }
 }
 
@@ -185,7 +163,7 @@ impl State {
 
         // The old token goes before the new one is minted, so the bot never
         // has two.
-        let previous = self.bots.of_bot(&bot_id);
+        let previous = self.bots.last_of(&bot_id);
         if let Some(old) = previous {
             self.bots.remove(&old);
             self.touch_bot(old);
@@ -358,11 +336,11 @@ impl State {
         for room_id in rooms {
             self.leave_locked(user_id, &room_id);
         }
-        if let Some(key) = self.bots.of_bot(user_id) {
+        if let Some(key) = self.bots.last_of(user_id) {
             self.bots.remove(&key);
             self.touch_bot(key);
         }
-        if let Some(key) = self.invites.of_user(user_id) {
+        if let Some(key) = self.invites.last_of(user_id) {
             self.invites.remove(&key);
             self.touch_invite(key);
         }

@@ -4,7 +4,6 @@
 //! a bearer token through the `token` scheme (§3.2), from any origin, and a
 //! sign-up invite makes one such account per use (Appendix B).
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use rust_stdlib::encoding::base64::URL_SAFE_NO_PAD;
@@ -17,8 +16,8 @@ use super::commands::{private_notice, user_id_args, CommandCtx};
 use super::devices::apron_link;
 use super::email::web_socket_url;
 use super::protocol::*;
-use super::remap::{Fate, Remap};
 use super::server::State;
+use super::tokens::{Held, TokenTable};
 use super::user_ids::{candidate_user_id, normalize_name};
 use super::webauthn::SessionKey;
 use crate::obj;
@@ -48,61 +47,16 @@ pub struct InviteToken {
     pub created: Time,
 }
 
-/// The account tokens by key, and each account's one key.
-#[derive(Default)]
-pub struct InviteTokens {
-    by_key: BTreeMap<SessionKey, InviteToken>,
-    by_user: BTreeMap<String, SessionKey>,
-}
+/// The account tokens, one an account.
+pub type InviteTokens = TokenTable<InviteToken>;
 
-impl InviteTokens {
-    pub fn get(&self, key: &SessionKey) -> Option<&InviteToken> {
-        self.by_key.get(key)
+impl Held for InviteToken {
+    const ONE_PER_HOLDER: bool = true;
+    fn holder(&self) -> &str {
+        &self.user
     }
-
-    pub fn keys(&self) -> impl Iterator<Item = &SessionKey> {
-        self.by_key.keys()
-    }
-
-    pub fn of_user(&self, user_id: &str) -> Option<SessionKey> {
-        self.by_user.get(user_id).copied()
-    }
-
-    pub fn insert(&mut self, key: SessionKey, token: InviteToken) {
-        self.by_user.insert(token.user.clone(), key);
-        self.by_key.insert(key, token);
-    }
-
-    pub fn remove(&mut self, key: &SessionKey) -> Option<InviteToken> {
-        let token = self.by_key.remove(key)?;
-        if self.by_user.get(&token.user) == Some(key) {
-            self.by_user.remove(&token.user);
-        }
-        Some(token)
-    }
-
-    /// Removes the token of each account `remap` drops, or moves the
-    /// renamed account's, and returns their keys.
-    pub(super) fn remap(&mut self, remap: &Remap) -> Vec<SessionKey> {
-        let mut changed = Vec::new();
-        for from in remap.sources() {
-            let Some(key) = self.by_user.remove(from) else {
-                continue;
-            };
-            changed.push(key);
-            match remap.fate(from) {
-                Fate::Rename(to) => {
-                    if let Some(token) = self.by_key.get_mut(&key) {
-                        token.user = to.to_owned();
-                    }
-                    self.by_user.insert(to.to_owned(), key);
-                }
-                _ => {
-                    self.by_key.remove(&key);
-                }
-            }
-        }
-        changed
+    fn set_holder(&mut self, to: &str) {
+        self.user = to.to_owned();
     }
 }
 
