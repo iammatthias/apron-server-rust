@@ -114,6 +114,12 @@ impl State {
                 "Sign in with a passkey or email to use /invite-device",
             ));
         }
+        if user_id == super::admin::ADMIN_USER_ID {
+            return Err(RpcError::new(
+                CODE_DENIED,
+                super::admin::ADMIN_SIGNS_IN_WITH_TOKEN,
+            ));
+        }
         let mut words = args.split_whitespace();
         let (Some(name), None) = (words.next(), words.next()) else {
             return Err(invalid_params("Usage: /invite-device <name>"));

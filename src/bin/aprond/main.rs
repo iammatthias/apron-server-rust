@@ -77,6 +77,7 @@ fn server_config(settings: Settings) -> Result<server::Config, String> {
     config.welcome = settings.welcome;
     config.client_ip_header = settings.client_ip_header;
     config.roles = settings.roles;
+    config.admin_token = settings.admin_token;
     config.disable_push = settings.disable_push;
     config.allow_insecure_push = settings.allow_insecure_push;
     config.vapid_private_key = settings.vapid_private_key;

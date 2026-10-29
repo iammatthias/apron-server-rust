@@ -74,6 +74,9 @@ pub struct UserState {
     /// The account a `/invite-bot` bot belongs to (bots.rs); `None` for
     /// every other user.
     pub owner: Option<String>,
+    /// An account that signs in with a token alone, with no passkey or
+    /// email address needed (admin.rs): the user `admin`.
+    pub invited: bool,
     /// Limits the user's new messages, room_set requests, and /avatar
     /// commands to messages_per_minute; `None` when unlimited.
     pub posts: Option<Limiter>,
@@ -126,6 +129,7 @@ impl UserState {
             dedup: DedupCache::default(),
             passkey: None,
             owner: None,
+            invited: false,
             posts: None,
             unfurls: None,
             chosen: STATUS_ONLINE.into(),
@@ -159,23 +163,23 @@ impl UserState {
         value
     }
 
-    /// Reports whether the user signed in with a credential, a passkey or
-    /// an email address, so it persists across connections and restarts,
-    /// rather than being a guest.
+    /// Reports whether the user is an account: it signed in with a
+    /// passkey, an email address or an account token, so it persists
+    /// across connections and restarts, and it is no guest or bot.
     pub fn account(&self) -> bool {
-        self.passkey.is_some() || !self.email.is_empty()
+        (self.passkey.is_some() || !self.email.is_empty() || self.invited) && !self.bot()
     }
 
-    /// Reports whether the user is an account's `/invite-bot` bot, which
-    /// signs in only with its token.
+    /// Reports whether the user is a bot, which signs in only with its
+    /// token: an account's `/invite-bot` bot, or a user with the `bot` role.
     pub fn bot(&self) -> bool {
-        self.owner.is_some()
+        self.owner.is_some() || self.has_role(super::bots::BOT_ROLE)
     }
 
     /// Reports whether the user outlives its connections and restarts: an
     /// account or a bot, not a guest.
     pub fn persists(&self) -> bool {
-        self.account() || self.bot()
+        self.passkey.is_some() || !self.email.is_empty() || self.invited || self.bot()
     }
 
     pub fn has_role(&self, role: &str) -> bool {
@@ -478,12 +482,14 @@ impl State {
     }
 
     /// Reports whether `id` may not be assigned: it was assigned before,
-    /// ignoring case, names a room, or is granted a role.
+    /// ignoring case, names a room, is granted a role, or is `admin`, which
+    /// only the admin token signs in as.
     pub fn user_id_taken_locked(&self, id: &str) -> bool {
         let key = id.to_lowercase();
         self.used_ids.contains(&key)
             || self.room_named_locked(id)
             || self.granted_ids.contains(&key)
+            || key == super::admin::ADMIN_USER_ID
     }
 
     /// Marks `id` used and reports whether it was free

@@ -235,6 +235,9 @@ impl State {
             if u.bot() {
                 return Err(denied(BOT_SIGNS_IN_WITH_TOKEN));
             }
+            if user_id == super::admin::ADMIN_USER_ID && u.invited {
+                return Err(denied(super::admin::ADMIN_SIGNS_IN_WITH_TOKEN));
+            }
             identity_id = user_id.clone();
             // A guest is no account: its registration makes one under a new
             // user_id, as apron-server-cloudflare's does (docs/DEVIATIONS.md).
@@ -582,6 +585,9 @@ impl State {
         let token = parse_string(&req.params, "token", true)?;
         if token.is_empty() {
             return Err(invalid_params("token must be a non-empty string"));
+        }
+        if self.is_admin_token(&token) {
+            return self.authenticate_admin_locked(c, req);
         }
         if token.starts_with(DEVICE_TOKEN_PREFIX) {
             return self.authenticate_device_locked(c, req, &token);

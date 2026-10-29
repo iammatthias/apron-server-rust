@@ -200,6 +200,9 @@ pub struct StoredUser {
     /// member.
     #[json("roles,omitzero")]
     pub roles: Vec<String>,
+    /// `UserState.invited`. Go's decoder skips the member.
+    #[json("invited,omitzero")]
+    pub invited: bool,
     /// The chosen status (§4.5.1), absent for online.
     #[json("status,omitzero")]
     pub status: Option<String>,
@@ -583,6 +586,7 @@ pub fn stored_user_of(u: &UserState) -> StoredUser {
         email: u.email.clone(),
         bot: u.owner.clone().unwrap_or_default(),
         roles: u.roles.clone(),
+        invited: u.invited,
         status: if u.chosen != STATUS_ONLINE {
             Some(u.chosen.clone())
         } else {
@@ -788,6 +792,7 @@ impl Server {
             if !stored.bot.is_empty() {
                 u.owner = Some(stored.bot.clone());
             }
+            u.invited = stored.invited;
             for role in &stored.roles {
                 if valid_role(role) && !u.has_role(role) && u.roles.len() < MAX_ROLES {
                     u.roles.push(role.clone());

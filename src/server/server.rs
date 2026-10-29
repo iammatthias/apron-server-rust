@@ -123,6 +123,9 @@ pub struct Config {
     /// Grants server roles (§3.3), such as "admin", to accounts: each role
     /// lists the user_ids or email addresses that hold it.
     pub roles: BTreeMap<String, Vec<String>>,
+    /// The SHA-256 of the token that signs in as the user `admin`
+    /// (admin.rs); `None` disables it.
+    pub admin_token: Option<[u8; 32]>,
     /// Enables email sign-in (§4.11) and delivers its codes; `None`
     /// disables it. `LogEmailSender` logs codes, for development.
     pub email_sender: Option<Arc<dyn EmailSender>>,
@@ -197,6 +200,7 @@ pub fn default_config() -> Config {
         max_private_rooms: 20,
         welcome: String::new(),
         roles: BTreeMap::new(),
+        admin_token: None,
         email_sender: None,
         client_ip_header: String::new(),
         email_link_url: String::new(),

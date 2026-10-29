@@ -40,6 +40,9 @@ pub struct Settings {
     pub client_ip_header: String,
     /// Holders by lowercased role; empty is Go's nil map.
     pub roles: BTreeMap<String, Vec<String>>,
+    /// The SHA-256 of the admin token, from `--admin-token-file` or
+    /// `$APRON_ADMIN_TOKEN`.
+    pub admin_token: Option<[u8; 32]>,
     pub disable_push: bool,
     pub allow_insecure_push: bool,
     pub vapid_private_key: String,
@@ -122,6 +125,7 @@ pub fn server_settings(options: &Options) -> Result<Settings, String> {
             .or_default()
             .push(holder.to_string());
     }
+    config.admin_token = admin_token(&options.admin_token_file)?;
     config.disable_push = options.push.disable;
     let public = !options.public_url.is_empty() || !options.tls.domains.is_empty();
     if options.push.allow_insecure && public {
@@ -234,3 +238,28 @@ fn valid_apple_app_id(id: &str) -> bool {
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'.')
 }
+
+/// The SHA-256 of the admin token: the contents of `path`, or else of
+/// `$APRON_ADMIN_TOKEN`, without surrounding whitespace. The token itself
+/// never enters the options, so `--print-config` cannot show it.
+fn admin_token(path: &str) -> Result<Option<[u8; 32]>, String> {
+    let token = if path.is_empty() {
+        std::env::var("APRON_ADMIN_TOKEN").unwrap_or_default()
+    } else {
+        let bytes = rust_stdlib::os::read_file(path)
+            .map_err(|e| format!("Failed to read --admin-token-file: {e}"))?;
+        String::from_utf8(bytes).map_err(|_| "--admin-token-file is not UTF-8 text".to_string())?
+    };
+    let token = token.trim();
+    if token.is_empty() {
+        return Ok(None);
+    }
+    if token.len() < MIN_ADMIN_TOKEN_BYTES {
+        return Err(format!(
+            "The admin token is shorter than {MIN_ADMIN_TOKEN_BYTES} bytes; use a long random one"
+        ));
+    }
+    Ok(Some(rust_stdlib_crypto::sha256::sum256(token.as_bytes())))
+}
+
+const MIN_ADMIN_TOKEN_BYTES: usize = 16;

@@ -28,6 +28,7 @@ pub struct Options {
     pub client_ip_header: String,
     pub welcome: String,
     pub roles: Vec<String>,
+    pub admin_token_file: String,
     pub webauthn: WebAuthnOptions,
     pub upload: UploadOptions,
     pub email: EmailOptions,
@@ -191,6 +192,7 @@ pub static GROUPS: &[Group] = &[
             spec!("client-ip-header", Str, client_ip_header, [], [], "Request header a reverse proxy puts the client's address in, such as X-Forwarded-For (its last entry) or X-Real-IP, for per-client limits; set only behind a proxy that sets it"),
             spec!("welcome", Str, welcome, [], [], "Markdown clients show on their sign-in screen (server.welcome), such as how this server's sign-in methods fit together (default: general's description, else a summary of how guests and sign-in work here)"),
             spec!("role", List, roles, [], [], "Grant a role to an account as role=user_id or role=email, such as admin=ada, once: the account keeps it until an admin takes it away; repeat for more. admin and mod (or moderator) may remove others from rooms"),
+            spec!("admin-token-file", Str, admin_token_file, [], [], "File holding a token that signs in as the user admin from any origin, without a passkey; at least 16 bytes (default: $APRON_ADMIN_TOKEN; unset or empty disables it)"),
         ],
     },
     Group {

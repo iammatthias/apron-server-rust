@@ -46,6 +46,9 @@ welcome = ""
 # Grant a role to an account as role=user_id or role=email, such as admin=ada, once: the account keeps it until an admin takes it away; repeat for more. admin and mod (or moderator) may remove others from rooms
 # role = []
 
+# File holding a token that signs in as the user admin from any origin, without a passkey; at least 16 bytes (default: $APRON_ADMIN_TOKEN; unset or empty disables it)
+admin-token-file = ""
+
 [webauthn]
 
 # Passkey relying party domain; empty disables passkeys
@@ -217,6 +220,9 @@ welcome = ""
 
 # Grant a role to an account as role=user_id or role=email, such as admin=ada, once: the account keeps it until an admin takes it away; repeat for more. admin and mod (or moderator) may remove others from rooms
 role = ["admin=ada"]
+
+# File holding a token that signs in as the user admin from any origin, without a passkey; at least 16 bytes (default: $APRON_ADMIN_TOKEN; unset or empty disables it)
+admin-token-file = ""
 
 [webauthn]
 
@@ -391,6 +397,9 @@ welcome = "Line one\nSay \"hi\" \\ tab\there \u0001 del\u007f é"
 # Grant a role to an account as role=user_id or role=email, such as admin=ada, once: the account keeps it until an admin takes it away; repeat for more. admin and mod (or moderator) may remove others from rooms
 # role = []
 
+# File holding a token that signs in as the user admin from any origin, without a passkey; at least 16 bytes (default: $APRON_ADMIN_TOKEN; unset or empty disables it)
+admin-token-file = ""
+
 [webauthn]
 
 # Passkey relying party domain; empty disables passkeys
@@ -562,6 +571,9 @@ welcome = ""
 
 # Grant a role to an account as role=user_id or role=email, such as admin=ada, once: the account keeps it until an admin takes it away; repeat for more. admin and mod (or moderator) may remove others from rooms
 role = ["admin=ada"]
+
+# File holding a token that signs in as the user admin from any origin, without a passkey; at least 16 bytes (default: $APRON_ADMIN_TOKEN; unset or empty disables it)
+admin-token-file = ""
 
 [webauthn]
 

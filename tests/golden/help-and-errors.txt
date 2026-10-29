@@ -60,6 +60,11 @@ Application Options:
                                      the account keeps it until an admin takes
                                      it away; repeat for more. admin and mod
                                      (or moderator) may remove others from rooms
+      --admin-token-file=            File holding a token that signs in as the
+                                     user admin from any origin, without a
+                                     passkey; at least 16 bytes (default:
+                                     $APRON_ADMIN_TOKEN; unset or empty
+                                     disables it)
 
 Passkeys:
       --webauthn.rp-id=              Passkey relying party domain; empty
@@ -265,6 +270,11 @@ Application Options:
                                      the account keeps it until an admin takes
                                      it away; repeat for more. admin and mod
                                      (or moderator) may remove others from rooms
+      --admin-token-file=            File holding a token that signs in as the
+                                     user admin from any origin, without a
+                                     passkey; at least 16 bytes (default:
+                                     $APRON_ADMIN_TOKEN; unset or empty
+                                     disables it)
 
 Passkeys:
       --webauthn.rp-id=              Passkey relying party domain; empty
@@ -470,6 +480,11 @@ Application Options:
                                      the account keeps it until an admin takes
                                      it away; repeat for more. admin and mod
                                      (or moderator) may remove others from rooms
+      --admin-token-file=            File holding a token that signs in as the
+                                     user admin from any origin, without a
+                                     passkey; at least 16 bytes (default:
+                                     $APRON_ADMIN_TOKEN; unset or empty
+                                     disables it)
 
 Passkeys:
       --webauthn.rp-id=              Passkey relying party domain; empty

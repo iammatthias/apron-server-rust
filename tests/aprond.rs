@@ -637,3 +637,65 @@ fn test_guest_and_history_flags() {
         );
     }
 }
+
+/// The admin token comes from `--admin-token-file` or `$APRON_ADMIN_TOKEN`,
+/// must be at least 16 bytes, and never shows in `--print-config`.
+#[test]
+fn test_admin_token_sources() {
+    let token = "a-long-admin-token-0123456789";
+    let run = |args: &[&str], env: &str| {
+        let out = Command::new(APROND)
+            .args(args)
+            .env("APRON_ADMIN_TOKEN", env)
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        (
+            out.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+        )
+    };
+    let (code, stdout, _) = run(&["--print-config"], token);
+    assert!(
+        code == 0 && !stdout.contains(token),
+        "print-config: {stdout}"
+    );
+    let (code, _, stderr) = run(&["--store", "memory", "--addr", "127.0.0.1:0"], "short");
+    assert!(
+        code != 0 && stderr.contains("The admin token is shorter than 16 bytes"),
+        "short env token: {code} {stderr}"
+    );
+    let dir = TempDir::new();
+    let path = dir.write("token", "short\n");
+    let (code, _, stderr) = run(
+        &[
+            "--store",
+            "memory",
+            "--addr",
+            "127.0.0.1:0",
+            "--admin-token-file",
+            &path,
+        ],
+        token,
+    );
+    assert!(
+        code != 0 && stderr.contains("The admin token is shorter than 16 bytes"),
+        "the file wins over the environment: {code} {stderr}"
+    );
+    let (code, _, stderr) = run(
+        &[
+            "--store",
+            "memory",
+            "--addr",
+            "127.0.0.1:0",
+            "--admin-token-file",
+            &dir.join("none"),
+        ],
+        "",
+    );
+    assert!(
+        code != 0 && stderr.contains("Failed to read --admin-token-file"),
+        "missing file: {code} {stderr}"
+    );
+}
