@@ -588,3 +588,25 @@ fn test_purge_persists() {
         BTreeSet::from([format!("used_id {lower}"), format!("used_id bot_{lower}")]),
     );
 }
+
+/// A purge takes the bots the user owns, not a user who merely has the
+/// name `bot_<user_id>`, such as one who held it before the prefix was
+/// reserved.
+#[test]
+fn test_purge_spares_an_unowned_bot_named_user() {
+    let server = new_test_server(account_config());
+    let mut admin = admin(&server);
+    let (dave, _) = named_account(&server, "Dave");
+    let legacy = format!("bot_{}", dave.user_id);
+    {
+        let mut st = server.app.lock();
+        let squatter = st.new_user_locked(&legacy, "Not a bot");
+        st.users.insert(legacy.clone(), squatter);
+    }
+    admin.drain();
+    private_reply(&mut admin, &format!("/purge {}", dave.user_id));
+    assert!(
+        server.app.lock().users.contains_key(&legacy),
+        "the purge took an unrelated user"
+    );
+}

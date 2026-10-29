@@ -1,5 +1,6 @@
 //! `/invite-bot`, an extension Go lacks (docs/DEVIATIONS.md): an account
-//! gets one bot of its own, `bot_<user_id>`, named after it, and a bearer
+//! gets one bot of its own, made as `bot_<user_id>` and keeping that
+//! user_id when its owner is renamed, named after it, and a bearer
 //! token that signs in as the bot through the `token` scheme (§3.2), from any
 //! origin, until `/invite-bot` again mints a new one. It follows
 //! apron-server-cloudflare's `/invite-bot`.
@@ -66,6 +67,24 @@ impl BotTokens {
         self.by_key.insert(key, token);
     }
 
+    /// The keys of the tokens `owner` minted.
+    pub fn owned_by(&self, owner: &str) -> Vec<SessionKey> {
+        self.by_key
+            .iter()
+            .filter(|(_, token)| token.owner == owner)
+            .map(|(key, _)| *key)
+            .collect()
+    }
+
+    /// Gives the tokens `from` minted to `to`, and returns their keys.
+    pub fn move_owner(&mut self, from: &str, to: &str) -> Vec<SessionKey> {
+        let keys = self.owned_by(from);
+        for key in &keys {
+            self.by_key.get_mut(key).expect("listed").owner = to.to_owned();
+        }
+        keys
+    }
+
     pub fn remove(&mut self, key: &SessionKey) -> Option<BotToken> {
         let token = self.by_key.remove(key)?;
         if self.by_bot.get(&token.bot) == Some(key) {
@@ -91,6 +110,16 @@ impl State {
         self.dirty.bots.insert(key);
     }
 
+    /// The user_ids of the bots `owner` owns. A bot keeps its user_id when
+    /// its owner is renamed, so this, not the `bot_` prefix, finds them.
+    pub fn bots_of(&self, owner: &str) -> Vec<String> {
+        self.users
+            .values()
+            .filter(|u| u.owner.as_deref() == Some(owner))
+            .map(|u| u.id.clone())
+            .collect()
+    }
+
     /// Makes the sender's bot, or renames it after the sender's current
     /// name, and mints its token, replacing the last one: the bot's
     /// connections that signed in with it close. A new bot joins the default
@@ -108,7 +137,11 @@ impl State {
         if !args.is_empty() {
             return Err(invalid_params("Usage: /invite-bot"));
         }
-        let bot_id = format!("{BOT_ID_PREFIX}{owner_id}");
+        let bot_id = self
+            .bots_of(&owner_id)
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| format!("{BOT_ID_PREFIX}{owner_id}"));
         let name = bot_name(owner);
         let exists = match self.users.get(&bot_id) {
             Some(bot) if bot.owner.as_deref() == Some(owner_id.as_str()) => true,

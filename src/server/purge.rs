@@ -6,7 +6,6 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use super::admin::ADMIN_USER_ID;
-use super::bots::BOT_ID_PREFIX;
 use super::commands::private_notice;
 use super::embeds::EmbedPurpose;
 use super::protocol::*;
@@ -48,7 +47,7 @@ fn plural(n: usize, one: &str) -> String {
 
 impl State {
     /// `/purge <user_id>` (a leading `@` is allowed): closes the connections
-    /// of a user and their bot (`bot_<user_id>`), then deletes them and
+    /// of a user and the bots they own, then deletes them and
     /// everything they posted, reacted or uploaded, silently: no record
     /// announces it. Threads it leaves empty are removed. The user_id stays
     /// used, so it is never issued again. The sender gets a ~private notice
@@ -77,12 +76,7 @@ impl State {
             return Err(invalid_params(message));
         }
         let mut ids = BTreeSet::from([user_id.to_owned()]);
-        if !user_id.starts_with(BOT_ID_PREFIX) {
-            let bot = format!("{BOT_ID_PREFIX}{user_id}");
-            if self.users.contains_key(&bot) {
-                ids.insert(bot);
-            }
-        }
+        ids.extend(self.bots_of(user_id));
         let rooms: BTreeSet<String> = ids
             .iter()
             .flat_map(|id| self.users[id].joined.iter().cloned())
@@ -246,7 +240,12 @@ impl State {
                 self.invites.remove(&key);
                 self.touch_invite(key);
             }
-            if let Some(key) = self.bots.of_bot(id) {
+            for key in self
+                .bots
+                .of_bot(id)
+                .into_iter()
+                .chain(self.bots.owned_by(id))
+            {
                 self.bots.remove(&key);
                 self.touch_bot(key);
             }

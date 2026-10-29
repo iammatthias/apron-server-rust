@@ -102,8 +102,9 @@ after a copy of the `apron_data` volume was kept on the host in
   in again, and signs in with its passkey as the new id.
 - A native client signed in with a device token keeps working: the token
   now signs in as the new id, and the `auth` result names it.
-- Its bot keeps `bot_<old>` and its token. `/invite-bot` then makes a new
-  bot, `bot_<new>`, and `/purge bot_<old>` removes the old one.
+- Its bot keeps `bot_<old>` and its token, and the new id owns it.
+  `/invite-bot` then gives that bot a new token, and `/purge <new>`
+  removes it with its owner.
 - `--role` grants given to the old id are not given again. A grant naming
   the new id is given when the rename makes it exist.
 
