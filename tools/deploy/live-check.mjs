@@ -15,8 +15,9 @@
 //
 // It posts nothing in general or any public room. The admin checks make
 // accounts named livecheck_<random>: one from /invite-token and one from a
-// /invite sign-up. There is no /purge yet, so they stay until B8's /purge
-// removes the livecheck_ accounts. The Track C checks post only in a
+// /invite sign-up, and one that is renamed and purged. At the end the admin
+// purges every livecheck_ account in general, this run's and any an earlier
+// run left. The Track C checks post only in a
 // private room named livecheck_<random> that the admin makes, and its
 // thread; both go when the script empties them. The emoji checks add a
 // :livecheck_<random>: custom emoji and remove it again, so every connection
@@ -306,10 +307,15 @@ if (!tokenFile) {
     return m ? decodeURIComponent(m[1]) : null;
   };
 
-  await check("admin: guest_1 holds the admin role (--role)", async () => {
-    const { frames, error } = await run("/role guest_1");
-    if (error) return `error ${JSON.stringify(error)}`;
-    return /guest_1.*roles? .*`admin`/s.test(noticeText(frames)) || `notice ${noticeText(frames)}`;
+  // The owner's account was guest_1 until /rename made it matthias.
+  await check("admin: the owner's account holds the admin role", async () => {
+    for (const owner of ["matthias", "guest_1"]) {
+      const { frames, error } = await run(`/role ${owner}`);
+      if (error?.message?.startsWith("No registered user")) continue;
+      if (error) return `error ${JSON.stringify(error)}`;
+      return new RegExp(`${owner}.*roles? .*\`admin\``, "s").test(noticeText(frames)) || `notice ${noticeText(frames)}`;
+    }
+    return "neither matthias nor guest_1 exists";
   });
 
   const accountID = `livecheck_${suffix}`;
@@ -361,6 +367,7 @@ if (!tokenFile) {
   });
 
   await pushChecks(run, linkToken);
+  await renameAndPurge(run, linkToken);
 
   await trackC(admin);
   admin.close();
@@ -384,6 +391,103 @@ if (!tokenFile) {
         own.close();
       }
     });
+  }
+
+  await cleanUp(adminToken);
+}
+
+// /rename and /purge on a livecheck_ account of their own: a rename moves
+// its connection and its token to the new user_id, and a purge closes the
+// connection and revokes the token.
+async function renameAndPurge(run, linkToken) {
+  const from = `livecheck_rn_${suffix}`;
+  const to = `livecheck_renamed_${suffix}`;
+  const { frames, error } = await run(`/invite-token ${from}`);
+  const token = !error && linkToken(noticeText(frames));
+  if (!token) {
+    report("rename: a livecheck_ account to rename", false, `error ${JSON.stringify(error)}`);
+    return;
+  }
+  const c = await connect();
+  const signIn = async () => {
+    const other = await connect();
+    try {
+      await other.server();
+      return await other.call("auth", { scheme: "token", token });
+    } finally {
+      other.close();
+    }
+  };
+  try {
+    await c.server();
+    const first = await c.call("auth", { scheme: "token", token });
+    if (first.error) {
+      report("rename: the account signs in", false, JSON.stringify(first.error));
+      return;
+    }
+    await check("rename: /rename moves the account, its connection and its token", async () => {
+      const seen = c.frames.length;
+      const r = await run(`/rename @${from} @${to}`);
+      if (r.error) return `error ${JSON.stringify(r.error)}`;
+      if (noticeText(r.frames) !== `Renamed \`${from}\` to \`${to}\`.`) return `notice ${noticeText(r.frames)}`;
+      const you = await c.until(() => c.frames.slice(seen).find((f) => f.method === "user" && f.params.you), 8000, "user you");
+      if (you.params.you.user_id !== to) return `you ${JSON.stringify(you.params.you)}`;
+      const again = await signIn();
+      return again.result?.you?.user_id === to || `token signs in as ${JSON.stringify(again.result?.you ?? again.error)}`;
+    });
+    await check("rename: the old user_id is retired", async () => {
+      const r = await run(`/invite-token ${from}`);
+      return r.error?.message === `The user_id ${from} is taken` || `reply ${JSON.stringify(r.error ?? noticeText(r.frames))}`;
+    });
+    await check("purge: /purge closes the connection and revokes the token", async () => {
+      const r = await run(`/purge ${to}`);
+      if (r.error) return `error ${JSON.stringify(r.error)}`;
+      if (noticeText(r.frames) !== `Purged \`${to}\`: 0 messages, 0 reaction sets, 0 uploads.`) return `notice ${noticeText(r.frames)}`;
+      const closing = await c.until(() => c.frames.find((f) => f.error && f.id === undefined) ?? (c.closed && { closed: c.closed }), 8000, "the close");
+      if (closing.error?.message !== "Removed by an admin") return `closed with ${JSON.stringify(closing)}`;
+      const again = await signIn();
+      return again.error?.message === "This invite token is not valid; ask an admin for a new one" || `reply ${JSON.stringify(again.error ?? again.result)}`;
+    });
+  } finally {
+    c.close();
+  }
+}
+
+// Purges every livecheck_ account the admin sees in general, and then any
+// livecheck_ bot whose owner went first, as a separate connection, so a
+// check that failed above does not stop it.
+async function cleanUp(adminToken) {
+  const admin = await connect();
+  try {
+    const signIn = await admin.call("auth", { scheme: "token", token: adminToken });
+    if (signIn.error) {
+      report("cleanup: the admin signs in", false, JSON.stringify(signIn.error));
+      return;
+    }
+    const left = async () => {
+      const { result, error } = await admin.call("room_list", { room_id: "general", members: true });
+      if (error) throw new Error(`room_list ${JSON.stringify(error)}`);
+      const members = result.joined?.find((r) => r.room_id === "general")?.members ?? [];
+      return members.map((m) => m.user_id).filter((id) => /^(bot_)?livecheck_/.test(id));
+    };
+    let purged = 0;
+    await check("cleanup: every livecheck_ account is purged", async () => {
+      for (const id of (await left()).filter((id) => !id.startsWith("bot_"))) {
+        const r = await admin.call("command", { room_id: "general", body: { text: `/purge ${id}` } });
+        if (r.error) return `/purge ${id}: ${JSON.stringify(r.error)}`;
+        purged++;
+      }
+      for (const id of await left()) {
+        const r = await admin.call("command", { room_id: "general", body: { text: `/purge ${id}` } });
+        if (r.error) return `/purge ${id}: ${JSON.stringify(r.error)}`;
+        purged++;
+      }
+      const remaining = await left();
+      return remaining.length === 0 || `still there: ${remaining.join(", ")}`;
+    });
+    console.log(`     purged ${purged} livecheck_ account(s)`);
+  } finally {
+    admin.close();
   }
 }
 

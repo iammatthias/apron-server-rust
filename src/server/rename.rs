@@ -9,7 +9,7 @@ use super::commands::private_notice;
 use super::embeds::EmbedPurpose;
 use super::invites::{issuable, NOT_ISSUABLE};
 use super::protocol::*;
-use super::purge::{user_id_in, user_list};
+use super::purge::{truncate_chars, user_id_in, user_list};
 use super::push::push_key;
 use super::server::{Client, Frame, RecordKind, State};
 use crate::obj;
@@ -64,9 +64,7 @@ impl State {
         }
         let Some(u) = self.users.get(from).filter(|u| u.persists()) else {
             let mut message = format!("No registered user has the user_id {from}");
-            if let Some((at, _)) = message.char_indices().nth(200) {
-                message.truncate(at);
-            }
+            truncate_chars(&mut message, 200);
             return Err(invalid_params(message));
         };
         if u.bot() {

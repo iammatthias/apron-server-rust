@@ -36,7 +36,6 @@ pub(super) fn user_id_in(element: Option<&Json>) -> &str {
 }
 
 /// What a purge removed, for the sender's notice.
-#[derive(Default)]
 struct Purged {
     messages: usize,
     reactions: usize,
@@ -301,7 +300,7 @@ impl State {
 }
 
 /// Cuts `s` to at most `max` characters.
-fn truncate_chars(s: &mut String, max: usize) {
+pub(super) fn truncate_chars(s: &mut String, max: usize) {
     if let Some((at, _)) = s.char_indices().nth(max) {
         s.truncate(at);
     }

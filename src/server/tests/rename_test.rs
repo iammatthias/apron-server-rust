@@ -215,8 +215,7 @@ fn test_rename_refusals() {
     let (erin, _) = named_account(&server, "Erin");
     let guest = dial_test_client(&server);
     let from = dave.user_id.clone();
-    let bot = token_in(&private_reply(&mut dave, "/invite-bot"));
-    drop(bot);
+    private_reply(&mut dave, "/invite-bot");
     admin.drain();
     let usage = (
         CODE_INVALID_PARAMS,
