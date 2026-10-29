@@ -9,12 +9,14 @@ use rust_stdlib::net::{split_host_port, url};
 use rust_stdlib::time::{self, Duration};
 
 use super::helpers::*;
+use super::persist_test::{start_with, start_with_store};
 use crate::obj;
 use crate::server::embeds::MAX_EMBEDS_PER_MESSAGE;
 use crate::server::outbound::{public_only, DialCheck};
 use crate::server::protocol::*;
 use crate::server::unfurl::*;
 use crate::server::Config;
+use crate::store::{self, Store};
 
 /// Serves fixture pages by path, counting the requests to each path and
 /// keeping the last User-Agent.
@@ -676,18 +678,14 @@ fn test_unfurl_republishes_link_embed() {
     assert_eq!(page.hits("/post"), 1);
 
     // Deleting the message deletes the hosted image.
-    let path = server.app.lock().embeds["embed_1"].path.clone();
-    assert!(path.starts_with(&dir.to_string()) && std::path::Path::new(&path).exists());
+    assert_eq!(upload_files(&dir), 1);
     let id = c.next_id("delete");
     c.request(
         "message",
         &id,
         obj! {"message_id" => message_id.as_str(), "deleted" => true},
     );
-    assert!(
-        !std::path::Path::new(&path).exists(),
-        "image kept after delete"
-    );
+    assert_eq!(upload_files(&dir), 0, "image kept after delete");
     assert_eq!(http_get(&image_url).0, 404);
     server.stop();
 }
@@ -864,4 +862,178 @@ fn test_shutdown_with_unfurl_in_flight() {
     gate.open();
     assert!(took < Duration::from_millis(1500), "shutdown took {took:?}");
     assert_eq!(upload_files(&dir), 0);
+}
+
+/// A fixture whose /post has ARTICLE's preview and image.
+fn article() -> Fixture {
+    fixture(vec![
+        ("/post", html(ARTICLE)),
+        ("/before.png", respond("image/png", test_png())),
+    ])
+}
+
+fn write_url(result: &Object) -> String {
+    result["embeds"].as_list()[0].as_object().unwrap()["write_url"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
+fn put(write_url: &str, size: usize) -> u16 {
+    http_do("PUT", write_url, Some(&vec![b'a'; size]), "text/plain").0
+}
+
+#[test]
+fn test_link_image_is_not_a_message_upload() {
+    let page = article();
+    let (mut server, _dir) = unfurl_server_with(Config {
+        max_message_upload_bytes: 100,
+        ..Config::default()
+    });
+    let mut c = dial_test_client(&server);
+    let result = post_embeds(
+        &mut c,
+        "both",
+        obj! {"room_id" => "general", "body" => obj! {
+            "text" => page.url("/post"),
+            "embeds" => vec![Json::from(obj! {"kind" => "upload"})],
+        }},
+    );
+    settle(&server);
+    let kinds: Vec<String> = embeds_of(&c.notification("message"))
+        .iter()
+        .map(|e| e["kind"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(kinds, vec!["upload", "link"]);
+    assert_eq!(put(&write_url(&result), 100), 201);
+    server.stop();
+}
+
+#[test]
+fn test_eviction_keeps_link_card() {
+    let page = article();
+    let (mut server, dir) = unfurl_server_with(Config {
+        max_upload_storage_bytes: 100 + test_png().len() as i64 - 1,
+        ..Config::default()
+    });
+    let mut c = dial_test_client(&server);
+    let result = post_embeds(
+        &mut c,
+        "upload",
+        obj! {"room_id" => "general", "body" => obj! {
+            "embeds" => vec![Json::from(obj! {"kind" => "upload"})],
+        }},
+    );
+    assert_eq!(put(&write_url(&result), 100), 201);
+    let uploaded = embeds_of(&c.notification("message"));
+    let file_url = uploaded[0]["url"].as_str().unwrap().to_owned();
+
+    let message_id = post(&mut c, &page.url("/post"), "");
+    settle(&server);
+    let linked = embeds_of(&c.notification("message"));
+    let image_url = linked[0]["og"].as_object().unwrap()["image"]
+        .as_object()
+        .unwrap()["url"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let card = embeds_of(&c.notification("message"));
+    assert_eq!(
+        card[0],
+        obj! {
+            "embed_id" => linked[0]["embed_id"].clone(),
+            "kind" => "link",
+            "url" => page.url("/post"),
+            "og" => obj! {
+                "title" => "Before & after",
+                "description" => "The fix, explained",
+                "site_name" => "Example",
+            },
+        }
+    );
+    c.expect_quiet();
+    assert_eq!(http_get(&image_url).0, 404);
+    assert_eq!(http_get(&file_url).0, 200);
+    assert_eq!(upload_files(&dir), 1);
+
+    // The server still holds the card, so a save that keeps it gets it back.
+    let id = c.next_id("edit");
+    let (before, _) = c.request(
+        "message",
+        &id,
+        obj! {
+            "message_id" => message_id.as_str(),
+            "body" => obj! {
+                "text" => format!("Kept: {}", page.url("/post")),
+                "embeds" => vec![Json::from(obj! {"embed_id" => card[0]["embed_id"].clone(), "kind" => "link"})],
+            },
+        },
+    );
+    assert_eq!(embeds_of(&notification_params(&before[0], "message")), card);
+    server.stop();
+}
+
+#[test]
+fn test_unfurl_respects_embed_cap() {
+    let pages: Vec<(&'static str, Route)> = ["/1", "/2"]
+        .into_iter()
+        .map(|p| (p, html(r#"<title>Page</title>"#)))
+        .collect();
+    let page = fixture(pages);
+    let (mut server, _dir) = unfurl_server();
+    let mut c = dial_test_client(&server);
+    let notes: Vec<Json> = (0..MAX_EMBEDS_PER_MESSAGE - 1)
+        .map(|_| obj! {"kind" => "note"}.into())
+        .collect();
+    let id = c.next_id("m");
+    c.request(
+        "message",
+        &id,
+        obj! {"body" => obj! {
+            "text" => format!("{} {}", page.url("/1"), page.url("/2")),
+            "embeds" => notes,
+        }},
+    );
+    settle(&server);
+    let embeds = embeds_of(&c.notification("message"));
+    assert_eq!(embeds.len(), MAX_EMBEDS_PER_MESSAGE);
+    assert_eq!(
+        embeds[MAX_EMBEDS_PER_MESSAGE - 1]["url"].as_str(),
+        Some(page.url("/1").as_str())
+    );
+    server.stop();
+}
+
+#[test]
+fn test_link_embed_survives_restart() {
+    let page = article();
+    let memory: Arc<dyn Store> = Arc::new(store::Memory::new());
+    let dir = TempDir::new("unfurl-uploads-");
+    let mut first = start_with(memory.clone(), &dir.to_string(), |config| {
+        config.unfurl = true;
+        config.unfurl_allow_internal = true;
+    });
+    let mut c = dial_test_client(&first);
+    let message_id = post(&mut c, &page.url("/post"), "");
+    settle(&first);
+    let linked = embeds_of(&c.notification("message"));
+    drop(c);
+    first.stop();
+
+    let mut second = start_with_store(memory, &dir.to_string());
+    let mut c = dial_test_client(&second);
+    let image_url = linked[0]["og"].as_object().unwrap()["image"]
+        .as_object()
+        .unwrap()["url"]
+        .as_str()
+        .unwrap()
+        .replace(&first.http.url, &second.http.url);
+    assert_eq!(http_get(&image_url), (200, test_png()));
+    let page = history_page(&mut c, "general", Object::new());
+    let restored = records(&page, "messages")
+        .into_iter()
+        .rfind(|m| m["message_id"].as_str() == Some(message_id.as_str()))
+        .unwrap();
+    assert_eq!(embeds_of(&restored), linked);
+    second.stop();
 }
