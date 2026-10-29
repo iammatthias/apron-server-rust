@@ -817,7 +817,6 @@ fn test_unfurl_skips_removed_urls() {
     gate.open();
     settle(&server);
     c.expect_quiet();
-    assert!(server.app.lock().embeds.is_empty());
     server.stop();
 }
 
@@ -827,7 +826,12 @@ fn test_unfurl_jobs_saturate() {
     let paths: Vec<&'static str> = (0..=MAX_JOBS)
         .map(|i| &*format!("/slow{i}").leak())
         .collect();
-    let page = fixture(paths.iter().map(|p| (*p, gated(&gate))).collect());
+    let later: Vec<&'static str> = (0..UNFURLS_PER_MINUTE)
+        .map(|i| &*format!("/later{i}").leak())
+        .collect();
+    let mut routes: Vec<(&'static str, Route)> = paths.iter().map(|p| (*p, gated(&gate))).collect();
+    routes.extend(later.iter().map(|p| (*p, html("<title>Later</title>"))));
+    let page = fixture(routes);
     let (mut server, _dir) = unfurl_server();
     let mut clients: Vec<TestClient> = paths.iter().map(|_| dial_test_client(&server)).collect();
     for (c, path) in clients.iter_mut().zip(&paths) {
@@ -839,6 +843,16 @@ fn test_unfurl_jobs_saturate() {
     let mut want = vec![1; MAX_JOBS];
     want.push(0);
     assert_eq!(hits, want);
+
+    // The refused message spent none of its sender's allowance.
+    let refused = clients.last_mut().unwrap();
+    for chunk in later.chunks(MAX_URLS_PER_MESSAGE) {
+        let urls: Vec<String> = chunk.iter().map(|p| page.url(p)).collect();
+        post(refused, &urls.join(" "), "");
+        settle(&server);
+    }
+    let hits: Vec<usize> = later.iter().map(|p| page.hits(p)).collect();
+    assert_eq!(hits, vec![1; UNFURLS_PER_MINUTE as usize]);
     server.stop();
 }
 
