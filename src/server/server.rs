@@ -740,7 +740,7 @@ pub fn open(config: Config) -> Result<Arc<Server>, store::StoreError> {
         let check = if config.unfurl_allow_internal {
             outbound::any_address()
         } else {
-            outbound::public_only()
+            unfurl::dial_check()
         };
         Unfurler::new(Fetcher::new(check, unfurl::FETCH_TIMEOUT))
     });
