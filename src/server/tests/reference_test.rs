@@ -253,7 +253,7 @@ fn test_failed_and_expired_writes_drop_the_embed() {
 /// is closed, where Go closes it first: rust-stdlib's close waits for the
 /// request body to end, which a reply that comes before the body ends
 /// would otherwise wait on.
-fn put_from_pipe(write_url: &str) -> (PipeWriter, mpsc::Receiver<u16>) {
+pub(super) fn put_from_pipe(write_url: &str) -> (PipeWriter, mpsc::Receiver<u16>) {
     let (body, pipe) = rust_stdlib::io::pipe();
     let (done, status) = mpsc::channel();
     let request = http::Request::new("PUT", write_url)
@@ -276,7 +276,7 @@ fn put_from_pipe(write_url: &str) -> (PipeWriter, mpsc::Receiver<u16>) {
 }
 
 /// Waits for a writer's status, failing rather than hanging.
-fn writer_status(status: &mpsc::Receiver<u16>) -> u16 {
+pub(super) fn writer_status(status: &mpsc::Receiver<u16>) -> u16 {
     status
         .recv_timeout(std::time::Duration::from_secs(10))
         .expect("the writer never finished")
