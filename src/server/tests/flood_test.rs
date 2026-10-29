@@ -5,9 +5,9 @@ use rust_stdlib::time;
 
 use super::helpers::*;
 use crate::obj;
+use crate::server::config::Config;
 use crate::server::limits::Limits;
 use crate::server::protocol::*;
-use crate::server::Config;
 use crate::ws;
 
 fn server(limits: Limits) -> TestServer {

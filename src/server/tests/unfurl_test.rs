@@ -11,12 +11,12 @@ use rust_stdlib::time::{self, Duration};
 use super::helpers::*;
 use super::persist_test::{start_with, start_with_store};
 use crate::obj;
+use crate::server::config::Config;
 use crate::server::embeds::MAX_EMBEDS_PER_MESSAGE;
 use crate::server::outbound::{public_only, DialCheck};
 use crate::server::protocol::*;
 use crate::server::unfurl::page::{parse_page, Meta};
 use crate::server::unfurl::*;
-use crate::server::Config;
 use crate::store::{self, Store};
 
 /// Serves fixture pages by path, counting the requests to each path and

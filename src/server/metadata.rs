@@ -8,10 +8,11 @@ use std::sync::Arc;
 use rust_stdlib::net::url;
 use rust_stdlib_derive::{MarshalTo, UnmarshalFrom};
 
+use super::client::Client;
 use super::commands::private_notice;
 use super::embeds::EmbedPurpose;
 use super::protocol::*;
-use super::server::{Client, State, DEFAULT_ROOM_ID};
+use super::server::{State, DEFAULT_ROOM_ID};
 use super::toggles::{Feature, UPLOADS_OFF};
 use super::users::MAX_NAME_RUNES;
 use crate::obj;

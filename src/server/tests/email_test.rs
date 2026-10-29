@@ -16,10 +16,11 @@ use super::webauthn_test::{
     TEST_PASSKEY_ORIGIN,
 };
 use crate::obj;
+use crate::server::config::Config;
 use crate::server::email::*;
 use crate::server::limits::IpKey;
 use crate::server::protocol::*;
-use crate::server::{Config, Server};
+use crate::server::Server;
 use crate::store::{self, Store};
 
 /// An EmailSender that keeps what it is asked to send.
@@ -898,7 +899,7 @@ fn test_email_proposals_keep_no_closed_connection() {
     propose(&mut guest, "bob@example.com");
     mailbox.receive();
     let guest_id = guest.user_id.clone();
-    let clients: Vec<Weak<crate::server::server::Client>> = app
+    let clients: Vec<Weak<crate::server::client::Client>> = app
         .lock()
         .clients
         .values()

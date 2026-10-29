@@ -7,8 +7,8 @@ use rust_stdlib::time;
 
 use super::helpers::*;
 use crate::obj;
+use crate::server::config::RETRY_AFTER_SECONDS;
 use crate::server::protocol::*;
-use crate::server::server::RETRY_AFTER_SECONDS;
 
 fn probe(server: &TestServer, path: &str, headers: &[(&str, &str)]) -> (u16, Header, Json) {
     let url = format!("{}{path}", server.http.url);

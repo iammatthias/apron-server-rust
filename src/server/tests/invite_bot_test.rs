@@ -10,8 +10,8 @@ use super::helpers::*;
 use super::persist_test::start_with_store;
 use super::webauthn_test::*;
 use crate::obj;
+use crate::server::config::Config;
 use crate::server::protocol::*;
-use crate::server::Config;
 use crate::store::{self, Store};
 
 const OTHER_ORIGIN: &str = "http://127.0.0.1:5173";

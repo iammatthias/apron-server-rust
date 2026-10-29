@@ -12,9 +12,9 @@ use rust_stdlib::time::{self, Duration};
 use super::helpers::*;
 use super::persist_test::start_with;
 use crate::obj;
+use crate::server::config::Config;
 use crate::server::embeds::UPLOAD_SUFFIX;
 use crate::server::protocol::*;
-use crate::server::Config;
 use crate::store::{self, Store};
 
 const RETENTION: Duration = Duration::from_hours(1);

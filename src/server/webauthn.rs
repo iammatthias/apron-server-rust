@@ -11,11 +11,12 @@ use rust_stdlib::time::{self, Duration, Time};
 use rust_stdlib_crypto::{rand, sha256};
 
 use super::bots::{BOT_SIGNS_IN_WITH_TOKEN, BOT_TOKEN_PREFIX};
+use super::client::Client;
 use super::devices::DEVICE_TOKEN_PREFIX;
 use super::protocol::*;
 use super::remap::{Fate, Remap};
 use super::rooms::room_update;
-use super::server::{Client, State};
+use super::server::State;
 use super::user_ids::{candidate_user_id, normalize_name};
 use crate::obj;
 use crate::webauthn::protocol::{

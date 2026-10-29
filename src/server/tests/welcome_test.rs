@@ -5,8 +5,8 @@
 use super::helpers::*;
 use super::webauthn_test::{test_web_authn, TEST_PASSKEY_ORIGIN};
 use crate::obj;
+use crate::server::config::Config;
 use crate::server::protocol::*;
-use crate::server::Config;
 use rust_stdlib::time;
 
 fn welcome_of(frame: &Object) -> String {
@@ -51,7 +51,7 @@ fn test_welcome_notice_says_guests_only_read() {
         ("guest posting", |c| c.guest_posting = true, ""),
     ];
     for (name, configure, rest) in cases {
-        let mut config = crate::server::default_config();
+        let mut config = crate::server::config::default_config();
         configure(&mut config);
         let server = new_test_server(config);
         let (_, notice) = greeting(&server);
@@ -112,7 +112,7 @@ fn test_welcome_flag_overrides_generals_description() {
 
 #[test]
 fn test_read_only_summary() {
-    let mut config = crate::server::default_config();
+    let mut config = crate::server::config::default_config();
     config.email_sender = Some(super::email_test::test_mailbox(1).0);
     let server = new_test_server(config);
     assert_eq!(

@@ -6,11 +6,12 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use super::admin::ADMIN_USER_ID;
+use super::client::Client;
 use super::commands::private_notice;
 use super::embeds::{EmbedPurpose, EmbedState};
 use super::protocol::*;
 use super::remap::Remap;
-use super::server::{Client, State};
+use super::server::State;
 
 /// Why the connections of a purged user close.
 pub(super) const PURGED: &str = "Removed by an admin";

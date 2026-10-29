@@ -11,8 +11,8 @@ use super::helpers::*;
 use super::persist_test::start_with;
 use super::webauthn_test::*;
 use crate::obj;
+use crate::server::config::Config;
 use crate::server::protocol::*;
-use crate::server::Config;
 use crate::store::{self, Store};
 
 pub const ADMIN_TOKEN: &str = "admin-token-for-tests-0123456789";

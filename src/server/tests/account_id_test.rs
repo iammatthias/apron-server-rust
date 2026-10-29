@@ -9,9 +9,9 @@ use rust_stdlib::regexp::Regexp;
 use super::helpers::*;
 use super::webauthn_test::*;
 use crate::obj;
+use crate::server::config::Config;
 use crate::server::protocol::*;
 use crate::server::user_ids::{candidate_user_id, user_id_slug, USER_ID_SLUG_ATTEMPTS};
-use crate::server::Config;
 
 #[test]
 fn test_user_id_slugs_follow_cloudflare() {
@@ -299,7 +299,7 @@ fn test_taken_slug_ids_fall_back_to_random() {
         c.user_id
     );
 
-    let mut config: Config = crate::server::default_config();
+    let mut config: Config = crate::server::config::default_config();
     config.web_authn = Some(test_web_authn());
     config.roles.insert(
         "admin".into(),

@@ -8,8 +8,8 @@ use super::admin_test::*;
 use super::helpers::*;
 use super::persist_test::start_with;
 use crate::obj;
+use crate::server::config::Config;
 use crate::server::protocol::*;
-use crate::server::Config;
 use crate::store::{self, Store};
 
 fn params(frame: &Object) -> Object {

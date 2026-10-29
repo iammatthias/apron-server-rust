@@ -12,12 +12,13 @@ use rust_stdlib::time::{self, Time};
 use rust_stdlib_crypto::{rand, sha256};
 
 use super::admin::ADMIN_USER_ID;
+use super::client::Client;
 use super::commands::private_notice;
 use super::devices::apron_link;
 use super::email::web_socket_url;
 use super::protocol::*;
 use super::remap::{Fate, Remap};
-use super::server::{Client, State};
+use super::server::State;
 use super::user_ids::{candidate_user_id, normalize_name};
 use super::webauthn::SessionKey;
 use crate::obj;

@@ -13,9 +13,9 @@ use super::purge_test::{account_config, entangle, named_account, stored_traces, 
 use super::reference_test::{put_from_pipe, writer_status};
 use super::webauthn_test::*;
 use crate::obj;
+use crate::server::config::Config;
 use crate::server::protocol::*;
 use crate::server::push::push_key;
-use crate::server::Config;
 use crate::store::{self, Store};
 
 /// What `traces` finds of a user_id that has a bot, the bot's own user_id

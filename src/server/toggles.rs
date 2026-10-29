@@ -5,9 +5,10 @@
 
 use std::sync::Arc;
 
+use super::client::{Client, Frame};
 use super::commands::private_notice;
 use super::protocol::*;
-use super::server::{Client, Frame, State};
+use super::server::State;
 use super::users::ADMIN_ROLE;
 use crate::obj;
 

@@ -13,9 +13,10 @@ use rust_stdlib_crypto::{rand, subtle};
 
 use super::admin::{ADMIN_SIGNS_IN_WITH_TOKEN, ADMIN_USER_ID};
 use super::bots::BOT_SIGNS_IN_WITH_TOKEN;
+use super::client::{Client, Conn};
 use super::protocol::*;
 use super::remap::{Fate, Remap};
-use super::server::{Client, Conn, State};
+use super::server::State;
 use super::status::retry_after;
 use super::user_ids::{normalize_name, requestable};
 use crate::rate::{every, Limiter};

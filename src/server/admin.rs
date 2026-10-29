@@ -7,9 +7,10 @@ use std::sync::Arc;
 use rust_stdlib_crypto::{sha256, subtle};
 
 use super::bots::BOT_ROLE;
+use super::client::Client;
 use super::commands::private_notice;
 use super::protocol::*;
-use super::server::{Client, State};
+use super::server::State;
 use super::users::{valid_role, ADMIN_ROLE, INVALID_ROLE, MAX_ROLES};
 
 /// The account the admin token signs in as. No one else may take its

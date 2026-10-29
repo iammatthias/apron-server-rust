@@ -3,10 +3,13 @@
 
 pub mod admin;
 pub mod bots;
+pub mod client;
 pub mod commands;
+pub mod config;
 pub mod custom_emoji;
 pub mod dedup;
 pub mod devices;
+pub mod dispatch;
 pub mod email;
 pub mod embeds;
 pub mod emoji;
@@ -26,6 +29,7 @@ pub mod retention;
 pub mod rooms;
 #[allow(clippy::module_inception)]
 pub mod server;
+pub mod server_frame;
 pub mod status;
 pub mod toggles;
 pub(crate) mod unfurl;
@@ -39,4 +43,5 @@ pub mod webpush;
 #[cfg(test)]
 mod tests;
 
-pub use server::{default_config, open, Config, Server, State};
+pub use config::{default_config, Config};
+pub use server::{open, Server, State};

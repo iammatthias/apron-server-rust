@@ -13,9 +13,9 @@ use rust_stdlib_crypto::{ecdsa, elliptic, rand, sha256};
 use super::helpers::*;
 use crate::cbor;
 use crate::obj;
+use crate::server::config::Config;
 use crate::server::protocol::*;
 use crate::server::webauthn::SESSION_LIFETIME;
-use crate::server::Config;
 use crate::webauthn::{self, WebAuthn};
 
 pub const TEST_PASSKEY_ORIGIN: &str = "http://localhost:5173";

@@ -212,7 +212,7 @@ fn test_toggle_addmember_sends_permissions() {
 /// A guest who only reads is told it may not write.
 #[test]
 fn test_read_only_guest_may_not_write() {
-    let server = new_test_server(crate::server::default_config());
+    let server = new_test_server(crate::server::config::default_config());
     let mut guest = dial_test_client(&server);
     let you = you_of(&guest.result("me", "me", Object::new()));
     assert_eq!(

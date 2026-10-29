@@ -4,9 +4,10 @@ use std::sync::Arc;
 use rust_stdlib::encoding::json::jsontext::Value;
 use rust_stdlib::time::Timer;
 
+use super::client::{Client, ClientId, Frame};
 use super::dedup::DedupCache;
 use super::protocol::*;
-use super::server::{Client, ClientId, Frame, Server, State, DEFAULT_ROOM_ID};
+use super::server::{Server, State, DEFAULT_ROOM_ID};
 use super::status::Cause;
 use super::status::*;
 use super::user_ids::{normalize_name, GUEST_ID_PREFIX};
@@ -386,7 +387,7 @@ impl State {
             return Err(RpcError::with_data(
                 CODE_RETRY_AFTER,
                 "Connection limit reached for this account",
-                obj! {"retry_after" => super::server::RETRY_AFTER_SECONDS},
+                obj! {"retry_after" => super::config::RETRY_AFTER_SECONDS},
             ));
         }
         self.note_bot_active_locked(user_id);
@@ -451,7 +452,7 @@ impl State {
     }
 
     /// Forgets a closed connection, retiring its guest identity.
-    pub fn detach_locked(&mut self, conn: super::server::Conn) {
+    pub fn detach_locked(&mut self, conn: super::client::Conn) {
         self.release_proposal_locked(&conn);
         let Some(user_id) = conn.user else { return };
         let Some(u) = self.users.get_mut(&user_id) else {

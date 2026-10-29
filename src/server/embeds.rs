@@ -16,8 +16,9 @@ use rust_stdlib::time::{self, Duration, Time, Timer};
 use rust_stdlib::{image, mime, path};
 use rust_stdlib_crypto::{rand, subtle};
 
+use super::client::Client;
 use super::protocol::*;
-use super::server::{Client, Server, State};
+use super::server::{Server, State};
 use super::toggles::{Feature, UPLOADS_OFF};
 use super::unfurl::Preview;
 use super::users::EMOJI_ROLES;
