@@ -29,6 +29,8 @@ pub use crate::webauthn::WebAuthn;
 
 pub const PASSKEY_LIFETIME: Duration = Duration::from_mins(2);
 pub const SESSION_LIFETIME: Duration = Duration::from_hours(30 * 24);
+/// Passkeys one account may hold (Cloudflare's MAX_PASSKEYS_PER_USER).
+pub const MAX_PASSKEYS: usize = 8;
 
 /// A passkey user's handle and credentials, persisted with the user
 /// (persist.rs). Go's `passkeyUser` also points back at its user; here the
@@ -292,8 +294,10 @@ impl State {
                     &fresh
                 }
             };
-            if passkey.credentials.len() >= 10 {
-                return Err(denied("This identity already has ten passkeys"));
+            if passkey.credentials.len() >= MAX_PASSKEYS {
+                return Err(denied(&format!(
+                    "An account holds at most {MAX_PASSKEYS} passkeys"
+                )));
             }
             let exclusions = passkey
                 .credentials
@@ -428,7 +432,7 @@ impl State {
             let u = &self.users[&ceremony.identity_id];
             if u.account() != !new_account
                 || u.passkey.as_ref().is_some_and(|user| {
-                    user.handle != ceremony.handle || user.credentials.len() >= 10
+                    user.handle != ceremony.handle || user.credentials.len() >= MAX_PASSKEYS
                 })
             {
                 return Err(denied("Registration changed; try again"));
