@@ -31,7 +31,9 @@ services:
       - --max-connections=300
       - --max-listener-connections=600
       - --max-private-rooms=20
-      - --role=admin=guest_1
+      # The owner's account, renamed from guest_1 by /rename. A grant is given
+      # once, so this only records who it went to.
+      - --role=admin=matthias
       - --history.retention=168h
       - --welcome=Guests can read along. Create a passkey to post, react and start threads. Messages are kept for 7 days.
       - --admin-token-file=/run/secrets/apron_admin_token

@@ -307,15 +307,10 @@ if (!tokenFile) {
     return m ? decodeURIComponent(m[1]) : null;
   };
 
-  // The owner's account was guest_1 until /rename made it matthias.
-  await check("admin: the owner's account holds the admin role", async () => {
-    for (const owner of ["matthias", "guest_1"]) {
-      const { frames, error } = await run(`/role ${owner}`);
-      if (error?.message?.startsWith("No registered user")) continue;
-      if (error) return `error ${JSON.stringify(error)}`;
-      return new RegExp(`${owner}.*roles? .*\`admin\``, "s").test(noticeText(frames)) || `notice ${noticeText(frames)}`;
-    }
-    return "neither matthias nor guest_1 exists";
+  await check("admin: matthias holds the admin role (--role)", async () => {
+    const { frames, error } = await run("/role matthias");
+    if (error) return `error ${JSON.stringify(error)}`;
+    return /matthias.*roles? .*`admin`/s.test(noticeText(frames)) || `notice ${noticeText(frames)}`;
   });
 
   const accountID = `livecheck_${suffix}`;
@@ -367,7 +362,7 @@ if (!tokenFile) {
   });
 
   await pushChecks(run, linkToken);
-  await renameAndPurge(run, linkToken);
+  await renameAndPurge(adminToken, linkToken);
 
   await trackC(admin);
   admin.close();
@@ -398,14 +393,24 @@ if (!tokenFile) {
 
 // /rename and /purge on a livecheck_ account of their own: a rename moves
 // its connection and its token to the new user_id, and a purge closes the
-// connection and revokes the token.
-async function renameAndPurge(run, linkToken) {
+// connection and revokes the token. The admin runs them on a connection of
+// its own, since the retired user_id's invalid_params counts against it.
+async function renameAndPurge(adminToken, linkToken) {
+  const admin = await connect();
+  const own = await admin.call("auth", { scheme: "token", token: adminToken });
+  if (own.error) {
+    report("rename: the admin signs in", false, JSON.stringify(own.error));
+    admin.close();
+    return;
+  }
+  const run = (text) => admin.call("command", { room_id: "general", body: { text } });
   const from = `livecheck_rn_${suffix}`;
   const to = `livecheck_renamed_${suffix}`;
   const { frames, error } = await run(`/invite-token ${from}`);
   const token = !error && linkToken(noticeText(frames));
   if (!token) {
     report("rename: a livecheck_ account to rename", false, `error ${JSON.stringify(error)}`);
+    admin.close();
     return;
   }
   const c = await connect();
@@ -450,6 +455,7 @@ async function renameAndPurge(run, linkToken) {
     });
   } finally {
     c.close();
+    admin.close();
   }
 }
 
