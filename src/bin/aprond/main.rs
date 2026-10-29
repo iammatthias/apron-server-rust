@@ -47,6 +47,16 @@ impl EmailSender for SmtpEmailSender {
     }
 }
 
+/// The HTTP mail API sender as the server's `EmailSender`.
+struct HttpEmailSender(email::HttpSender);
+
+impl EmailSender for HttpEmailSender {
+    fn send_sign_in_code(&self, ctx: &Context, m: &SignInEmail) -> Result<(), SendError> {
+        self.0
+            .send_sign_in_code(ctx, &m.to, &m.code, m.add, &m.text())
+    }
+}
+
 /// A count option as the server's `usize`; Go treats every count at or
 /// below 0 as unlimited, as 0 is here.
 fn count(n: i64) -> usize {
@@ -82,6 +92,7 @@ fn server_config(settings: Settings) -> Result<server::Config, String> {
         match sender {
             settings::EmailSender::Log => Arc::new(LogEmailSender::default()),
             settings::EmailSender::Smtp(smtp) => Arc::new(SmtpEmailSender(smtp)),
+            settings::EmailSender::Http(http) => Arc::new(HttpEmailSender(http)),
         }
     });
     config.email_link_url = settings.email_link_url;

@@ -73,13 +73,13 @@ max-storage-mb = 1000
 # Offer email sign-in (off by default)
 enable = false
 
-# How email sign-in codes are delivered, with --email.enable: smtp sends them, log writes them to the server log (development only; refused with --public-url or --tls.domain)
+# How email sign-in codes are delivered, with --email.enable: smtp sends them, http POSTs them to a mail API (not in the Go aprond), log writes them to the server log (development only; refused with --public-url or --tls.domain)
 sender = "smtp"
 
 # Page that sign-in links in emails open, such as https://chat.example/, with a sign-in token in its fragment (default: --public-url; empty sends codes without links)
 link-url = ""
 
-# Sender address of sign-in emails, for --email.sender smtp
+# Sender address of sign-in emails, for --email.sender smtp or http
 from = ""
 
 # SMTP relay as host:port, for --email.sender smtp: STARTTLS is required (such as :587), or TLS from the start on port 465
@@ -93,6 +93,12 @@ smtp-password = ""
 
 # Send through a relay that does not offer STARTTLS, in cleartext (a relay on the same host only)
 smtp-insecure = false
+
+# Mail API that --email.sender http POSTs {"from", "to", "subject", "text"} to as JSON, such as https://api.cloudflare.com/client/v4/accounts/<account ID>/email/sending/send (not in the Go aprond)
+http-url = ""
+
+# Header of each --email.sender http request, as Name: value, such as "Authorization: Bearer <token>"; repeat for more (not in the Go aprond)
+# http-header = []
 
 [push]
 
@@ -239,13 +245,13 @@ max-storage-mb = 1000
 # Offer email sign-in (off by default)
 enable = false
 
-# How email sign-in codes are delivered, with --email.enable: smtp sends them, log writes them to the server log (development only; refused with --public-url or --tls.domain)
+# How email sign-in codes are delivered, with --email.enable: smtp sends them, http POSTs them to a mail API (not in the Go aprond), log writes them to the server log (development only; refused with --public-url or --tls.domain)
 sender = "smtp"
 
 # Page that sign-in links in emails open, such as https://chat.example/, with a sign-in token in its fragment (default: --public-url; empty sends codes without links)
 link-url = ""
 
-# Sender address of sign-in emails, for --email.sender smtp
+# Sender address of sign-in emails, for --email.sender smtp or http
 from = ""
 
 # SMTP relay as host:port, for --email.sender smtp: STARTTLS is required (such as :587), or TLS from the start on port 465
@@ -259,6 +265,12 @@ smtp-password = ""
 
 # Send through a relay that does not offer STARTTLS, in cleartext (a relay on the same host only)
 smtp-insecure = false
+
+# Mail API that --email.sender http POSTs {"from", "to", "subject", "text"} to as JSON, such as https://api.cloudflare.com/client/v4/accounts/<account ID>/email/sending/send (not in the Go aprond)
+http-url = ""
+
+# Header of each --email.sender http request, as Name: value, such as "Authorization: Bearer <token>"; repeat for more (not in the Go aprond)
+# http-header = []
 
 [push]
 
@@ -406,13 +418,13 @@ max-storage-mb = -1
 # Offer email sign-in (off by default)
 enable = true
 
-# How email sign-in codes are delivered, with --email.enable: smtp sends them, log writes them to the server log (development only; refused with --public-url or --tls.domain)
+# How email sign-in codes are delivered, with --email.enable: smtp sends them, http POSTs them to a mail API (not in the Go aprond), log writes them to the server log (development only; refused with --public-url or --tls.domain)
 sender = "log"
 
 # Page that sign-in links in emails open, such as https://chat.example/, with a sign-in token in its fragment (default: --public-url; empty sends codes without links)
 link-url = ""
 
-# Sender address of sign-in emails, for --email.sender smtp
+# Sender address of sign-in emails, for --email.sender smtp or http
 from = ""
 
 # SMTP relay as host:port, for --email.sender smtp: STARTTLS is required (such as :587), or TLS from the start on port 465
@@ -426,6 +438,12 @@ smtp-password = ""
 
 # Send through a relay that does not offer STARTTLS, in cleartext (a relay on the same host only)
 smtp-insecure = false
+
+# Mail API that --email.sender http POSTs {"from", "to", "subject", "text"} to as JSON, such as https://api.cloudflare.com/client/v4/accounts/<account ID>/email/sending/send (not in the Go aprond)
+http-url = ""
+
+# Header of each --email.sender http request, as Name: value, such as "Authorization: Bearer <token>"; repeat for more (not in the Go aprond)
+# http-header = []
 
 [push]
 
@@ -572,13 +590,13 @@ max-storage-mb = 1000
 # Offer email sign-in (off by default)
 enable = false
 
-# How email sign-in codes are delivered, with --email.enable: smtp sends them, log writes them to the server log (development only; refused with --public-url or --tls.domain)
+# How email sign-in codes are delivered, with --email.enable: smtp sends them, http POSTs them to a mail API (not in the Go aprond), log writes them to the server log (development only; refused with --public-url or --tls.domain)
 sender = "smtp"
 
 # Page that sign-in links in emails open, such as https://chat.example/, with a sign-in token in its fragment (default: --public-url; empty sends codes without links)
 link-url = ""
 
-# Sender address of sign-in emails, for --email.sender smtp
+# Sender address of sign-in emails, for --email.sender smtp or http
 from = ""
 
 # SMTP relay as host:port, for --email.sender smtp: STARTTLS is required (such as :587), or TLS from the start on port 465
@@ -592,6 +610,12 @@ smtp-password = ""
 
 # Send through a relay that does not offer STARTTLS, in cleartext (a relay on the same host only)
 smtp-insecure = false
+
+# Mail API that --email.sender http POSTs {"from", "to", "subject", "text"} to as JSON, such as https://api.cloudflare.com/client/v4/accounts/<account ID>/email/sending/send (not in the Go aprond)
+http-url = ""
+
+# Header of each --email.sender http request, as Name: value, such as "Authorization: Bearer <token>"; repeat for more (not in the Go aprond)
+# http-header = []
 
 [push]
 

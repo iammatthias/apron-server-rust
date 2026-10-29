@@ -59,13 +59,23 @@ fn without_times(log: &[u8]) -> String {
 }
 
 /// Runs `aprond` with each case and compares its exit status, standard
-/// output and standard error (without log times) with `tests/golden/<name>`.
+/// output and standard error (without log times) with `tests/golden/<name>`,
+/// recorded on macOS, whose default data directory differs from Linux's.
 /// Each `(from, to)` in `masks` replaces a per-run value such as a temp path.
 /// `APRON_UPDATE_GOLDEN=1` rewrites the file instead.
 fn check_golden(name: &str, cases: &[Vec<&str>], masks: &[(String, &str)]) {
     let mut got = String::new();
     for args in cases {
-        let (code, out, err) = output(APROND, args);
+        // A fixed home keeps the default store and upload paths, which
+        // depend on the user's directories, the same for everyone.
+        let out = Command::new(APROND)
+            .args(args)
+            .env("HOME", "/home/aprond")
+            .env_remove("XDG_DATA_HOME")
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        let (code, out, err) = (out.status.code().unwrap_or(-1), out.stdout, out.stderr);
         got.push_str(&format!(
             "$ aprond {}\nexit {code}\n--- stdout\n{}--- stderr\n{}\n\n",
             args.join(" "),

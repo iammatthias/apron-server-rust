@@ -64,6 +64,8 @@ pub struct EmailOptions {
     pub smtp_user: String,
     pub smtp_password: String,
     pub smtp_insecure: bool,
+    pub http_url: String,
+    pub http_headers: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -214,13 +216,15 @@ pub static GROUPS: &[Group] = &[
         namespace: "email",
         options: &[
             spec!("enable", Bool, email.enable, [], [], "Offer email sign-in (off by default)"),
-            spec!("sender", Str, email.sender, ["smtp"], ["smtp", "log"], "How email sign-in codes are delivered, with --email.enable: smtp sends them, log writes them to the server log (development only; refused with --public-url or --tls.domain)"),
+            spec!("sender", Str, email.sender, ["smtp"], ["smtp", "http", "log"], "How email sign-in codes are delivered, with --email.enable: smtp sends them, http POSTs them to a mail API (not in the Go aprond), log writes them to the server log (development only; refused with --public-url or --tls.domain)"),
             spec!("link-url", Str, email.link_url, [], [], "Page that sign-in links in emails open, such as https://chat.example/, with a sign-in token in its fragment (default: --public-url; empty sends codes without links)"),
-            spec!("from", Str, email.from, [], [], "Sender address of sign-in emails, for --email.sender smtp"),
+            spec!("from", Str, email.from, [], [], "Sender address of sign-in emails, for --email.sender smtp or http"),
             spec!("smtp-addr", Str, email.smtp_addr, [], [], "SMTP relay as host:port, for --email.sender smtp: STARTTLS is required (such as :587), or TLS from the start on port 465"),
             spec!("smtp-user", Str, email.smtp_user, [], [], "SMTP user name; empty sends without authentication"),
             spec!("smtp-password", Str, email.smtp_password, [], [], "SMTP password"),
             spec!("smtp-insecure", Bool, email.smtp_insecure, [], [], "Send through a relay that does not offer STARTTLS, in cleartext (a relay on the same host only)"),
+            spec!("http-url", Str, email.http_url, [], [], "Mail API that --email.sender http POSTs {\"from\", \"to\", \"subject\", \"text\"} to as JSON, such as https://api.cloudflare.com/client/v4/accounts/<account ID>/email/sending/send (not in the Go aprond)"),
+            spec!("http-header", List, email.http_headers, [], [], "Header of each --email.sender http request, as Name: value, such as \"Authorization: Bearer <token>\"; repeat for more (not in the Go aprond)"),
         ],
     },
     Group {

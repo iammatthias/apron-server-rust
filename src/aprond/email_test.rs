@@ -1,6 +1,6 @@
 //! cmd/aprond/email_test.go.
 
-use super::email::SmtpSender;
+use super::email::{HttpSender, SmtpSender};
 use rust_stdlib::context::Context;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
@@ -137,4 +137,135 @@ fn test_new_smtp_sender_errors() {
         SmtpSender::new("smtp.example:587", "", "", "", false).unwrap_err(),
         "invalid --email.from \"\": an email address is required"
     );
+}
+
+/// A local mail API that records each request's method, path, headers and
+/// body, and answers with `status`.
+fn capture_api(
+    status: u16,
+) -> (
+    rust_stdlib::net::http::httptest::Server,
+    mpsc::Receiver<(String, String, rust_stdlib::net::http::Header, String)>,
+) {
+    use rust_stdlib::net::http::{handler_func, httptest};
+    let (tx, rx) = mpsc::channel();
+    let tx = std::sync::Mutex::new(tx);
+    let server = httptest::Server::new(handler_func(move |w, r| {
+        let body = r
+            .body
+            .as_ref()
+            .map(|b| b.read_all().unwrap())
+            .unwrap_or_default();
+        let _ = tx.lock().unwrap().send((
+            r.method.clone(),
+            r.url.path.clone(),
+            r.header.clone(),
+            String::from_utf8(body).unwrap(),
+        ));
+        w.write_header(status);
+    }))
+    .unwrap();
+    (server, rx)
+}
+
+#[test]
+fn test_http_sender_posts_json() {
+    let (api, requests) = capture_api(202);
+    let sender = HttpSender::new(
+        &format!("{}/send", api.url),
+        "Apron <chat@example.com>",
+        &[
+            "Authorization: Bearer secret".to_string(),
+            "X-Extra:  yes ".to_string(),
+        ],
+    )
+    .unwrap();
+    sender
+        .send_sign_in_code(
+            &Context::background(),
+            "ada@example.com",
+            "123456",
+            false,
+            "Your code is 123456.\n",
+        )
+        .unwrap();
+    let (method, path, header, body) = requests.recv_timeout(Duration::from_secs(1)).unwrap();
+    assert_eq!((method.as_str(), path.as_str()), ("POST", "/send"));
+    assert_eq!(header.get("Authorization"), Some("Bearer secret"));
+    assert_eq!(header.get("X-Extra"), Some("yes"));
+    assert_eq!(header.get("Content-Type"), Some("application/json"));
+    assert_eq!(
+        body,
+        r#"{"from":"\"Apron\" <chat@example.com>","subject":"Your sign-in code is 123456","text":"Your code is 123456.\n","to":"ada@example.com"}"#
+    );
+    sender
+        .send_sign_in_code(
+            &Context::background(),
+            "ada@example.com",
+            "654321",
+            true,
+            "",
+        )
+        .unwrap();
+    let (_, _, _, body) = requests.recv_timeout(Duration::from_secs(1)).unwrap();
+    assert!(
+        body.contains(r#""subject":"Your code to add this address is 654321""#),
+        "{body}"
+    );
+}
+
+#[test]
+fn test_http_sender_fails_on_a_refusal() {
+    let (api, _requests) = capture_api(401);
+    let sender = HttpSender::new(&api.url, "chat@example.com", &[]).unwrap();
+    let err = sender
+        .send_sign_in_code(
+            &Context::background(),
+            "ada@example.com",
+            "123456",
+            false,
+            "",
+        )
+        .unwrap_err();
+    assert!(err.to_string().contains("401"), "{err}");
+}
+
+#[test]
+fn test_new_http_sender_errors() {
+    for (url, from, header, want) in [
+        (
+            "",
+            "chat@example.com",
+            None,
+            "invalid --email.http-url \"\"",
+        ),
+        (
+            "ftp://api.example/",
+            "chat@example.com",
+            None,
+            "invalid --email.http-url",
+        ),
+        (
+            "https://api.example/",
+            "",
+            None,
+            "invalid --email.from \"\"",
+        ),
+        (
+            "https://api.example/",
+            "chat@example.com",
+            Some("Authorization"),
+            "invalid --email.http-header \"Authorization\"",
+        ),
+        (
+            "https://api.example/",
+            "chat@example.com",
+            Some("Bad Name: x"),
+            "invalid --email.http-header",
+        ),
+    ] {
+        let headers: Vec<String> = header.into_iter().map(str::to_string).collect();
+        let err = HttpSender::new(url, from, &headers).unwrap_err();
+        assert!(err.starts_with(want), "{url} {from} {header:?}: {err}");
+    }
 }
