@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
-use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
+use std::sync::mpsc::{sync_channel, SyncSender};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::thread;
 
@@ -24,7 +24,7 @@ use super::limits::{IpKey, LimitTable, Window};
 use super::messages::MessageState;
 use super::metadata::StoredServer;
 use super::outbound;
-use super::persist::{DirtySet, StoredMeta};
+use super::persist::{write_store, DirtySet, StoredMeta};
 use super::protocol::*;
 use super::push::PushRegistration;
 use super::push_delivery::PushDeliverer;
@@ -287,7 +287,7 @@ pub fn open(config: Config) -> Result<Arc<Server>, store::StoreError> {
     let config = Arc::new(config);
     let (tx, rx) = sync_channel::<Vec<Entry>>(STORE_QUEUE);
     let writer_store = store.clone();
-    let writer = thread::spawn(move || Server::write_store(writer_store, rx));
+    let writer = thread::spawn(move || write_store(writer_store, rx));
     let server = Arc::new_cyclic(|weak: &Weak<Server>| {
         let mut granted_ids = BTreeSet::new();
         for holders in config.roles.values() {
@@ -790,17 +790,6 @@ impl Server {
         }
         let scheme = if r.tls.is_some() { "https" } else { "http" };
         format!("{scheme}://{}", r.host)
-    }
-
-    fn write_store(store: Arc<dyn Store>, rx: Receiver<Vec<Entry>>) {
-        for batch in rx {
-            if let Err(e) = store.apply(&batch) {
-                slog::error(
-                    "cannot write to the store",
-                    &["error".into(), slog::Value::from(e.to_string()).into()],
-                );
-            }
-        }
     }
 
     /// Queues the marked changes as one batch for the store writer.
