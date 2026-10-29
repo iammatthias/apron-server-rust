@@ -172,7 +172,7 @@ pub(super) fn entangle(
         );
         st.touch_invite(key);
         st.emails
-            .insert(format!("{user_id}@example.com"), user_id.clone());
+            .insert("entangled@example.com".into(), user_id.clone());
         st.email.proposals.insert(
             u64::MAX,
             crate::server::email::EmailProposal {
@@ -201,7 +201,7 @@ pub(super) fn entangle(
         );
         st.touch_room("general");
         let u = st.users.get_mut(&user_id).unwrap();
-        u.email = format!("{user_id}@example.com");
+        u.email = "entangled@example.com".into();
         u.chosen = "dnd".into();
         u.mute = MuteState {
             forever: true,
@@ -229,10 +229,17 @@ pub(super) fn entangle(
 
 /// Every place the server keeps `user_id`, ignoring case: each store entry
 /// a store holding the state would have, as `<kind> <id>`, and each map
-/// that lives in memory only.
-pub(super) fn traces(server: &TestServer, user_id: &str) -> BTreeSet<String> {
+/// that lives in memory only. Text in `ignore`, such as a longer user_id
+/// that contains this one, does not count.
+pub(super) fn traces(server: &TestServer, user_id: &str, ignore: &[&str]) -> BTreeSet<String> {
     let needle = user_id.to_lowercase();
-    let has = |text: &str| text.to_lowercase().contains(&needle);
+    let has = |text: &str| {
+        let mut text = text.to_lowercase();
+        for skip in ignore {
+            text = text.replace(&skip.to_lowercase(), "");
+        }
+        text.contains(&needle)
+    };
     let st = server.app.lock();
     let mut found = BTreeSet::new();
     for entry in st.dump_locked() {
@@ -279,6 +286,26 @@ pub(super) fn traces(server: &TestServer, user_id: &str) -> BTreeSet<String> {
     found
 }
 
+/// The entries of a store that hold `user_id`, ignoring case, as
+/// `<kind> <id>`; text in `ignore` does not count.
+pub(super) fn stored_traces(s: &dyn Store, user_id: &str, ignore: &[&str]) -> BTreeSet<String> {
+    let needle = user_id.to_lowercase();
+    let mut found = BTreeSet::new();
+    s.load(&mut |entry| {
+        let value = String::from_utf8_lossy(entry.value.as_deref().unwrap_or_default());
+        let mut text = format!("{} {value}", entry.id).to_lowercase();
+        for skip in ignore {
+            text = text.replace(&skip.to_lowercase(), "");
+        }
+        if text.contains(&needle) {
+            found.insert(format!("{} {}", entry.kind, entry.id));
+        }
+        Ok(())
+    })
+    .unwrap();
+    found
+}
+
 /// A purge leaves nothing of the user or their bot but their user_ids,
 /// which stay used, in memory and in the store.
 #[test]
@@ -298,7 +325,7 @@ fn test_purge_leaves_nothing_behind() {
     );
     let lower = user_id.to_lowercase();
     assert_eq!(
-        traces(&server, &user_id),
+        traces(&server, &user_id, &[]),
         BTreeSet::from([format!("used_id {lower}"), format!("used_id bot_{lower}")]),
     );
     let st = server.app.lock();
@@ -551,27 +578,14 @@ fn test_purge_persists() {
         c.user_id.clone()
     };
     let lower = user_id.to_lowercase();
-    let mut stored = BTreeSet::new();
-    open()
-        .load(&mut |entry| {
-            let value = String::from_utf8_lossy(entry.value.as_deref().unwrap_or_default());
-            if format!("{} {value}", entry.id)
-                .to_lowercase()
-                .contains(&lower)
-            {
-                stored.insert(format!("{} {}", entry.kind, entry.id));
-            }
-            Ok(())
-        })
-        .unwrap();
     assert_eq!(
-        stored,
+        stored_traces(&*open(), &user_id, &[]),
         BTreeSet::from([format!("used_id {lower}"), format!("used_id bot_{lower}")]),
         "the store keeps the purged user"
     );
     let server = start_with(open(), &upload_dir, configure);
     assert_eq!(
-        traces(&server, &user_id),
+        traces(&server, &user_id, &[]),
         BTreeSet::from([format!("used_id {lower}"), format!("used_id bot_{lower}")]),
     );
 }

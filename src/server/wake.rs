@@ -373,6 +373,18 @@ impl State {
         }
     }
 
+    /// Moves a renamed user's place in the waiting wakes to their new
+    /// user_id.
+    pub fn move_wakes_locked(&mut self, from: &str, to: &str) {
+        for wake in self.pending_wakes.values_mut() {
+            for (id, _) in &mut wake.reasons {
+                if id == from {
+                    *id = to.to_owned();
+                }
+            }
+        }
+    }
+
     /// The users the waiting wakes would wake, for tests.
     #[cfg(test)]
     pub fn waking_users(&self) -> Vec<String> {

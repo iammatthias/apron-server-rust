@@ -80,41 +80,28 @@ Phases 2a, 2b, and 2c run in parallel once phase 1 lands.
 | 2026-10-27 | The ACME gate runs Pebble v2.10.1 and pebble-challtestsrv from `cargo test` (`acme::pebble_test`). The test fails when they are missing, unless `APRON_SKIP_PEBBLE=1`; AGENTS.md, Verification, gives the install command and the lookup order (`$PEBBLE_BIN_DIR`, `PATH`, `$(go env GOPATH)/bin`). | It issues over TLS-ALPN-01 through a real handshake, verifies the chain against Pebble's root, reuses the certificate, renews it, and has Go's autocert read the cache. Pebble's validator sends HTTP-01 requests with `Host: <domain>:5002`, which `HostWhitelist` rejects in Go and here alike, so HTTP-01 is checked by the handler tests, not against Pebble. |
 | 2026-10-29 | Reaction records are logged with their entries qualified: `parse_emojis` normalizes a `reactions` request before `commit_reactions_locked` logs it, and a move re-logs the stored sets, which load qualified (d74f625); `reactions_test` checks the record `history` serves. Records logged before d74f625 keep the form they were sent in, and no migration rewrites them. A logged record is what was broadcast under its `log_id`, which clients may already hold, so the log stays append-only; the current sets were already rewritten qualified when they loaded, so `room_list` and every new record agree, and a client reading an old record compares entries without U+FE0F (§4.7). |
 | 2026-10-29 | `/purge` (`src/server/purge.rs`) erases users in one pass under the lock, `erase_users_locked`, and is the first code that deletes a record from the middle of the log (`remove_record_locked`, which also drops it from every room log that holds it). Its test, `purge_test::test_purge_leaves_nothing_behind`, builds a user holding one of everything and checks that the user_id appears nowhere in the state's store entries (`dump_locked`, now over every record rather than the room logs' only) or the maps kept in memory, and `test_purge_persists` checks the store itself after a restart. Each erase step was mutation-checked against those tests: removing any one of them fails a test. | A purge touches some 25 places that key or name a user. A test that searches every place for the user_id finds a missed one without a test per place, and the same search checks `/rename`. `dump_locked` read records only through the room logs, so a record dropped from a log but left in `State.records` was invisible to it. |
+| 2026-10-29 | `/rename` (`src/server/rename.rs`) moves a user in one pass under the lock, `move_user_locked`, re-keying `State.users` and every map that names the user, and rewriting the user objects of logged records in place, as Cloudflare's `renameIdentity` does. The user's timers are stopped and set again under the new id. `rename_test::test_rename_moves_everything` checks that every place `purge_test::traces` found under the old user_id before the rename holds the new one after it, but the sessions, and that only `used_ids` and the bot's entries keep the old one. | PROTOCOL.md §3.3.3 has logged records keep a user_id, and Cloudflare rewrites them for `/rename` as its one exception; this server follows Cloudflare, so the user's past messages stay editable. Comparing the places before and after catches a move that leaves anything behind without a test per field. |
 
 ## Migrating a guest_<n> account
 
 Accounts registered before 2026-10-28, such as the live `guest_1` with its
-bot `bot_guest_1`, keep their user_ids. Nothing migrates them. Moving one to
-a Cloudflare-style id, say `ada_1234`, would take all of the following under
-one lock, as one store flush:
+bot `bot_guest_1`, keep their user_ids until an admin moves them with
+`/rename <old_user_id> <new_user_id>` (`src/server/rename.rs`,
+docs/DEVIATIONS.md). For the account itself:
 
-1. Claim the new id (`claim_user_id_locked`); the old one stays in
-   `used_ids`, so it is never reissued (§3.3.3).
-2. Re-key the `UserState` in `State.users`, its `user` store entry, and
-   `id`. Its passkey, email, roles, profile, status, mutes, pings and unread
-   counts move with it; re-run `grant_roles_locked`, since `Config.roles`
-   may name the old id.
-3. Every reference by user_id: `State.credentials` values, `State.emails`
-   values, `RoomState.members`, `active` and `reads` in every room,
-   `RoomState.creator`, `MessageState.owner` (what lets the user edit and
-   delete), `EmbedState.avatar_for`, and the keys of `MessageState.reactions`.
-   PROTOCOL.md §3.3.3 says logged records keep the old user_id, so logged
-   `from` objects and memberships stay as they are, where Cloudflare's
-   `/rename` (store.ts) rewrites them.
-4. Sessions (`Session.user`) and `device` entries (`user`) point at the new
-   id, so existing tokens keep signing in; push registrations are re-keyed,
-   `"<user> <url>"` to the new id, or deleted so devices register again.
-5. The bot: `bot_guest_1` becomes `bot_ada_1234`, by steps 1 to 4 for the
-   bot's own `UserState` (whose `owner` becomes the new id), and its `bot`
-   token entry's `bot` and `owner` fields. The entry is keyed by the
-   token's hash, so the bot's token keeps working; the bot client learns
-   its id from the `auth` result on its next connection.
-6. Frames: `you` with the new id to the user's connections and the bot's,
-   and `user` `{new, old}` to everyone who shares a room with either.
-   Connected clients then derive per-user state again (§3.3.3).
-
-A Go `aprond` on the same store opens the result, since every entry keeps
-its shape.
+- Its passkeys, device tokens, invite token, roles, memberships, read
+  cursors, rooms it created, messages, reactions, avatar, push
+  registrations, mutes and status move to the new id, and its logged
+  messages, reaction sets and memberships are rewritten to it.
+- Its connections stay open as the new id and get `user` `you`.
+- Its sessions are deleted. A web client that resumes one is told to sign
+  in again, and signs in with its passkey as the new id.
+- A native client signed in with a device token keeps working: the token
+  now signs in as the new id, and the `auth` result names it.
+- Its bot keeps `bot_<old>` and its token. `/invite-bot` then makes a new
+  bot, `bot_<new>`, and `/purge bot_<old>` removes the old one.
+- `--role` grants given to the old id are not given again. A grant naming
+  the new id is given when the rename makes it exist.
 
 ## Passkeys for a native iOS client
 

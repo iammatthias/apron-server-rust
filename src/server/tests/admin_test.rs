@@ -489,7 +489,8 @@ pub fn token_in(text: &str) -> String {
 /// origin, named after its user_id, in general; the notice carries a
 /// link.apron.chat link. Taken, guest and bot user_ids, and non-admins, are
 /// refused. (Cloudflare's test also moves the token with /rename and
-/// revokes it with /purge, which this server does not have.)
+/// revokes it with /purge, here rename_test's
+/// test_rename_moves_the_invite_token.)
 #[test]
 fn test_invite_token_makes_a_token_account() {
     let server = new_test_server(Config {
@@ -628,8 +629,8 @@ fn test_invite_token_persists() {
 
 /// /role <user_id> bot makes a token account a bot in full, but not a
 /// passkey holder or an admin; taking the role away makes it an account
-/// again. (Cloudflare's test also refuses a bot's /rename, which this server
-/// does not have.)
+/// again. (Cloudflare's test also refuses a bot's /rename, here
+/// rename_test's test_rename_refusals.)
 #[test]
 fn test_role_bot_makes_a_token_account_a_bot() {
     let server = admin_test_server();
