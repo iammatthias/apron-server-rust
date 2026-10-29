@@ -11,6 +11,7 @@ mod ext_test;
 mod frame_limits_test;
 mod guest_posting_test;
 mod helpers;
+mod idle_bots_test;
 mod invite_bot_test;
 mod invite_device_test;
 mod limits_test;
