@@ -1,7 +1,7 @@
-//! Link previews, an extension Go lacks. This file holds the local fixture
-//! servers and the tests of URL extraction, page parsing, and the cache.
-//! unfurl_fetcher_test.rs and unfurl_embeds_test.rs hold the rest. Pages come
-//! from local fixture servers, so nothing reaches the internet.
+//! Link previews. This file holds the local fixture servers and the tests of
+//! URL extraction, page parsing, and the cache. unfurl_fetcher_test.rs and
+//! unfurl_embeds_test.rs hold the rest. Pages come from local fixture
+//! servers, so nothing reaches the internet.
 
 use std::sync::{Arc, Mutex};
 
