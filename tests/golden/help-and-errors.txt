@@ -294,6 +294,19 @@ Limits:
       --limit.server-posts-per-day=     Posts of everyone on the server a UTC
                                         day; 0 is unlimited (not in the Go
                                         aprond) (default: 10000)
+      --limit.room-lists-per-minute=    room_list requests of one user a
+                                        minute, besides the first joined
+                                        listing after each sign-in; 0 is
+                                        unlimited (not in the Go aprond)
+                                        (default: 6)
+      --limit.uploads-per-user-day=     New uploads of one user a UTC day: a
+                                        message's upload embeds, /avatar,
+                                        /emoji add and /server avatar; 0 is
+                                        unlimited (not in the Go aprond)
+                                        (default: 20)
+      --limit.uploads-per-day=          New uploads of everyone on the server a
+                                        UTC day; 0 is unlimited (not in the Go
+                                        aprond) (default: 500)
 
 Server:
       --server.title=                   Plain name clients show for this
@@ -615,6 +628,19 @@ Limits:
       --limit.server-posts-per-day=     Posts of everyone on the server a UTC
                                         day; 0 is unlimited (not in the Go
                                         aprond) (default: 10000)
+      --limit.room-lists-per-minute=    room_list requests of one user a
+                                        minute, besides the first joined
+                                        listing after each sign-in; 0 is
+                                        unlimited (not in the Go aprond)
+                                        (default: 6)
+      --limit.uploads-per-user-day=     New uploads of one user a UTC day: a
+                                        message's upload embeds, /avatar,
+                                        /emoji add and /server avatar; 0 is
+                                        unlimited (not in the Go aprond)
+                                        (default: 20)
+      --limit.uploads-per-day=          New uploads of everyone on the server a
+                                        UTC day; 0 is unlimited (not in the Go
+                                        aprond) (default: 500)
 
 Server:
       --server.title=                   Plain name clients show for this
@@ -936,6 +962,19 @@ Limits:
       --limit.server-posts-per-day=     Posts of everyone on the server a UTC
                                         day; 0 is unlimited (not in the Go
                                         aprond) (default: 10000)
+      --limit.room-lists-per-minute=    room_list requests of one user a
+                                        minute, besides the first joined
+                                        listing after each sign-in; 0 is
+                                        unlimited (not in the Go aprond)
+                                        (default: 6)
+      --limit.uploads-per-user-day=     New uploads of one user a UTC day: a
+                                        message's upload embeds, /avatar,
+                                        /emoji add and /server avatar; 0 is
+                                        unlimited (not in the Go aprond)
+                                        (default: 20)
+      --limit.uploads-per-day=          New uploads of everyone on the server a
+                                        UTC day; 0 is unlimited (not in the Go
+                                        aprond) (default: 500)
 
 Server:
       --server.title=                   Plain name clients show for this

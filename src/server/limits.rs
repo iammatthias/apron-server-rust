@@ -12,6 +12,9 @@ use std::fmt;
 use rust_stdlib::net;
 use rust_stdlib::time;
 
+use super::protocol::{RpcError, CODE_RETRY_AFTER};
+use crate::obj;
+
 const MINUTE_MS: f64 = 60_000.0;
 const DAY_MS: i64 = 86_400_000;
 
@@ -36,6 +39,13 @@ pub struct Limits {
     pub trusted_posts: Posts,
     pub ip_posts: Posts,
     pub server_posts: Posts,
+    /// `room_list` requests of one user a minute; the first `joined`
+    /// listing after each sign-in is free.
+    pub room_lists_per_user_minute: u32,
+    /// New uploads (a message's new `upload` embeds, `/avatar`, `/emoji
+    /// add` and `/server avatar`) of one user, and of everyone, a UTC day.
+    pub uploads_per_user_day: u32,
+    pub uploads_per_day: u32,
 }
 
 /// Posts a minute and a day; zero is no limit.
@@ -115,6 +125,9 @@ impl Default for Limits {
                 minute: 120,
                 day: 10_000,
             },
+            room_lists_per_user_minute: 6,
+            uploads_per_user_day: 20,
+            uploads_per_day: 500,
         }
     }
 }
@@ -133,6 +146,9 @@ impl Limits {
             trusted_posts: Posts::default(),
             ip_posts: Posts::default(),
             server_posts: Posts::default(),
+            room_lists_per_user_minute: 0,
+            uploads_per_user_day: 0,
+            uploads_per_day: 0,
         }
     }
 }
@@ -194,6 +210,38 @@ impl Bucket {
 pub enum Scope {
     Admission,
     Post,
+    RoomList,
+    Upload,
+}
+
+/// What a client holds back after a refusal (EXTENSIONS.md `ext:limits`):
+/// `history` or `room_list` alone after `Read`; every request the posting
+/// limits count after `Write`; requests with a new upload after `Upload`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Category {
+    Read,
+    Write,
+    Upload,
+}
+
+impl Category {
+    fn as_str(self) -> &'static str {
+        match self {
+            Category::Read => "read",
+            Category::Write => "write",
+            Category::Upload => "upload",
+        }
+    }
+}
+
+/// The retry_after error of a refusal, naming the limit and, where the
+/// refused request is one its row counts, its category.
+pub fn refused(message: &str, retry_after: i64, category: Option<Category>) -> RpcError {
+    let mut data = obj! {"retry_after" => retry_after};
+    if let Some(category) = category {
+        data.insert("ext".into(), obj! {"limits" => category.as_str()}.into());
+    }
+    RpcError::with_data(CODE_RETRY_AFTER, message, data)
 }
 
 /// Whose use a row counts.

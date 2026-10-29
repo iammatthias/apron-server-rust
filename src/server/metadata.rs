@@ -362,7 +362,7 @@ impl State {
             return Err(RpcError::new(CODE_DENIED, UPLOADS_OFF));
         }
         let user_id = self.client_user(c).unwrap_or_default();
-        self.charge_post_locked(c, &user_id)?;
+        self.charge_uploads_locked(&user_id, 1)?;
         Ok(self.new_image_write_locked(c, EmbedPurpose::ServerAvatar))
     }
 

@@ -481,6 +481,9 @@ pub struct Conn {
     pub email_sends: Option<Limiter>,
     /// The connection's latest proposal, which may have been dropped since.
     pub proposal: Option<ProposalId>,
+    /// Whether the connection has listed its joined rooms since it signed
+    /// in, which the first time costs no room listing.
+    pub listed_joined: bool,
     /// Whether the last `server` frame it got listed wake scope `joined`
     /// (push.rs, `wakes_joined`).
     pub wake_joined: bool,
@@ -1278,6 +1281,7 @@ impl Server {
                     device: [0; 32],
                     email_sends: None,
                     proposal: None,
+                    listed_joined: false,
                     wake_joined: false,
                 },
             );
@@ -1843,6 +1847,7 @@ impl State {
             "ext:settings".into(),
             "ext:media".into(),
             "ext:permissions".into(),
+            "ext:limits".into(),
         ]);
         let mut ext = obj! {"settings" => settings, "media" => media};
         // ext:emoji, once an admin has added a custom emoji.

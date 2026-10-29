@@ -5,7 +5,7 @@ use rust_stdlib::encoding::json::jsontext::Value;
 
 use super::embeds::MAX_EMBEDS_PER_MESSAGE;
 use super::emoji::{is_emoji_key, normalize_entries, same_entries};
-use super::limits::{Charge, Poster, Principal, Scope};
+use super::limits::{refused, Allowance, Category, Charge, Poster, Principal, Scope};
 use super::protocol::*;
 use super::server::{Client, Frame, LogRecord, RecordKind, Server, State, DEFAULT_ROOM_ID};
 use super::users::{json_equal, MODERATOR_ROLES};
@@ -419,7 +419,7 @@ impl State {
                 return Ok((result.into(), true));
             }
         }
-        self.charge_post_locked(c, &user_id)?;
+        self.charge_post_locked(c, &user_id, Some(Category::Write))?;
 
         let log_id = self.next_id_locked();
         if !replacing {
@@ -604,7 +604,14 @@ impl State {
     /// to none, refusing it with retry_after naming the limit. Every
     /// accepted change is one: a message saved, a reaction set changed, a
     /// room saved, a join or leave, a profile change.
-    pub fn charge_post_locked(&mut self, c: &Client, user_id: &str) -> Result<(), RpcError> {
+    /// `category` is `Write` for the requests ext:limits' write row lists,
+    /// and `None` for `me` and commands.
+    pub fn charge_post_locked(
+        &mut self,
+        c: &Client,
+        user_id: &str,
+        category: Option<Category>,
+    ) -> Result<(), RpcError> {
         self.note_bot_active_locked(user_id);
         let poster = match self.users.get(user_id) {
             Some(u) if u.persists() && !u.bot() && !u.roles.is_empty() => Poster::Trusted,
@@ -643,11 +650,35 @@ impl State {
                 (2, true) => "Daily posting limit reached for the server",
                 (_, true) => "Daily posting limit reached",
             };
-            RpcError::with_data(
-                CODE_RETRY_AFTER,
-                message,
-                obj! {"retry_after" => refusal.retry_after()},
-            )
+            refused(message, refusal.retry_after(), category)
+        })
+    }
+
+    /// Charges `n` new uploads of the user's to their day and the server's,
+    /// or none.
+    pub fn charge_uploads_locked(&mut self, user_id: &str, n: u32) -> Result<(), RpcError> {
+        let limits = &self.config.limits;
+        let user = Principal::User(user_id.to_owned());
+        let daily = |day| Allowance { minute: None, day };
+        let charges = [
+            Charge {
+                scope: Scope::Upload,
+                principal: &user,
+                allowance: daily(limits.uploads_per_user_day),
+            },
+            Charge {
+                scope: Scope::Upload,
+                principal: &Principal::Server,
+                allowance: daily(limits.uploads_per_day),
+            },
+        ];
+        self.limits.charge(&charges, n).map_err(|refusal| {
+            let message = if refusal.row == 0 {
+                "Daily upload limit reached"
+            } else {
+                "Daily upload limit reached for the server"
+            };
+            refused(message, refusal.retry_after(), Some(Category::Upload))
         })
     }
 
@@ -707,7 +738,7 @@ impl State {
             return Err(invalid_params(format!("{key} is not a custom emoji here")));
         }
         if !same_entries(&current, &emojis) {
-            self.charge_post_locked(c, &user_id)?;
+            self.charge_post_locked(c, &user_id, Some(Category::Write))?;
             self.touch_message(&message_id);
             let from = self.users[&user_id].from();
             let log_id = self.commit_reactions_locked(
