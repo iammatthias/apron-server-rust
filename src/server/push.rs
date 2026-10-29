@@ -342,7 +342,8 @@ impl UserState {
 
 impl State {
     /// Whether a user may be woken for `joined`: an account holding one of
-    /// JOINED_WAKE_ROLES, and no bot.
+    /// JOINED_WAKE_ROLES, and no bot, since has_any_role never holds for a
+    /// bot.
     pub fn wakes_joined(&self, user_id: &str) -> bool {
         self.users
             .get(user_id)
