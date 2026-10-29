@@ -57,6 +57,8 @@ impl MessageState {
 
 /// Bounds body.mentions.
 pub const MAX_MENTIONS: usize = 256;
+/// Bounds each user_id body.mentions names, in bytes.
+pub const MAX_MENTION_BYTES: usize = 256;
 /// Bounds a message's ext, merged (§4.12), which every snapshot of the
 /// message carries.
 pub const MAX_MESSAGE_EXT_BYTES: usize = 64 << 10;
@@ -108,6 +110,20 @@ pub fn mentions(body: Option<&Object>) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Collapses repeated user_ids in body.mentions, keeping the first of each.
+fn dedupe_mentions(body: &mut Object) {
+    if let Some(Json::Array(mentions)) = body.get_mut("mentions") {
+        let mut seen = Vec::new();
+        mentions.retain(|m| {
+            let fresh = !seen.contains(m);
+            if fresh {
+                seen.push(m.clone());
+            }
+            fresh
+        });
+    }
+}
+
 pub(crate) fn validate_body(body: &Object, max_text_bytes: usize) -> Result<(), RpcError> {
     if let Some(raw) = body.get("text") {
         let Some(text) = raw.as_str() else {
@@ -137,9 +153,15 @@ pub(crate) fn validate_body(body: &Object, max_text_bytes: usize) -> Result<(), 
             ));
         }
         for value in mentions {
-            if !value.as_str().is_some_and(valid_id) {
+            let Some(mention) = value.as_str().filter(|m| valid_id(m)) else {
                 return Err(invalid_params(
                     "body.mentions must be an array of user_id strings",
+                ));
+            };
+            if mention.len() > MAX_MENTION_BYTES {
+                return Err(RpcError::new(
+                    CODE_TOO_LARGE,
+                    "a mentioned user_id is too long",
                 ));
             }
         }
@@ -288,8 +310,9 @@ impl State {
         }
         let mut body: Option<Object> = None;
         if !deleted {
-            let parsed = parse_object(&req.params, "body", true)?.unwrap_or_default();
+            let mut parsed = parse_object(&req.params, "body", true)?.unwrap_or_default();
             validate_body(&parsed, self.config.frame.max_text_bytes)?;
+            dedupe_mentions(&mut parsed);
             body = Some(parsed);
         }
         let (ext_write, _) = parse_ext(&req.params, "ext")?;

@@ -118,6 +118,59 @@ fn og_image_alt(og: Option<&Json>) -> String {
         .to_owned()
 }
 
+/// The fields of a sender's `og` this server keeps, as single lines of at
+/// most this many code points (apron-server-cloudflare's OG_TEXT_FIELDS).
+const OG_TEXT_FIELDS: [(&str, usize); 3] =
+    [("title", 256), ("description", 512), ("site_name", 128)];
+
+/// Reduces a sender's `og` to its text fields, each one plain line, so a
+/// client never loads media a sender named; drops `og` when nothing is
+/// left. The server's own og, of a link preview or upload, replaces it.
+fn clean_og(embed: &mut Object) {
+    let Some(og) = embed.remove("og") else {
+        return;
+    };
+    let Some(og) = og.as_object() else {
+        return;
+    };
+    let mut clean = Object::new();
+    for (field, max) in OG_TEXT_FIELDS {
+        if let Some(line) = og
+            .get(field)
+            .and_then(Json::as_str)
+            .and_then(|v| og_line(v, max))
+        {
+            clean.insert(field.into(), line.into());
+        }
+    }
+    if !clean.is_empty() {
+        embed.insert("og".into(), clean.into());
+    }
+}
+
+/// `value` as one line: controls and bidirectional overrides become spaces,
+/// runs of whitespace one space, trimmed, and cut to `max` code points with
+/// an ellipsis; `None` when nothing is left.
+fn og_line(value: &str, max: usize) -> Option<String> {
+    let unsafe_char = |c: char| {
+        c.is_control()
+            || matches!(c, '\u{2028}' | '\u{2029}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+    };
+    let spaced: String = value
+        .chars()
+        .map(|c| if unsafe_char(c) { ' ' } else { c })
+        .collect();
+    let line = spaced.split_whitespace().collect::<Vec<_>>().join(" ");
+    if line.is_empty() {
+        return None;
+    }
+    if line.chars().count() <= max {
+        return Some(line);
+    }
+    let cut: String = line.chars().take(max - 1).collect();
+    Some(format!("{}…", cut.trim_end()))
+}
+
 /// Drops an embed's `og.image`, and its `og` when nothing else is left.
 fn without_image(embed: &mut Object) {
     let Some(og) = embed.get_mut("og").and_then(Json::as_object_mut) else {
@@ -278,7 +331,7 @@ impl State {
                 if let Some(kind) = previous[&id].get("kind").cloned() {
                     embed.insert("kind".into(), kind);
                 }
-                embed.remove("og");
+                clean_og(&mut embed);
                 embed.remove("write_url");
                 if let Some(e) = self.embeds.get(&id) {
                     embed.remove("url");
@@ -295,7 +348,7 @@ impl State {
                 .to_owned();
             let id = self.next_embed_id();
             let alt = og_image_alt(embed.get("og"));
-            embed.remove("og");
+            clean_og(&mut embed);
             embed.remove("write_url");
             embed.insert("embed_id".into(), id.as_str().into());
             if kind == "upload" || kind == "stream" {
