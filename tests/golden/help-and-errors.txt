@@ -363,6 +363,32 @@ Limits:
                                             the latest winning; a change made
                                             with me goes at once; 0 to 60 (not
                                             in the Go aprond) (default: 60)
+      --limit.history-per-minute=           History pages one user may request
+                                            a minute, after a burst of
+                                            --limit.history-burst; 0 is
+                                            unlimited (not in the Go aprond)
+                                            (default: 20)
+      --limit.history-burst=                History pages a quiet user may
+                                            request at once (not in the Go
+                                            aprond) (default: 60)
+      --limit.history-per-day=              History pages one user may request
+                                            a UTC day; 0 is unlimited (not in
+                                            the Go aprond) (default: 3000)
+      --limit.ip-history-per-minute=        History pages one client address
+                                            may request a minute, after a burst
+                                            of --limit.ip-history-burst; 0 is
+                                            unlimited (not in the Go aprond)
+                                            (default: 60)
+      --limit.ip-history-burst=             History pages a quiet client
+                                            address may request at once (not in
+                                            the Go aprond) (default: 120)
+      --limit.ip-history-per-day=           History pages one client address
+                                            may request a UTC day; 0 is
+                                            unlimited (not in the Go aprond)
+                                            (default: 6000)
+      --limit.server-history-per-day=       History pages everyone may request
+                                            a UTC day; 0 is unlimited (not in
+                                            the Go aprond) (default: 40000)
       --limit.offline-grace-seconds=        Seconds a status change a closed
                                             connection caused waits, so a
                                             reconnect within them shows others
@@ -761,6 +787,32 @@ Limits:
                                             the latest winning; a change made
                                             with me goes at once; 0 to 60 (not
                                             in the Go aprond) (default: 60)
+      --limit.history-per-minute=           History pages one user may request
+                                            a minute, after a burst of
+                                            --limit.history-burst; 0 is
+                                            unlimited (not in the Go aprond)
+                                            (default: 20)
+      --limit.history-burst=                History pages a quiet user may
+                                            request at once (not in the Go
+                                            aprond) (default: 60)
+      --limit.history-per-day=              History pages one user may request
+                                            a UTC day; 0 is unlimited (not in
+                                            the Go aprond) (default: 3000)
+      --limit.ip-history-per-minute=        History pages one client address
+                                            may request a minute, after a burst
+                                            of --limit.ip-history-burst; 0 is
+                                            unlimited (not in the Go aprond)
+                                            (default: 60)
+      --limit.ip-history-burst=             History pages a quiet client
+                                            address may request at once (not in
+                                            the Go aprond) (default: 120)
+      --limit.ip-history-per-day=           History pages one client address
+                                            may request a UTC day; 0 is
+                                            unlimited (not in the Go aprond)
+                                            (default: 6000)
+      --limit.server-history-per-day=       History pages everyone may request
+                                            a UTC day; 0 is unlimited (not in
+                                            the Go aprond) (default: 40000)
       --limit.offline-grace-seconds=        Seconds a status change a closed
                                             connection caused waits, so a
                                             reconnect within them shows others
@@ -1159,6 +1211,32 @@ Limits:
                                             the latest winning; a change made
                                             with me goes at once; 0 to 60 (not
                                             in the Go aprond) (default: 60)
+      --limit.history-per-minute=           History pages one user may request
+                                            a minute, after a burst of
+                                            --limit.history-burst; 0 is
+                                            unlimited (not in the Go aprond)
+                                            (default: 20)
+      --limit.history-burst=                History pages a quiet user may
+                                            request at once (not in the Go
+                                            aprond) (default: 60)
+      --limit.history-per-day=              History pages one user may request
+                                            a UTC day; 0 is unlimited (not in
+                                            the Go aprond) (default: 3000)
+      --limit.ip-history-per-minute=        History pages one client address
+                                            may request a minute, after a burst
+                                            of --limit.ip-history-burst; 0 is
+                                            unlimited (not in the Go aprond)
+                                            (default: 60)
+      --limit.ip-history-burst=             History pages a quiet client
+                                            address may request at once (not in
+                                            the Go aprond) (default: 120)
+      --limit.ip-history-per-day=           History pages one client address
+                                            may request a UTC day; 0 is
+                                            unlimited (not in the Go aprond)
+                                            (default: 6000)
+      --limit.server-history-per-day=       History pages everyone may request
+                                            a UTC day; 0 is unlimited (not in
+                                            the Go aprond) (default: 40000)
       --limit.offline-grace-seconds=        Seconds a status change a closed
                                             connection caused waits, so a
                                             reconnect within them shows others

@@ -251,6 +251,27 @@ policy-violations = 3
 # Seconds between the status changes of one user that others are sent, the latest winning; a change made with me goes at once; 0 to 60 (not in the Go aprond)
 status-coalesce-seconds = 60
 
+# History pages one user may request a minute, after a burst of --limit.history-burst; 0 is unlimited (not in the Go aprond)
+history-per-minute = 20
+
+# History pages a quiet user may request at once (not in the Go aprond)
+history-burst = 60
+
+# History pages one user may request a UTC day; 0 is unlimited (not in the Go aprond)
+history-per-day = 3000
+
+# History pages one client address may request a minute, after a burst of --limit.ip-history-burst; 0 is unlimited (not in the Go aprond)
+ip-history-per-minute = 60
+
+# History pages a quiet client address may request at once (not in the Go aprond)
+ip-history-burst = 120
+
+# History pages one client address may request a UTC day; 0 is unlimited (not in the Go aprond)
+ip-history-per-day = 6000
+
+# History pages everyone may request a UTC day; 0 is unlimited (not in the Go aprond)
+server-history-per-day = 40000
+
 # Seconds a status change a closed connection caused waits, so a reconnect within them shows others nothing; 0 to 60 (not in the Go aprond)
 offline-grace-seconds = 60
 
@@ -519,6 +540,27 @@ policy-violations = 3
 
 # Seconds between the status changes of one user that others are sent, the latest winning; a change made with me goes at once; 0 to 60 (not in the Go aprond)
 status-coalesce-seconds = 60
+
+# History pages one user may request a minute, after a burst of --limit.history-burst; 0 is unlimited (not in the Go aprond)
+history-per-minute = 20
+
+# History pages a quiet user may request at once (not in the Go aprond)
+history-burst = 60
+
+# History pages one user may request a UTC day; 0 is unlimited (not in the Go aprond)
+history-per-day = 3000
+
+# History pages one client address may request a minute, after a burst of --limit.ip-history-burst; 0 is unlimited (not in the Go aprond)
+ip-history-per-minute = 60
+
+# History pages a quiet client address may request at once (not in the Go aprond)
+ip-history-burst = 120
+
+# History pages one client address may request a UTC day; 0 is unlimited (not in the Go aprond)
+ip-history-per-day = 6000
+
+# History pages everyone may request a UTC day; 0 is unlimited (not in the Go aprond)
+server-history-per-day = 40000
 
 # Seconds a status change a closed connection caused waits, so a reconnect within them shows others nothing; 0 to 60 (not in the Go aprond)
 offline-grace-seconds = 60
@@ -790,6 +832,27 @@ policy-violations = 3
 # Seconds between the status changes of one user that others are sent, the latest winning; a change made with me goes at once; 0 to 60 (not in the Go aprond)
 status-coalesce-seconds = 60
 
+# History pages one user may request a minute, after a burst of --limit.history-burst; 0 is unlimited (not in the Go aprond)
+history-per-minute = 20
+
+# History pages a quiet user may request at once (not in the Go aprond)
+history-burst = 60
+
+# History pages one user may request a UTC day; 0 is unlimited (not in the Go aprond)
+history-per-day = 3000
+
+# History pages one client address may request a minute, after a burst of --limit.ip-history-burst; 0 is unlimited (not in the Go aprond)
+ip-history-per-minute = 60
+
+# History pages a quiet client address may request at once (not in the Go aprond)
+ip-history-burst = 120
+
+# History pages one client address may request a UTC day; 0 is unlimited (not in the Go aprond)
+ip-history-per-day = 6000
+
+# History pages everyone may request a UTC day; 0 is unlimited (not in the Go aprond)
+server-history-per-day = 40000
+
 # Seconds a status change a closed connection caused waits, so a reconnect within them shows others nothing; 0 to 60 (not in the Go aprond)
 offline-grace-seconds = 60
 
@@ -1058,6 +1121,27 @@ policy-violations = 3
 
 # Seconds between the status changes of one user that others are sent, the latest winning; a change made with me goes at once; 0 to 60 (not in the Go aprond)
 status-coalesce-seconds = 60
+
+# History pages one user may request a minute, after a burst of --limit.history-burst; 0 is unlimited (not in the Go aprond)
+history-per-minute = 20
+
+# History pages a quiet user may request at once (not in the Go aprond)
+history-burst = 60
+
+# History pages one user may request a UTC day; 0 is unlimited (not in the Go aprond)
+history-per-day = 3000
+
+# History pages one client address may request a minute, after a burst of --limit.ip-history-burst; 0 is unlimited (not in the Go aprond)
+ip-history-per-minute = 60
+
+# History pages a quiet client address may request at once (not in the Go aprond)
+ip-history-burst = 120
+
+# History pages one client address may request a UTC day; 0 is unlimited (not in the Go aprond)
+ip-history-per-day = 6000
+
+# History pages everyone may request a UTC day; 0 is unlimited (not in the Go aprond)
+server-history-per-day = 40000
 
 # Seconds a status change a closed connection caused waits, so a reconnect within them shows others nothing; 0 to 60 (not in the Go aprond)
 offline-grace-seconds = 60

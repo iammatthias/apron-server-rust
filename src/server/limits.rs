@@ -62,6 +62,13 @@ pub struct Limits {
     /// connection caused waits, so a reconnect within it shows nothing.
     pub status_coalesce: time::Duration,
     pub offline_grace: time::Duration,
+    /// History pages one user, and one IP, may request: a minute, with a
+    /// larger burst for a quiet one, and a UTC day; and everyone, a day.
+    pub user_history: Rate,
+    pub ip_history: Rate,
+    pub user_history_day: u32,
+    pub ip_history_day: u32,
+    pub server_history_day: u32,
 }
 
 /// Posts a minute and a day; zero is no limit.
@@ -73,10 +80,7 @@ pub struct Posts {
 
 impl Posts {
     pub fn allowance(self) -> Allowance {
-        Allowance {
-            day: self.day,
-            ..Allowance::minute(self.minute)
-        }
+        Allowance::rate(Rate::per_minute(self.minute), self.day)
     }
 
     fn max(self, other: Posts) -> Posts {
@@ -167,6 +171,17 @@ impl Default for Limits {
             policy_violations: 3,
             status_coalesce: time::Duration::from_secs(60),
             offline_grace: time::Duration::from_secs(60),
+            user_history: Rate {
+                per_minute: 20,
+                burst: 60,
+            },
+            ip_history: Rate {
+                per_minute: 60,
+                burst: 120,
+            },
+            user_history_day: 3_000,
+            ip_history_day: 6_000,
+            server_history_day: 40_000,
         }
     }
 }
@@ -194,6 +209,11 @@ impl Limits {
             policy_violations: 0,
             status_coalesce: time::Duration::from_secs(0),
             offline_grace: time::Duration::from_secs(0),
+            user_history: Rate::per_minute(0),
+            ip_history: Rate::per_minute(0),
+            user_history_day: 0,
+            ip_history_day: 0,
+            server_history_day: 0,
         }
     }
 }
@@ -258,6 +278,7 @@ pub enum Scope {
     RoomList,
     Upload,
     Frame,
+    History,
 }
 
 /// What a client holds back after a refusal (EXTENSIONS.md `ext:limits`):
@@ -309,9 +330,14 @@ pub struct Allowance {
 
 impl Allowance {
     pub fn minute(per_minute: u32) -> Allowance {
+        Allowance::rate(Rate::per_minute(per_minute), 0)
+    }
+
+    /// A rate and a day; a zero rate is no minute limit.
+    pub fn rate(rate: Rate, day: u32) -> Allowance {
         Allowance {
-            minute: (per_minute > 0).then(|| Rate::per_minute(per_minute)),
-            day: 0,
+            minute: (rate.per_minute > 0).then_some(rate),
+            day,
         }
     }
 }

@@ -96,6 +96,22 @@ fn posts(flag: &str, minute: i64, day: i64) -> Result<crate::server::limits::Pos
     })
 }
 
+/// A history rate: its burst at least a minute's pages.
+fn history_rate(
+    prefix: &str,
+    per_minute: i64,
+    burst: i64,
+) -> Result<crate::server::limits::Rate, String> {
+    let per_minute = rate(&format!("limit.{prefix}history-per-minute"), per_minute)?;
+    let burst = rate(&format!("limit.{prefix}history-burst"), burst)?;
+    if burst < per_minute {
+        return Err(format!(
+            "invalid --limit.{prefix}history-burst {burst}: use at least --limit.{prefix}history-per-minute"
+        ));
+    }
+    Ok(crate::server::limits::Rate { per_minute, burst })
+}
+
 fn seconds_to_60(flag: &str, value: i64) -> Result<Duration, String> {
     if !(0..=60).contains(&value) {
         return Err(format!("invalid --{flag} {value}: use 0 to 60"));
@@ -298,6 +314,11 @@ pub fn server_settings(options: &Options) -> Result<Settings, String> {
         policy_violations: nonnegative("limit.policy-violations", l.policy_violations)?,
         status_coalesce: seconds_to_60("limit.status-coalesce-seconds", l.status_coalesce_seconds)?,
         offline_grace: seconds_to_60("limit.offline-grace-seconds", l.offline_grace_seconds)?,
+        user_history: history_rate("", l.history_per_minute, l.history_burst)?,
+        ip_history: history_rate("ip-", l.ip_history_per_minute, l.ip_history_burst)?,
+        user_history_day: rate("limit.history-per-day", l.history_per_day)?,
+        ip_history_day: rate("limit.ip-history-per-day", l.ip_history_per_day)?,
+        server_history_day: rate("limit.server-history-per-day", l.server_history_per_day)?,
     };
     Ok(config)
 }
