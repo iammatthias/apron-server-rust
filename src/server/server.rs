@@ -58,6 +58,9 @@ pub const DEFAULT_MAX_LISTED_MEMBERS: usize = 1000;
 /// shutdown).
 pub const RETRY_AFTER_SECONDS: i64 = 30;
 
+/// How long a connection may stay without signing in (Config.auth_timeout).
+pub const AUTH_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Controls the HTTP and WebSocket behavior of a Server. The fields are Go's
 /// `Config`; the ones later phases implement are kept so a configuration
 /// written against the Go server type-checks here.
@@ -139,6 +142,10 @@ pub struct Config {
     /// How long an unfurl waits for its pages; FETCH_TIMEOUT unless a test
     /// shortens it.
     pub unfurl_timeout: Duration,
+    /// How long a connection may stay without signing in before it is
+    /// closed with 1008, as apron-server-cloudflare closes it after 30
+    /// seconds.
+    pub auth_timeout: Duration,
     /// An extension Go lacks (docs/DEVIATIONS.md): false keeps guests
     /// read-only, as apron-server-cloudflare's `GUEST_POSTING` does.
     pub guest_posting: bool,
@@ -198,6 +205,7 @@ pub fn default_config() -> Config {
         unfurl: false,
         unfurl_allow_internal: false,
         unfurl_timeout: unfurl::FETCH_TIMEOUT,
+        auth_timeout: AUTH_TIMEOUT,
         guest_posting: false,
         retention: None,
     }
@@ -527,6 +535,16 @@ impl Client {
         if self.out.try_send(batch).is_err() {
             self.stop_connection();
         }
+    }
+
+    /// Closes with a WebSocket close code and reason (RFC 6455 §7.4), for a
+    /// connection that broke a policy.
+    pub fn close_with_code(&self, code: u16, reason: &str) {
+        if self.closing.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let _ = self.ws.close(code, reason);
+        self.stop_connection();
     }
 
     /// Reports whether a connection-level error is queued, after which the
@@ -1177,6 +1195,23 @@ impl Server {
             client.enqueue(&obj! {"method" => "server", "params" => st.server_params()});
             client.enqueue(&st.welcome_notice());
         }
+        let auth_deadline = {
+            let server = Arc::downgrade(self);
+            let client = Arc::downgrade(&client);
+            time::after_func(self.config.auth_timeout, move || {
+                let (Some(server), Some(client)) = (server.upgrade(), client.upgrade()) else {
+                    return;
+                };
+                let signed_in = server
+                    .lock()
+                    .clients
+                    .get(&client.id)
+                    .is_some_and(|conn| conn.user.is_some());
+                if !signed_in {
+                    client.close_with_code(ws::STATUS_POLICY_VIOLATION, "Authentication timed out");
+                }
+            })
+        };
 
         while let Ok((message_type, payload)) = client.ws.read() {
             if message_type != ws::MessageType::Text {
@@ -1197,6 +1232,7 @@ impl Server {
             // next is read, which makes auth a barrier (§3.2).
             self.process_frame(&client, &payload);
         }
+        auth_deadline.stop();
     }
 
     /// The address of the client that opened a request: with
