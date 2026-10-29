@@ -40,7 +40,7 @@ store = "sqlite:/home/aprond/Library/Application Support/aprond/aprond.db"
 # Request header a reverse proxy puts the client's address in, such as X-Forwarded-For (its last entry) or X-Real-IP, for per-client limits; set only behind a proxy that sets it
 client-ip-header = ""
 
-# Markdown clients show on their sign-in screen (server.welcome), such as how this server's sign-in methods fit together
+# Markdown clients show on their sign-in screen (server.welcome), such as how this server's sign-in methods fit together (default: general's description, else a summary of how guests and sign-in work here)
 welcome = ""
 
 # Grant a role to an account as role=user_id or role=email, such as admin=ada; repeat for more. admin and moderator may remove others from rooms
@@ -189,7 +189,7 @@ store = "sqlite:/home/aprond/Library/Application Support/aprond/aprond.db"
 # Request header a reverse proxy puts the client's address in, such as X-Forwarded-For (its last entry) or X-Real-IP, for per-client limits; set only behind a proxy that sets it
 client-ip-header = ""
 
-# Markdown clients show on their sign-in screen (server.welcome), such as how this server's sign-in methods fit together
+# Markdown clients show on their sign-in screen (server.welcome), such as how this server's sign-in methods fit together (default: general's description, else a summary of how guests and sign-in work here)
 welcome = ""
 
 # Grant a role to an account as role=user_id or role=email, such as admin=ada; repeat for more. admin and moderator may remove others from rooms
@@ -339,7 +339,7 @@ store = "sqlite:/home/aprond/Library/Application Support/aprond/aprond.db"
 # Request header a reverse proxy puts the client's address in, such as X-Forwarded-For (its last entry) or X-Real-IP, for per-client limits; set only behind a proxy that sets it
 client-ip-header = ""
 
-# Markdown clients show on their sign-in screen (server.welcome), such as how this server's sign-in methods fit together
+# Markdown clients show on their sign-in screen (server.welcome), such as how this server's sign-in methods fit together (default: general's description, else a summary of how guests and sign-in work here)
 welcome = "Line one\nSay \"hi\" \\ tab\there \u0001 del\u007f é"
 
 # Grant a role to an account as role=user_id or role=email, such as admin=ada; repeat for more. admin and moderator may remove others from rooms
@@ -488,7 +488,7 @@ store = "sqlite:/home/aprond/Library/Application Support/aprond/aprond.db"
 # Request header a reverse proxy puts the client's address in, such as X-Forwarded-For (its last entry) or X-Real-IP, for per-client limits; set only behind a proxy that sets it
 client-ip-header = ""
 
-# Markdown clients show on their sign-in screen (server.welcome), such as how this server's sign-in methods fit together
+# Markdown clients show on their sign-in screen (server.welcome), such as how this server's sign-in methods fit together (default: general's description, else a summary of how guests and sign-in work here)
 welcome = ""
 
 # Grant a role to an account as role=user_id or role=email, such as admin=ada; repeat for more. admin and moderator may remove others from rooms

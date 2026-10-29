@@ -305,8 +305,16 @@ pub fn dial_origin(server: &TestServer, origin: &str) -> (TestClient, Object) {
     }
 }
 
-/// Connects with the given request headers and returns the server frame.
+/// Connects with the given request headers and returns the server frame,
+/// after reading the welcome that follows it.
 pub fn dial_headers(server: &TestServer, headers: &[(&str, &str)]) -> (TestClient, Object) {
+    let (c, server_frame) = dial_server_frame(server, headers);
+    welcome_text(&c.read());
+    (c, server_frame)
+}
+
+/// Connects and returns the server frame, leaving what follows it unread.
+pub fn dial_server_frame(server: &TestServer, headers: &[(&str, &str)]) -> (TestClient, Object) {
     let conn = match ws::dial(&ws_url(server), headers, second()) {
         Ok(conn) => conn,
         Err(e) => panic!("dial: {e}"),
@@ -326,6 +334,23 @@ pub fn dial_headers(server: &TestServer, headers: &[(&str, &str)]) -> (TestClien
         "first frame = {server_frame:?}, want server announcement"
     );
     (c, server_frame)
+}
+
+/// The text of the `~private` welcome that follows the server frame, after
+/// checking that it is one, in no room.
+pub fn welcome_text(frame: &Object) -> String {
+    let notice = notification_params(frame, "message");
+    assert!(
+        !notice.contains_key("room_id")
+            && !notice.contains_key("message_id")
+            && notice["from"]
+                == Json::from(obj! {"user_id" => "~private", "name" => "System message to you"}),
+        "welcome notice = {frame:?}"
+    );
+    notice["body"].as_object().unwrap()["text"]
+        .as_str()
+        .unwrap()
+        .to_owned()
 }
 
 /// Signs c in as a guest and returns the auth result. Every notification the

@@ -277,8 +277,9 @@ fn test_connection_and_rate_limits() {
     let server = new_test_server(config);
     let mut a = dial_test_client(&server);
 
-    // Over capacity: the server frame, then an error without id, then close.
-    let (b, _) = dial_raw(&server);
+    // Over capacity: the server frame, then an error without id, then
+    // close, with no welcome.
+    let (b, _) = dial_server_frame(&server, &[]);
     let failure = b.read();
     let error = failure["error"].as_object().unwrap();
     assert!(
