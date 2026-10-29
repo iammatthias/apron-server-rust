@@ -15,6 +15,7 @@ use crate::obj;
 /// reserved for them (Appendix A.3): requestable_user_id never matches one.
 pub const ROOM_NOTICE_ID: &str = "~room";
 pub const PRIVATE_NOTICE_ID: &str = "~private";
+pub const PRIVATE_NOTICE_NAME: &str = "System message to you";
 
 pub const MAX_KICK_REASON_RUNES: usize = 200;
 
@@ -86,7 +87,7 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
 pub(super) fn private_notice(r: &RoomState, text: &str) -> Object {
     obj! {"method" => "message", "params" => obj! {
         "room_id" => r.id.as_str(),
-        "from" => obj! {"user_id" => PRIVATE_NOTICE_ID, "name" => "System message to you"},
+        "from" => obj! {"user_id" => PRIVATE_NOTICE_ID, "name" => PRIVATE_NOTICE_NAME},
         "body" => obj! {"text" => text, "format" => "markdown"},
     }}
 }

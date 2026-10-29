@@ -330,7 +330,7 @@ fn test_restore_after_a_crash() {
 /// Roles from the configuration are granted to accounts, shown in their
 /// current user objects, and never settable with `me`; a granted user_id
 /// that was never used is not given to a guest. server.welcome is the
-/// configured Markdown.
+/// configured Markdown, and a summary without it.
 #[test]
 fn test_roles_and_welcome() {
     let kept: Arc<dyn Store> = Arc::new(store::Memory::new());
@@ -338,7 +338,10 @@ fn test_roles_and_welcome() {
     let mut server = start_with_store(kept.clone(), &format!("{dir}/before"));
     let (mut ada, frame) = dial_origin(&server, TEST_PASSKEY_ORIGIN);
     assert!(
-        !frame["params"].as_object().unwrap().contains_key("welcome"),
+        frame["params"].as_object().unwrap()["welcome"]
+            .as_str()
+            .unwrap()
+            .starts_with("Guests can "),
         "welcome without configuration: {frame:?}"
     );
     let registered = register_test_passkey(&mut ada, &mut new_test_authenticator());

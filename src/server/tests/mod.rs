@@ -21,3 +21,4 @@ mod status_test;
 mod unfurl_test;
 mod webauthn_test;
 mod webpush_test;
+mod welcome_test;

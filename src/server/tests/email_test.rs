@@ -22,7 +22,7 @@ use crate::server::{Config, Server};
 use crate::store::{self, Store};
 
 /// An EmailSender that keeps what it is asked to send.
-struct TestMailbox(SyncSender<SignInEmail>);
+pub(super) struct TestMailbox(SyncSender<SignInEmail>);
 
 impl EmailSender for TestMailbox {
     fn send_sign_in_code(&self, _ctx: &Context, message: &SignInEmail) -> Result<(), SendError> {
@@ -43,7 +43,7 @@ impl Mailbox {
     }
 }
 
-fn test_mailbox(capacity: usize) -> (Arc<TestMailbox>, Mailbox) {
+pub(super) fn test_mailbox(capacity: usize) -> (Arc<TestMailbox>, Mailbox) {
     let (tx, rx) = sync_channel(capacity);
     (Arc::new(TestMailbox(tx)), Mailbox(rx))
 }
