@@ -15,7 +15,7 @@ use crate::server::embeds::{
     upload_content_type, valid_avatar_image, FILE_PATH, STREAM_PATH, WRITE_PATH,
 };
 use crate::server::protocol::*;
-use crate::server::rooms::MAX_LISTED_ROOMS;
+use crate::server::rooms::{MAX_CREATED_ROOMS, MAX_THREADS, MAX_THREADS_PER_USER};
 use crate::server::users::{normalize_name, MAX_NAME_RUNES};
 use crate::ws;
 
@@ -550,12 +550,14 @@ fn test_room_list_filters_and_order() {
     let server = new_test_server(default_config());
     let mut clients = dial_group(&server, 2);
     let (mut a, mut b) = (clients.remove(0), clients.remove(0));
+    grant_role(&server, &a.user_id, "mod");
     let (ops, _) = save_room(&mut a, "ops", obj! {"title" => "Ops"});
     let (deploy, _) = save_room(
         &mut a,
         "deploy",
         obj! {"parent_room_id" => ops.as_str(), "title" => "Deploy"},
     );
+    grant_role(&server, &b.user_id, "mod");
     let (random, _) = save_room(&mut b, "random", obj! {"title" => "Random"});
     let (idle, _) = save_room(
         &mut b,
@@ -708,6 +710,7 @@ fn test_room_list_latest_log_id_delta() {
     let server = new_test_server(default_config());
     let mut clients = dial_group(&server, 2);
     let (mut a, mut b) = (clients.remove(0), clients.remove(0));
+    grant_role(&server, &a.user_id, "mod");
     let (ops, _) = save_room(&mut a, "ops", obj! {"title" => "Ops"});
     join_room(&mut b, &ops);
     let since = expect_membership(&a, &ops, &b.user_id, true)["log_id"]
@@ -718,6 +721,7 @@ fn test_room_list_latest_log_id_delta() {
     leave_room(&mut b, &ops);
     expect_membership(&a, &ops, &b.user_id, false);
     let (news, _) = save_room(&mut a, "news", obj! {"title" => "News"});
+    grant_role(&server, &b.user_id, "mod");
     let (mine, _) = save_room(&mut b, "mine", obj! {"title" => "Mine"});
 
     // Joined since then in joined, left since then in left; general has not
@@ -925,6 +929,7 @@ fn test_history_without_room_id_pages_joined_rooms() {
         obj! {"parent_room_id" => "general", "title" => "Aside"},
     );
     a.drain();
+    grant_role(&server, &a.user_id, "mod");
     let (ops, _) = save_room(&mut a, "ops", obj! {"title" => "Ops"});
     b.drain();
     join_room(&mut b, &ops);
@@ -1084,37 +1089,132 @@ fn test_history_without_room_id_pages_joined_rooms() {
     assert_eq!(bound, start, "history_log_id after rejoining");
 }
 
+/// Only an admin or mod creates and edits top-level rooms, and only an
+/// admin `general`; anyone creates and edits threads, which cannot nest. An
+/// account has at most MAX_THREADS_PER_USER threads, the server
+/// MAX_CREATED_ROOMS top-level rooms besides `general` and MAX_THREADS rooms
+/// besides it and private rooms (apron-server-cloudflare's commitRoom).
 #[test]
-fn test_room_list_truncates_only_unjoined_rooms() {
+fn test_room_set_permissions_and_caps() {
     let server = new_test_server(default_config());
     let mut clients = dial_group(&server, 2);
-    let (mut owner, mut other) = (clients.remove(0), clients.remove(0));
-    let mut threads = Vec::new();
-    for i in 0..=MAX_LISTED_ROOMS {
-        let (thread, _) = save_room(
-            &mut owner,
-            &format!("thread-{i}"),
+    let (mut guest, mut mod_) = (clients.remove(0), clients.remove(0));
+    let denied = |c: &mut TestClient, id: &str, params: Object, message: &str| {
+        let frame = c.call("room_set", id, params);
+        assert_eq!(
+            frame["error"]
+                .as_object()
+                .map(|e| (e["code"].clone(), e["message"].clone())),
+            Some((Json::from(CODE_DENIED), Json::from(message))),
+            "{id}: {frame:?}"
+        );
+    };
+    denied(
+        &mut guest,
+        "top",
+        obj! {"title" => "Ops"},
+        "Only an admin or mod may create a room; others may create threads",
+    );
+    denied(
+        &mut guest,
+        "general",
+        obj! {"room_id" => "general", "title" => "Mine"},
+        "Only an admin may edit the general room",
+    );
+    grant_role(&server, &mod_.user_id, "mod");
+    denied(
+        &mut mod_,
+        "general",
+        obj! {"room_id" => "general", "title" => "Mine"},
+        "Only an admin may edit the general room",
+    );
+    let (ops, _) = save_room(&mut mod_, "ops", obj! {"title" => "Ops"});
+    denied(
+        &mut guest,
+        "edit-ops",
+        obj! {"room_id" => ops.as_str(), "title" => "Mine"},
+        "Only an admin or mod may edit a room; anyone may edit a thread",
+    );
+    save_room(
+        &mut mod_,
+        "mod-edits-ops",
+        obj! {"room_id" => ops.as_str(), "title" => "Ops 2"},
+    );
+    let (thread, _) = save_room(
+        &mut guest,
+        "thread",
+        obj! {"parent_room_id" => ops.as_str()},
+    );
+    mod_.drain();
+    save_room(
+        &mut mod_,
+        "edit-thread",
+        obj! {"room_id" => thread.as_str(), "title" => "Renamed"},
+    );
+    guest.drain();
+    denied(
+        &mut guest,
+        "nested",
+        obj! {"parent_room_id" => thread.as_str()},
+        "Threads cannot be nested",
+    );
+    revoke_role(&server, &mod_.user_id, "mod");
+    grant_role(&server, &mod_.user_id, "admin");
+    save_room(
+        &mut mod_,
+        "edit-general",
+        obj! {"room_id" => "general", "title" => "General"},
+    );
+    for i in 1..MAX_CREATED_ROOMS {
+        save_room(&mut mod_, &format!("top-{i}"), obj! {"title" => "Top"});
+    }
+    denied(&mut mod_, "top-full", obj! {"title" => "Top"}, "room_limit");
+    guest.drain();
+
+    // An account's live threads are capped; a guest's are not.
+    server
+        .app
+        .lock()
+        .users
+        .get_mut(&mod_.user_id)
+        .unwrap()
+        .invited = true;
+    for i in 0..MAX_THREADS_PER_USER {
+        save_room(
+            &mut mod_,
+            &format!("mine-{i}"),
             obj! {"parent_room_id" => "general"},
         );
-        room_updated(&other, "updated");
-        threads.push(thread);
+        guest.drain();
     }
-    let joined = list_rooms(&mut owner, obj! {"filter" => "joined"});
-    assert_eq!(
-        joined["joined"].as_list().len(),
-        MAX_LISTED_ROOMS + 2,
-        "owner joined rooms"
+    denied(
+        &mut mod_,
+        "mine-full",
+        obj! {"parent_room_id" => "general"},
+        &format!("You can have at most {MAX_THREADS_PER_USER} threads at once; one stops counting when everyone has left it or its history expires"),
     );
-    // The unjoined listing keeps the most recently active.
-    let rooms =
-        room_ids(list_rooms(&mut other, obj! {"parent_room_id" => "general"}).get("not_joined"));
-    assert!(
-        rooms.len() == MAX_LISTED_ROOMS
-            && rooms[0] == *threads.last().unwrap()
-            && !rooms.contains(&threads[0]),
-        "unjoined threads: {}, first {:?}",
-        rooms.len(),
-        rooms.first()
+    let made = MAX_CREATED_ROOMS + 1 + MAX_THREADS_PER_USER;
+    for i in made..MAX_THREADS {
+        save_room(
+            &mut guest,
+            &format!("theirs-{i}"),
+            obj! {"parent_room_id" => "general"},
+        );
+        mod_.drain();
+    }
+    denied(
+        &mut guest,
+        "theirs-full",
+        obj! {"parent_room_id" => "general"},
+        "thread_limit",
+    );
+    // Private rooms count against their own caps, and their members edit
+    // them.
+    let (private, _) = save_room(&mut guest, "private", obj! {"private" => true});
+    save_room(
+        &mut guest,
+        "edit-private",
+        obj! {"room_id" => private.as_str(), "title" => "Ours"},
     );
 }
 
@@ -1126,6 +1226,7 @@ fn test_join_leave_and_deliveries() {
     let server = new_test_server(default_config());
     let mut clients = dial_group(&server, 3);
     let (mut a, mut b, mut c) = (clients.remove(0), clients.remove(0), clients.remove(0));
+    grant_role(&server, &a.user_id, "mod");
     let (ops, ops_record) = save_room(&mut a, "ops", obj! {"title" => "Ops"});
 
     // A member receives the room's records; a poster who has not joined gets
@@ -1350,6 +1451,7 @@ fn test_prev_log_id_links_records() {
         Some(&Json::from(id.as_str())),
         "edit prev_log_id: {edit:?}"
     );
+    grant_role(&server, &c.user_id, "mod");
     let (room, record) = save_room(&mut c, "room", obj! {"title" => "A"});
     let (_, updated) = save_room(
         &mut c,
@@ -1725,7 +1827,9 @@ fn test_commands() {
     let server = new_test_server(default_config());
     let mut clients = dial_group(&server, 3);
     let (mut a, mut b, mut c) = (clients.remove(0), clients.remove(0), clients.remove(0));
+    grant_role(&server, &a.user_id, "mod");
     let (ops, _) = save_room(&mut a, "ops", obj! {"title" => "Ops"});
+    revoke_role(&server, &a.user_id, "mod");
     join_room(&mut b, &ops);
     expect_membership(&a, &ops, "guest_2", true);
     join_room(&mut c, &ops);
@@ -1868,6 +1972,7 @@ fn test_private_rooms_per_user_bound() {
     a.expect_error("room_set", "third", obj! {"private" => true}, CODE_DENIED);
     // Not counted: a public room, a private thread of a public room, and a
     // thread of a private room, whose members alone can be added to it.
+    grant_role(&server, &a.user_id, "mod");
     save_room(&mut a, "open", obj! {"title" => "Open"});
     save_room(
         &mut a,
@@ -2041,6 +2146,7 @@ fn test_private_rooms_and_membership_by_user_id() {
     );
 
     // Only members may add others; adding someone gives them the room.
+    grant_role(&server, &a.user_id, "mod");
     let (open, _) = save_room(&mut a, "open", obj! {"title" => "Open"});
     b.expect_error(
         "room_join",
@@ -2283,6 +2389,7 @@ fn test_member_lists_are_truncated_with_member_count() {
         "unlimited listing: {all:?}"
     );
     // A room within the bound carries no member_count.
+    grant_role(&server, &clients[0].user_id, "mod");
     let (ops, _) = save_room(&mut clients[0], "ops", obj! {"title" => "Ops"});
     let ops_entry = nth(
         &list_rooms(
@@ -2318,20 +2425,10 @@ fn test_leaving_a_private_room_hides_only_what_was_visible() {
         "public",
         obj! {"parent_room_id" => room.as_str(), "title" => "Public", "private" => false},
     );
-    let (nested, _) = save_room(
-        &mut a,
-        "nested",
-        obj! {"parent_room_id" => public.as_str(), "title" => "Nested"},
-    );
     let (aside, _) = save_room(
         &mut a,
         "aside",
         obj! {"parent_room_id" => room.as_str(), "title" => "Aside", "private" => true},
-    );
-    save_room(
-        &mut a,
-        "inside-aside",
-        obj! {"parent_room_id" => aside.as_str(), "title" => "Inside"},
     );
     let (shared, _) = save_room(
         &mut a,
@@ -2342,11 +2439,6 @@ fn test_leaving_a_private_room_hides_only_what_was_visible() {
         "room_join",
         "add-shared",
         obj! {"room_id" => shared.as_str(), "user_id" => b.user_id.as_str()},
-    );
-    let (in_shared, _) = save_room(
-        &mut a,
-        "in-shared",
-        obj! {"parent_room_id" => shared.as_str(), "title" => "In shared", "private" => false},
     );
     b.drain();
     a.drain();
@@ -2369,7 +2461,7 @@ fn test_leaving_a_private_room_hides_only_what_was_visible() {
         })
         .collect();
     left.sort();
-    let mut want = vec![room, public, nested, shared, in_shared];
+    let mut want = vec![room, public, shared];
     want.sort();
     assert_eq!(left, want, "left (not {aside})");
 }

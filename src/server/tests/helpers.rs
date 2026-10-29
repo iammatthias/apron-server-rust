@@ -1008,3 +1008,22 @@ pub fn assert_revoked_runs_nothing(
         "a message reached a member: {frames:?}"
     );
 }
+
+/// Gives user_id `role` in memory only, so a test guest can do what the
+/// role allows (guests never hold roles otherwise).
+pub fn grant_role(server: &TestServer, user_id: &str, role: &str) {
+    let mut st = server.app.lock();
+    let u = st.users.get_mut(user_id).expect("user exists");
+    if !u.has_role(role) {
+        u.roles.push(role.into());
+    }
+}
+
+pub fn revoke_role(server: &TestServer, user_id: &str, role: &str) {
+    let mut st = server.app.lock();
+    st.users
+        .get_mut(user_id)
+        .expect("user exists")
+        .roles
+        .retain(|r| r != role);
+}

@@ -26,8 +26,12 @@ pub const MAX_PROFILE_EXT_BYTES: usize = 16 << 10;
 pub const MAX_ROLES: usize = 8;
 /// The role that lets a user run the admin commands.
 pub const ADMIN_ROLE: &str = "admin";
-/// The role that lets a user remove others from rooms, as `admin` does.
+/// The role that lets a user create and edit top-level rooms and move
+/// others' messages, as `admin` does.
 pub const MOD_ROLE: &str = "mod";
+/// The roles whose accounts create and edit top-level rooms besides
+/// `general` (apron-server-cloudflare's ROOM_CREATOR_ROLES).
+pub const ROOM_CREATOR_ROLES: &[&str] = &[ADMIN_ROLE, MOD_ROLE];
 pub const INVALID_ROLE: &str =
     "A role is 1 to 24 lowercase letters, digits, _ or -, starting with a letter";
 
@@ -190,6 +194,10 @@ impl UserState {
 
     pub fn has_role(&self, role: &str) -> bool {
         self.roles.iter().any(|r| r == role)
+    }
+
+    pub fn has_any_role(&self, roles: &[&str]) -> bool {
+        roles.iter().any(|role| self.has_role(role))
     }
 
     /// The complete current user object for user and users (§3.3), with the

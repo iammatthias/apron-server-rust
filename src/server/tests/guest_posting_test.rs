@@ -40,6 +40,7 @@ fn test_read_only_guest_writes_are_denied() {
     let server = read_only_server();
     let (mut a, _) = account(&server, "Ada");
     let (message_id, _) = save(&mut a, "post", obj! {"body" => obj! {"text" => "hi"}});
+    grant_role(&server, &a.user_id, "mod");
     let (room_id, _) = save_room(&mut a, "room", obj! {"title" => "Ops"});
     a.drain();
     let (mut g, _) = dial_raw(&server);
@@ -107,6 +108,7 @@ fn test_read_only_guest_reads() {
     let server = read_only_server();
     let (mut a, _) = account(&server, "Ada");
     let (message_id, _) = save(&mut a, "post", obj! {"body" => obj! {"text" => "hi"}});
+    grant_role(&server, &a.user_id, "mod");
     let (room_id, _) = save_room(&mut a, "room", obj! {"title" => "Ops"});
     save(
         &mut a,

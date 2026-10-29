@@ -163,6 +163,7 @@ fn test_room_set_counts_toward_messages_per_minute() {
     config.messages_per_minute = 1;
     let server = new_test_server(config);
     let mut a = dial_test_client(&server);
+    grant_role(&server, &a.user_id, "mod");
     save_room(&mut a, "create", obj! {"title" => "Ops"});
     let frame = a.call("room_set", "again", obj! {"title" => "More"});
     assert_eq!(

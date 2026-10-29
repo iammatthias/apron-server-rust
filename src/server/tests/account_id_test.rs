@@ -165,6 +165,7 @@ fn finish_registration(c: &mut TestClient, options: &Object) -> Object {
 fn test_guest_registration_frames() {
     let server = passkey_test_server();
     let mut a = dial_test_client(&server);
+    grant_role(&server, &a.user_id, "mod");
     let (lab, _) = save_room(&mut a, "lab", obj! {"title" => "Lab"});
     let (mut b, _) = dial_origin(&server, TEST_PASSKEY_ORIGIN);
     guest_auth(&mut b);

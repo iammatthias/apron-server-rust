@@ -11,12 +11,8 @@ use super::server::{
     MAX_HISTORY_REPLY_BYTES,
 };
 use super::toggles::Feature;
-use super::users::{UserState, ADMIN_ROLE, MOD_ROLE};
+use super::users::{UserState, ADMIN_ROLE, MOD_ROLE, ROOM_CREATOR_ROLES};
 use crate::obj;
-
-/// Caps `not_joined` in a room_list result; `joined` is never truncated
-/// (§4.2.1).
-pub const MAX_LISTED_ROOMS: usize = 200;
 
 pub const MAX_THREAD_TITLE_RUNES: usize = 60;
 pub const DEFAULT_THREAD_TITLE: &str = "Thread";
@@ -24,6 +20,14 @@ pub const DEFAULT_THREAD_TITLE: &str = "Thread";
 /// every room record carries.
 pub const MAX_DESCRIPTION_BYTES: usize = 16 << 10;
 pub const MAX_ROOM_EXT_BYTES: usize = 16 << 10;
+/// Most top-level rooms created besides `general` (apron-server-cloudflare's
+/// MAX_CREATED_ROOMS).
+pub const MAX_CREATED_ROOMS: usize = 16;
+/// Most rooms that exist at once besides `general` and private top-level
+/// rooms: threads and created top-level rooms (Cloudflare's threadLimit).
+pub const MAX_THREADS: usize = 100;
+/// Most live threads one account created (Cloudflare's threadsPerUser).
+pub const MAX_THREADS_PER_USER: usize = 25;
 
 /// A room's current record, its log, and its members. Every room, including
 /// threads (rooms with parent_room_id), is visible to every authenticated
@@ -608,6 +612,48 @@ impl State {
         }
     }
 
+    /// Checks that u may save r's client fields: only an admin saves
+    /// `general`, and only an admin or mod (ROOM_CREATOR_ROLES) a public
+    /// top-level room; anyone a thread, and a private room's members theirs.
+    fn may_edit_room_locked(&self, u: &UserState, r: &RoomState) -> Result<(), RpcError> {
+        if r.id == DEFAULT_ROOM_ID {
+            if !u.has_role(ADMIN_ROLE) {
+                return Err(RpcError::new(
+                    CODE_DENIED,
+                    "Only an admin may edit the general room",
+                ));
+            }
+        } else if r.parent.is_none() && !r.private && !u.has_any_role(ROOM_CREATOR_ROLES) {
+            return Err(RpcError::new(
+                CODE_DENIED,
+                "Only an admin or mod may edit a room; anyone may edit a thread",
+            ));
+        }
+        Ok(())
+    }
+
+    /// The rooms MAX_THREADS bounds: every room but `general` and private
+    /// top-level rooms, which their own caps bound.
+    fn thread_count(&self) -> usize {
+        self.rooms
+            .values()
+            .filter(|r| r.id != DEFAULT_ROOM_ID && !(r.parent.is_none() && r.private))
+            .count()
+    }
+
+    /// The threads user_id created whose history retention has not
+    /// discarded entirely.
+    fn live_threads_created_by(&self, user_id: &str) -> usize {
+        self.rooms
+            .values()
+            .filter(|r| {
+                r.parent.is_some()
+                    && r.creator == user_id
+                    && r.history_log_id(self.history_floor).is_some()
+            })
+            .count()
+    }
+
     fn user_of(&self, c: &Client) -> Result<String, RpcError> {
         self.client_user(c)
             .ok_or_else(|| RpcError::new(CODE_DENIED, "Sign in before sending requests"))
@@ -653,15 +699,41 @@ impl State {
             };
             parent = existing.parent.clone();
             kept_ext = ext_of(existing.record.get("ext"));
+            self.may_edit_room_locked(&self.users[&user_id], existing)?;
         } else if !parent_id.is_empty() {
-            if self.visible_room_locked(&user_id, &parent_id).is_none() {
+            let Some(parent_room) = self.visible_room_locked(&user_id, &parent_id) else {
                 return Err(invalid_params(format!(
                     "Unknown parent room {}",
                     quote(&parent_id)
                 )));
+            };
+            if parent_room.parent.is_some() {
+                return Err(RpcError::new(CODE_DENIED, "Threads cannot be nested"));
+            }
+            let u = &self.users[&user_id];
+            if u.persists() && self.live_threads_created_by(&user_id) >= MAX_THREADS_PER_USER {
+                return Err(RpcError::new(
+                    CODE_DENIED,
+                    format!("You can have at most {MAX_THREADS_PER_USER} threads at once; one stops counting when everyone has left it or its history expires"),
+                ));
             }
             parent = Some(parent_id.clone());
-        } else if private && self.private_rooms_full_locked(&self.users[&user_id]) {
+        } else if !private {
+            if !self.users[&user_id].has_any_role(ROOM_CREATOR_ROLES) {
+                return Err(RpcError::new(
+                    CODE_DENIED,
+                    "Only an admin or mod may create a room; others may create threads",
+                ));
+            }
+            let created = self
+                .rooms
+                .values()
+                .filter(|r| r.parent.is_none() && !r.private && r.id != DEFAULT_ROOM_ID)
+                .count();
+            if created >= MAX_CREATED_ROOMS {
+                return Err(RpcError::new(CODE_DENIED, "room_limit"));
+            }
+        } else if self.private_rooms_full_locked(&self.users[&user_id]) {
             return Err(RpcError::new(
                 CODE_DENIED,
                 format!(
@@ -669,6 +741,10 @@ impl State {
                     self.config.max_private_rooms
                 ),
             ));
+        }
+        let counted = !(updating || private && parent.is_none());
+        if counted && self.thread_count() >= MAX_THREADS {
+            return Err(RpcError::new(CODE_DENIED, "thread_limit"));
         }
         // ext merges into the room's (§4.12), and the limit applies to the
         // result; other client fields are replaced (§4.2.4).
@@ -752,9 +828,8 @@ impl State {
     }
 
     /// Answers room_list (§4.2.1): the rooms matching its filters, joined
-    /// ones in `joined` (never truncated) and visible unjoined ones in
-    /// `not_joined` (the most recently active MAX_LISTED_ROOMS), each most
-    /// recently active first. The result is followed by the read cursors kept
+    /// ones in `joined` and visible unjoined ones in `not_joined`, each most
+    /// recently active first; MAX_THREADS and MAX_CREATED_ROOMS bound both. The result is followed by the read cursors kept
     /// for the listed rooms (§4.6).
     pub fn list_rooms_locked(
         &self,
@@ -841,7 +916,6 @@ impl State {
         joined.sort_by(by_activity);
         others.sort_by(by_activity);
         left.sort_by(by_activity);
-        others.truncate(MAX_LISTED_ROOMS);
 
         let mut users: BTreeSet<String> = BTreeSet::new();
         let mut render_rooms = |rooms: &[&RoomState]| -> Vec<Json> {

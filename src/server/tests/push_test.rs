@@ -332,6 +332,7 @@ fn test_push_wakes_mentions_and_replies_of_idle_users() {
     );
     // Mentions and replies wake a user in any room they can see, joined or
     // not. Mentions in commands notify no one.
+    grant_role(&server, &a.user_id, "mod");
     let (ops, _) = save_room(&mut a, "ops", obj! {"title" => "Ops"});
     save(
         &mut a,
@@ -654,6 +655,7 @@ fn test_push_wake_scopes() {
         "private thread message"
     );
     // A room carol has not joined wakes neither joined nor private.
+    grant_role(&server, &a.user_id, "mod");
     let (open_room, _) = save_room(&mut a, "open", obj! {"title" => "Open"});
     post(
         &mut a,
@@ -755,6 +757,7 @@ fn test_push_respects_mutes() {
         "thread of a muted room woke"
     );
     b.status(obj! {"room_id" => "general", "mute" => false});
+    grant_role(&server, &a.user_id, "mod");
     let (ops, _) = save_room(&mut a, "ops", obj! {"title" => "Ops"});
     let frames = b.status(obj! {"room_id" => ops.as_str(), "mute" => true});
     assert_eq!(
@@ -1309,6 +1312,7 @@ fn test_push_unread_and_badge() {
         ],
     );
     // A mention in a room the user has not joined counts until read there.
+    grant_role(&server, &a.user_id, "mod");
     let (ops, _) = save_room(&mut a, "ops", obj! {"title" => "Ops"});
     let (elsewhere, _) = save(
         &mut a,
@@ -2076,21 +2080,18 @@ fn test_private_wakes_for_threads_of_joined_rooms() {
         "thread",
         obj! {"parent_room_id" => secret.as_str(), "private" => false},
     );
-    let (nested, _) = save_room(&mut a, "nested", obj! {"parent_room_id" => thread.as_str()});
     relay.pushes(&server, &mut a);
-    for (i, room) in [thread, nested].iter().enumerate() {
-        save(
-            &mut a,
-            &format!("post-{i}"),
-            obj! {"room_id" => room.as_str(), "body" => obj! {"text" => "in a thread"}},
-        );
-        let got = relay.pushes(&server, &mut a);
-        assert!(
-            paths(&got) == strs(&["/private"]) && got[0].header("Urgency") == "high",
-            "a message in a thread of a private room carol joined woke {:?}",
-            paths(&got)
-        );
-    }
+    save(
+        &mut a,
+        "post",
+        obj! {"room_id" => thread.as_str(), "body" => obj! {"text" => "in a thread"}},
+    );
+    let got = relay.pushes(&server, &mut a);
+    assert!(
+        paths(&got) == strs(&["/private"]) && got[0].header("Urgency") == "high",
+        "a message in a thread of a private room carol joined woke {:?}",
+        paths(&got)
+    );
     // A public room's thread wakes no one for private.
     let (public, _) = save_room(
         &mut a,

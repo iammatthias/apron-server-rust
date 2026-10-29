@@ -708,6 +708,7 @@ fn test_log_ids_form_one_sequence_across_rooms_and_kinds() {
     };
     let (id, message) = save(&mut c, "m1", obj! {"body" => obj! {"text" => "a"}});
     check("message", message.get("log_id"));
+    grant_role(&server, &c.user_id, "mod");
     let (room, record) = save_room(&mut c, "r1", obj! {"title" => "Ops"});
     check("room", record.get("log_id"));
     assert_eq!(
@@ -730,6 +731,7 @@ fn test_replies_may_cross_rooms() {
     let mut c = dial_test_client(&server);
     let body = obj! {"text" => "hello"};
     let (root, _) = save(&mut c, "root", obj! {"body" => body.clone()});
+    grant_role(&server, &c.user_id, "mod");
     let (ops, _) = save_room(&mut c, "ops", obj! {"title" => "Ops"});
 
     let (reply, created) = save(
@@ -836,19 +838,12 @@ fn test_room_set_creates_and_edits_rooms_and_threads() {
         "description" => description, "latest_log_id" => record["latest_log_id"].clone(), "history_log_id" => thread.as_str(),
     };
     assert_eq!(record, want, "thread record");
-    // The observer has not joined the thread, so no room_update for its
-    // nested thread reaches them.
-    let (_, untitled) = save_room(
-        &mut c,
-        "untitled",
-        obj! {"parent_room_id" => thread.as_str()},
-    );
+    let (_, untitled) = save_room(&mut c, "untitled", obj! {"parent_room_id" => "general"});
     assert!(
-        untitled["title"] == Json::from("Thread")
-            && untitled["parent_room_id"] == Json::from(thread.as_str()),
-        "nested untitled thread: {untitled:?}"
+        untitled["title"] == Json::from("Thread"),
+        "untitled thread: {untitled:?}"
     );
-    observer.expect_quiet();
+    room_updated(&observer, "updated");
 
     // Edits replace every client field except parent_room_id, and reach the
     // room's members and, for a thread, the parent's.
@@ -877,6 +872,7 @@ fn test_room_set_creates_and_edits_rooms_and_threads() {
         "thread update fields: {updated:?}"
     );
     // A new top-level room joins only its creator.
+    grant_role(&server, &observer.user_id, "mod");
     let (top, top_record) = save_room(&mut observer, "top", obj! {"title" => "Ops"});
     c.expect_quiet();
     assert!(
@@ -889,6 +885,7 @@ fn test_room_set_creates_and_edits_rooms_and_threads() {
         "omitted title was retained on a top-level room: {cleared:?}"
     );
     // An editor who has not joined the room still receives the update.
+    grant_role(&server, &c.user_id, "mod");
     let (_, renamed) = save_room(
         &mut c,
         "rename-top",
@@ -1290,6 +1287,7 @@ fn test_history_paginates_across_record_kinds() {
     );
     let (id, message) = save(&mut c, "m1", obj! {"body" => obj! {"text" => "one"}});
     let reaction = react(&mut c, "x1", &id, &["👍"]);
+    grant_role(&server, &c.user_id, "admin");
     let (_, updated) = save_room(
         &mut c,
         "r1",
