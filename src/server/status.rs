@@ -36,7 +36,6 @@ use super::toggles::Feature;
 use super::users::UserState;
 use super::wake::HELD_WAKE_WINDOW;
 use crate::obj;
-use crate::rate::{every, Limiter};
 
 pub const STATUS_ONLINE: &str = "online";
 pub const STATUS_IDLE: &str = "idle";
@@ -47,12 +46,7 @@ pub const STATUS_NONE: &str = "";
 /// Caps a timed mute at a year; `true` mutes until changed.
 pub const MAX_MUTE_SECONDS: i64 = 365 * 24 * 60 * 60;
 /// Bounds the rooms a user mutes at once.
-pub const MAX_ROOM_MUTES: usize = 1000;
-/// Each user may send STATUS_REQUEST_BURST `status` requests at once,
-/// refilled one every STATUS_REQUEST_REFILL; beyond them a request is
-/// retry_after (§4.5).
-pub const STATUS_REQUEST_BURST: i64 = 20;
-pub const STATUS_REQUEST_REFILL: Duration = time::SECOND;
+pub const MAX_ROOM_MUTES: usize = 100;
 /// What changed a user's status, which decides when others hear of it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Cause {
@@ -104,32 +98,16 @@ impl MuteState {
 /// Go's `retryAfter`: a retry_after error carrying `wait` rounded up to
 /// seconds.
 pub fn retry_after(message: &str, wait: Duration) -> RpcError {
-    RpcError::with_data(
-        CODE_RETRY_AFTER,
-        message,
-        obj! {"retry_after" => seconds(wait)},
-    )
+    retry_after_seconds(message, seconds(wait))
+}
+
+pub fn retry_after_seconds(message: &str, seconds: i64) -> RpcError {
+    RpcError::with_data(CODE_RETRY_AFTER, message, obj! {"retry_after" => seconds})
 }
 
 /// `wait` rounded up to whole seconds, at least one.
 pub fn seconds(wait: Duration) -> i64 {
     ((wait.as_nanos() + time::SECOND.as_nanos() - 1) / time::SECOND.as_nanos()).max(1)
-}
-
-/// Applies the user's limit on `status` requests, idle and mute alike, and
-/// on `me` requests that change the status (§4.5 lets servers limit them).
-pub fn admit_status_locked(u: &mut UserState) -> Result<(), RpcError> {
-    let limiter = u
-        .status_requests
-        .get_or_insert_with(|| Limiter::new(every(STATUS_REQUEST_REFILL), STATUS_REQUEST_BURST));
-    let now = time::now();
-    let reservation = limiter.reserve_n(&now, 1);
-    let delay = reservation.delay_from(&now);
-    if delay.as_nanos() > 0 {
-        limiter.cancel_at(&reservation, &now);
-        return Err(retry_after("Status changes limited", delay));
-    }
-    Ok(())
 }
 
 /// The `status` notification that tells the user's connections of a mute,
@@ -645,9 +623,11 @@ impl State {
     /// Applies a `status` request (§4.5) and answers {} once it has: the
     /// mute's echo to the user's connections, the sender's included,
     /// precedes the result. On an error nothing changes: invalid params, a
-    /// mute of a room the user cannot see, a mute of another room beyond
-    /// MAX_ROOM_MUTES, or more requests than the user's limit
-    /// (`admit_status_locked`).
+    /// mute of a room the user cannot see, going idle more often than the
+    /// connection's limit, a mute past the user's limit (shared with `me`
+    /// status changes), or a mute of another room beyond MAX_ROOM_MUTES.
+    /// Only an applied change counts against a limit, and coming back from
+    /// idle never does, as on Cloudflare.
     pub fn status_locked(
         &mut self,
         c: &Arc<Client>,
@@ -672,16 +652,44 @@ impl State {
             )));
         }
         let now = time::now();
-        if update.has_mute && update.scoped && update.mute(&now).active(&now) {
-            let u = &self.users[&user_id];
-            if !u.room_mutes.contains_key(&update.room_id) && u.room_mutes.len() >= MAX_ROOM_MUTES {
+        let ms = now.unix_milli();
+        let limits = &self.config.limits;
+        let (idle_limit, status_limit) = (
+            limits.idle_changes_per_connection_minute,
+            limits.status_changes_per_user_minute,
+        );
+        let idle_changes = match self.clients.get_mut(&c.id) {
+            Some(conn)
+                if matches!(update.idle, Some(Idle::For(_))) && conn.idle_since.is_none() =>
+            {
+                Some(&mut conn.idle_changes)
+            }
+            _ => None,
+        };
+        let going_idle = idle_changes.is_some();
+        if let Some(wait) = idle_changes.and_then(|w| w.wait(ms, idle_limit)) {
+            return Err(retry_after_seconds("Idle changes limited", wait));
+        }
+        if update.has_mute {
+            let u = self.users.get_mut(&user_id).expect("user exists");
+            if let Some(wait) = u.status_changes.wait(ms, status_limit) {
+                return Err(retry_after_seconds("Mute changes limited", wait));
+            }
+            if update.scoped
+                && update.mute(&now).active(&now)
+                && !u.room_mutes.contains_key(&update.room_id)
+                && u.room_mutes.len() >= MAX_ROOM_MUTES
+            {
                 return Err(RpcError::new(
                     CODE_DENIED,
                     format!("At most {MAX_ROOM_MUTES} rooms can be muted; unmute one first"),
                 ));
             }
+            u.status_changes.note(ms);
         }
-        admit_status_locked(self.users.get_mut(&user_id).expect("user exists"))?;
+        if let Some(conn) = self.clients.get_mut(&c.id).filter(|_| going_idle) {
+            conn.idle_changes.note(ms);
+        }
         self.apply_status_locked(c, &user_id, &update);
         Ok((Object::new().into(), false))
     }

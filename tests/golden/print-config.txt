@@ -251,6 +251,12 @@ server-frames-per-minute = 600
 # Malformed or invalid requests within a minute that close a connection with 1008; 0 never closes
 policy-violations = 3
 
+# Changes to idle with status of one connection in a rolling minute; coming back is never refused; 0 is unlimited
+idle-changes-per-minute = 12
+
+# Mute changes with status and status changes with me of one user together in a rolling minute; 0 is unlimited
+status-changes-per-minute = 6
+
 # Seconds between the status changes of one user that others are sent, the latest winning; a change made with me goes at once; 0 to 60
 status-coalesce-seconds = 60
 
@@ -552,6 +558,12 @@ server-frames-per-minute = 600
 
 # Malformed or invalid requests within a minute that close a connection with 1008; 0 never closes
 policy-violations = 3
+
+# Changes to idle with status of one connection in a rolling minute; coming back is never refused; 0 is unlimited
+idle-changes-per-minute = 12
+
+# Mute changes with status and status changes with me of one user together in a rolling minute; 0 is unlimited
+status-changes-per-minute = 6
 
 # Seconds between the status changes of one user that others are sent, the latest winning; a change made with me goes at once; 0 to 60
 status-coalesce-seconds = 60
@@ -856,6 +868,12 @@ server-frames-per-minute = 600
 # Malformed or invalid requests within a minute that close a connection with 1008; 0 never closes
 policy-violations = 3
 
+# Changes to idle with status of one connection in a rolling minute; coming back is never refused; 0 is unlimited
+idle-changes-per-minute = 12
+
+# Mute changes with status and status changes with me of one user together in a rolling minute; 0 is unlimited
+status-changes-per-minute = 6
+
 # Seconds between the status changes of one user that others are sent, the latest winning; a change made with me goes at once; 0 to 60
 status-coalesce-seconds = 60
 
@@ -1157,6 +1175,12 @@ server-frames-per-minute = 600
 
 # Malformed or invalid requests within a minute that close a connection with 1008; 0 never closes
 policy-violations = 3
+
+# Changes to idle with status of one connection in a rolling minute; coming back is never refused; 0 is unlimited
+idle-changes-per-minute = 12
+
+# Mute changes with status and status changes with me of one user together in a rolling minute; 0 is unlimited
+status-changes-per-minute = 6
 
 # Seconds between the status changes of one user that others are sent, the latest winning; a change made with me goes at once; 0 to 60
 status-coalesce-seconds = 60

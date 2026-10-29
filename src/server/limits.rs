@@ -60,6 +60,10 @@ pub struct Limits {
     pub frames_per_connection_minute: usize,
     pub frames_per_ip_minute: u32,
     pub server_frames_per_minute: u32,
+    /// Changes to idle on one connection a rolling minute; and mute
+    /// changes and `me` status changes of one user together.
+    pub idle_changes_per_connection_minute: usize,
+    pub status_changes_per_user_minute: usize,
     /// Malformed or invalid requests (parse_error, invalid_request,
     /// invalid_params, too_large) within a minute that close a connection
     /// with 1008.
@@ -113,11 +117,27 @@ impl Window {
     /// Notes an event at `now` (Unix ms) and returns the events within the
     /// last minute, it included.
     pub fn note(&mut self, now: i64) -> usize {
+        self.prune(now);
+        self.0.push_back(now);
+        self.0.len()
+    }
+
+    /// The whole seconds until another event fits under `limit` events a
+    /// minute, or `None` when one fits at `now` (Cloudflare's
+    /// MinuteRateLimit). A zero limit is no limit.
+    pub fn wait(&mut self, now: i64, limit: usize) -> Option<i64> {
+        self.prune(now);
+        if limit == 0 || self.0.len() < limit {
+            return None;
+        }
+        let oldest = self.0[self.0.len() - limit];
+        Some(((oldest + 60_000 - now + 999) / 1_000).max(1))
+    }
+
+    fn prune(&mut self, now: i64) {
         while self.0.front().is_some_and(|&at| at <= now - 60_000) {
             self.0.pop_front();
         }
-        self.0.push_back(now);
-        self.0.len()
     }
 }
 
@@ -183,6 +203,8 @@ impl Default for Limits {
             frames_per_ip_minute: 120,
             server_frames_per_minute: 600,
             policy_violations: 3,
+            idle_changes_per_connection_minute: 12,
+            status_changes_per_user_minute: 6,
             status_coalesce: time::Duration::from_secs(60),
             offline_grace: time::Duration::from_secs(60),
             user_history: Rate {
@@ -225,6 +247,8 @@ impl Limits {
             frames_per_ip_minute: 0,
             server_frames_per_minute: 0,
             policy_violations: 0,
+            idle_changes_per_connection_minute: 0,
+            status_changes_per_user_minute: 0,
             status_coalesce: time::Duration::from_secs(0),
             offline_grace: time::Duration::from_secs(0),
             user_history: Rate::per_minute(0),

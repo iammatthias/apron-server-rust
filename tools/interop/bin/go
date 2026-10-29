@@ -37,6 +37,8 @@ if [[ "${1:-}" == run && "${2:-}" == ./cmd/aprond ]]; then
 		--limit.frames-per-ip-minute=0
 		--limit.server-frames-per-minute=0
 		--limit.policy-violations=0
+		--limit.idle-changes-per-minute=0
+		--limit.status-changes-per-minute=0
 		--limit.status-coalesce-seconds=0
 		--limit.offline-grace-seconds=0
 		--limit.history-per-minute=0

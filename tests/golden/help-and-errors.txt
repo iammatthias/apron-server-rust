@@ -331,6 +331,14 @@ Limits:
                                             within a minute that close a
                                             connection with 1008; 0 never
                                             closes (default: 3)
+      --limit.idle-changes-per-minute=      Changes to idle with status of one
+                                            connection in a rolling minute;
+                                            coming back is never refused; 0 is
+                                            unlimited (default: 12)
+      --limit.status-changes-per-minute=    Mute changes with status and status
+                                            changes with me of one user
+                                            together in a rolling minute; 0 is
+                                            unlimited (default: 6)
       --limit.status-coalesce-seconds=      Seconds between the status changes
                                             of one user that others are sent,
                                             the latest winning; a change made
@@ -732,6 +740,14 @@ Limits:
                                             within a minute that close a
                                             connection with 1008; 0 never
                                             closes (default: 3)
+      --limit.idle-changes-per-minute=      Changes to idle with status of one
+                                            connection in a rolling minute;
+                                            coming back is never refused; 0 is
+                                            unlimited (default: 12)
+      --limit.status-changes-per-minute=    Mute changes with status and status
+                                            changes with me of one user
+                                            together in a rolling minute; 0 is
+                                            unlimited (default: 6)
       --limit.status-coalesce-seconds=      Seconds between the status changes
                                             of one user that others are sent,
                                             the latest winning; a change made
@@ -1133,6 +1149,14 @@ Limits:
                                             within a minute that close a
                                             connection with 1008; 0 never
                                             closes (default: 3)
+      --limit.idle-changes-per-minute=      Changes to idle with status of one
+                                            connection in a rolling minute;
+                                            coming back is never refused; 0 is
+                                            unlimited (default: 12)
+      --limit.status-changes-per-minute=    Mute changes with status and status
+                                            changes with me of one user
+                                            together in a rolling minute; 0 is
+                                            unlimited (default: 6)
       --limit.status-coalesce-seconds=      Seconds between the status changes
                                             of one user that others are sent,
                                             the latest winning; a change made

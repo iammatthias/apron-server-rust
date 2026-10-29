@@ -152,6 +152,8 @@ pub struct Conn {
     /// `idle` dated it; `None` while attended, which it is until it says
     /// otherwise.
     pub idle_since: Option<Time>,
+    /// The connection's changes to idle in the last minute.
+    pub idle_changes: Window,
     /// The pending passkey ceremony, if any (§4.10).
     pub ceremony: Option<PasskeyCeremony>,
     /// The SHA-256 of the session or bot token the connection last signed
