@@ -600,7 +600,7 @@ impl State {
     }
 
     /// Issues a bearer token that resumes the account from the origin for
-    /// SESSION_LIFETIME, renewed on each use (§3.2). Only its SHA-256 is
+    /// SESSION_LIFETIME, renewed by a use past half of it (§3.2). Only its SHA-256 is
     /// kept, as the session's key.
     pub fn new_session_locked(
         &mut self,
@@ -661,11 +661,11 @@ impl State {
         }
         self.prune_sessions_locked(&now);
         let key = sha256::sum256(token.as_bytes());
-        let Some(user_id) = self
+        let Some((user_id, expires)) = self
             .sessions
             .get(&key)
             .filter(|session| session.origin == c.origin && now.before(&session.expires))
-            .map(|session| session.user.clone())
+            .map(|session| (session.user.clone(), session.expires.clone()))
         else {
             // A temporary token approves its proposal with this scheme too,
             // as a client presents the token of a link that isn't its own
@@ -675,13 +675,15 @@ impl State {
             }
             return Err(denied("Session expired; sign in again"));
         };
-        // Each successful resume renews the session for a full lifetime, so
-        // an active user is never forced back through a ceremony. The token
-        // itself is not rotated, since several tabs may share one persisted
-        // token: the result carries the presented token, which clients keep
-        // as the latest.
-        self.sessions.renew(&key, now.add(SESSION_LIFETIME));
-        self.touch_session(key);
+        // A resume once half the lifetime has passed renews the session for
+        // a full one, as Cloudflare's does, so an active user is never
+        // forced back through a ceremony. The token itself is not rotated,
+        // since several tabs may share one persisted token: the result
+        // carries the presented token, which clients keep as the latest.
+        if expires.sub(&now) < SESSION_LIFETIME / 2 {
+            self.sessions.renew(&key, now.add(SESSION_LIFETIME));
+            self.touch_session(key);
+        }
         self.set_conn_token(c, key);
         // Resuming the user the connection is signed in as is no sign-in
         // (§4.5), and sends nothing after its result.

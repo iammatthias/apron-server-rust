@@ -388,8 +388,35 @@ fn test_passkey_registration_login_and_session() {
         identity,
         "reconnect changed identity"
     );
-    // A resume renews the session: a token close to expiry is good for a
-    // full lifetime again after use.
+    // A resume before half the lifetime has passed keeps the expiry.
+    let expiry = |server: &super::helpers::TestServer| {
+        server
+            .app
+            .lock()
+            .sessions
+            .get(&sha256::sum256(token.as_bytes()))
+            .unwrap()
+            .expires
+            .clone()
+    };
+    let fifteen_days_and_a_minute = Duration::from_hours(15 * 24) + time::MINUTE;
+    set_session_expiry(&server, fifteen_days_and_a_minute);
+    let kept = expiry(&server);
+    let (mut early, _) = dial_origin(&server, TEST_PASSKEY_ORIGIN);
+    passkey_result(&passkey_call(
+        &mut early,
+        "resume",
+        "token",
+        "",
+        obj! {"token" => token.as_str()},
+    ));
+    assert_eq!(
+        expiry(&server),
+        kept,
+        "a resume before half renewed the session"
+    );
+    // A resume past half renews the session: a token close to expiry is
+    // good for a full lifetime again after use.
     set_session_expiry(&server, time::MINUTE);
     let (mut renewed, _) = dial_origin(&server, TEST_PASSKEY_ORIGIN);
     let result = passkey_result(&passkey_call(
