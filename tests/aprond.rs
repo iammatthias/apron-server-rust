@@ -630,7 +630,7 @@ fn test_guest_and_history_flags() {
     assert_eq!(code, 0);
     assert!(String::from_utf8(out)
         .unwrap()
-        .contains("\nposting = true\n\n[history]\n\n# Delete messages, reactions, and their uploads older than this, such as 168h, checking hourly; emptied threads go, other rooms stay (default: keep forever; not in the Go aprond)\nretention = \"168h\"\n\n[frame]\n"));
+        .contains("\nposting = true\n\n[history]\n\n# Delete messages, reactions, and their uploads older than this, such as 168h, checking hourly; emptied threads and private rooms go, other rooms stay (default: keep forever; not in the Go aprond)\nretention = \"168h\"\n\n[frame]\n"));
     for bad in ["7d", "-1h"] {
         let flag = format!("--history.retention={bad}");
         let (code, _, err) = output(APROND, &["--store", "memory", &flag]);

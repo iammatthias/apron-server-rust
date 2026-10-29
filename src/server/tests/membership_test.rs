@@ -289,3 +289,105 @@ fn test_private_room_members() {
     );
     assert_eq!(join(&mut bob, "add-carol", &room, &carol.user_id), None);
 }
+
+fn leave(c: &mut TestClient, room_id: &str) {
+    let id = c.next_id("leave");
+    let frame = reply(c, "room_leave", &id, obj! {"room_id" => room_id});
+    assert!(frame.contains_key("result"), "{frame:?}");
+}
+
+fn exists(server: &TestServer, room_id: &str) -> bool {
+    server.app.lock().rooms.contains_key(room_id)
+}
+
+/// A thread or private room goes when the last one in it leaves, with the
+/// messages in it; a connected guest or an offline account keeps it, and
+/// general and the top-level rooms admins make stay (apron-server-cloudflare's
+/// "removes a thread when the last one in it leaves").
+#[test]
+fn test_emptied_rooms_are_removed() {
+    let server = admin_test_server();
+    let mut admin = admin(&server);
+    let mut bob = account(&server);
+    let carol = account(&server);
+    let mut guest = dial_test_client(&server);
+    admin.drain();
+    bob.drain();
+    let thread = |c: &mut TestClient, title: &str| {
+        c.drain();
+        save_room(
+            c,
+            title,
+            obj! {"parent_room_id" => "general", "title" => title},
+        )
+        .0
+    };
+
+    let unused = thread(&mut bob, "unused");
+    leave(&mut bob, &unused);
+    assert!(!exists(&server, &unused), "an unused thread stayed");
+    let frame = reply(
+        &mut bob,
+        "room_join",
+        "join-unused",
+        obj! {"room_id" => unused.as_str()},
+    );
+    assert_eq!(error_code(&frame), Some(CODE_INVALID_PARAMS));
+
+    let written = thread(&mut bob, "written");
+    let (message, _) = save(
+        &mut bob,
+        "post",
+        obj! {"room_id" => written.as_str(), "body" => obj! {"text" => "hello"}},
+    );
+    leave(&mut bob, &written);
+    assert!(!exists(&server, &written), "messages kept a thread");
+    let frame = reply(
+        &mut bob,
+        "message",
+        "move-gone",
+        obj! {"message_id" => message.as_str(), "room_id" => "general", "body" => obj! {"text" => "hello"}},
+    );
+    assert_eq!(error_code(&frame), Some(CODE_INVALID_PARAMS));
+
+    // An account that is not connected keeps it; removing them empties it.
+    let offline = thread(&mut bob, "offline");
+    assert_eq!(join(&mut bob, "add-carol", &offline, &carol.user_id), None);
+    drop(carol);
+    leave(&mut bob, &offline);
+    assert!(exists(&server, &offline), "a member's thread went");
+    let carol_id = server.app.lock().rooms[&offline]
+        .members
+        .iter()
+        .next()
+        .unwrap()
+        .clone();
+    assert_eq!(
+        remove(&mut admin, "remove-carol", &offline, &carol_id),
+        None
+    );
+    assert!(!exists(&server, &offline), "an emptied thread stayed");
+
+    // A connected guest keeps it until the guest leaves too.
+    let guests = thread(&mut bob, "guests");
+    guest.drain();
+    join_room(&mut guest, &guests);
+    bob.drain();
+    leave(&mut bob, &guests);
+    assert!(exists(&server, &guests), "a guest's thread went");
+    leave(&mut guest, &guests);
+    assert!(!exists(&server, &guests), "an emptied thread stayed");
+
+    // A private room goes too; general and an admin's room stay.
+    bob.drain();
+    let (private, _) = save_room(&mut bob, "private", obj! {"private" => true});
+    leave(&mut bob, &private);
+    assert!(!exists(&server, &private), "an emptied private room stayed");
+    admin.drain();
+    let (top, _) = save_room(&mut admin, "top", obj! {"title" => "Top"});
+    leave(&mut admin, &top);
+    assert!(exists(&server, &top), "an admin's room went");
+    bob.drain();
+    leave(&mut bob, "general");
+    assert!(exists(&server, "general"));
+}
