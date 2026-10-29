@@ -28,6 +28,7 @@ pub mod purge;
 pub mod push;
 pub mod remap;
 pub mod rename;
+pub mod restore;
 pub mod retention;
 pub mod room_list;
 pub mod room_set;
