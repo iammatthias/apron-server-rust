@@ -2,7 +2,6 @@
 //! section 6, Connections), after its admission and connection-status
 //! integration tests.
 
-use super::admin_test::{admin_config, token_auth, ADMIN_TOKEN};
 use super::helpers::*;
 use crate::server::config::Config;
 use crate::server::config::RETRY_AFTER_SECONDS;

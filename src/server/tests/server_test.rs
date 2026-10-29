@@ -2185,8 +2185,8 @@ fn test_client_og_is_kept_as_text() {
 /// ROOM_TITLE and DEFAULT_ROOM_TITLE).
 #[test]
 fn test_default_room_titles() {
-    let server = super::admin_test::admin_test_server();
-    let mut ada = super::admin_test::admin(&server);
+    let server = super::helpers::admin_test_server();
+    let mut ada = super::helpers::admin(&server);
     let (room_id, created) = save_room(&mut ada, "create", obj! {"title" => "  "});
     assert_eq!(created["title"], Json::from("Room"));
     let (_, saved) = save_room(&mut ada, "save", obj! {"room_id" => room_id.as_str()});

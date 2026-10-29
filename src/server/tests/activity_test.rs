@@ -27,10 +27,10 @@ fn test_read_cursors_stay_with_the_user() {
         ACTIVITY_RELAYS_PER_MINUTE, 10,
         "Cloudflare's relay allowance"
     );
-    let server = super::admin_test::admin_test_server();
+    let server = super::helpers::admin_test_server();
     let mut other = dial_test_client(&server);
-    let mut first = super::admin_test::admin(&server);
-    let mut second = super::admin_test::admin(&server);
+    let mut first = super::helpers::admin(&server);
+    let mut second = super::helpers::admin(&server);
     other.drain();
     let mut ids = Vec::new();
     for i in 0..12 {

@@ -88,10 +88,6 @@ fn sign_in_by_email(c: &mut TestClient, token: &str, extra: Object) -> (Vec<Obje
     (before, result)
 }
 
-fn user_id_of(result: &Object) -> String {
-    you_of(result)["user_id"].as_str().unwrap().to_owned()
-}
-
 /// The form-encoded fragment of an email's link.
 fn link_fragment(message: &SignInEmail) -> BTreeMap<String, Vec<String>> {
     let fragment = message.link.split_once('#').map_or("", |(_, f)| f);
@@ -1358,10 +1354,10 @@ fn test_missing_client_address_is_refused() {
 fn test_email_refused_to_the_admin_user() {
     let (server, mailbox) = email_test_server(|config| {
         config.admin_token = Some(rust_stdlib_crypto::sha256::sum256(
-            super::admin_test::ADMIN_TOKEN.as_bytes(),
+            super::helpers::ADMIN_TOKEN.as_bytes(),
         ));
     });
-    let mut admin = super::admin_test::admin(&server);
+    let mut admin = super::helpers::admin(&server);
     let denied = Json::from(obj! {
         "code" => CODE_DENIED,
         "message" => crate::server::admin::ADMIN_SIGNS_IN_WITH_TOKEN,

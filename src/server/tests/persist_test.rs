@@ -543,11 +543,11 @@ fn test_pending_image_writes_are_dropped_on_restore() {
     use super::metadata_test::{command_with, upload_embed, write_url};
     let dir = TempDir::new("apron-pending-");
     let configure = |config: &mut Config| {
-        config.admin_token = super::admin_test::admin_config().admin_token;
+        config.admin_token = super::helpers::admin_config().admin_token;
     };
     let kept: Arc<dyn Store> = Arc::new(store::Memory::new());
     let server = start_with(kept.clone(), &format!("{dir}/before"), configure);
-    let mut ada = super::admin_test::admin(&server);
+    let mut ada = super::helpers::admin(&server);
     let mut urls = Vec::new();
     for command in ["/avatar", "/emoji add :late:", "/server avatar"] {
         let (_, started) = command_with(&mut ada, command, upload_embed());
@@ -581,7 +581,7 @@ fn test_pending_image_writes_are_dropped_on_restore() {
 /// for another operation is invalid_params.
 #[test]
 fn test_deduplication_survives_restart() {
-    use super::admin_test::{token_auth, ADMIN_TOKEN};
+    use super::helpers::{token_auth, ADMIN_TOKEN};
     let dir = TempDir::new("apron-dedup-");
     let path = format!("{dir}/aprond.db");
     let upload_dir = format!("{dir}/uploads");

@@ -1,7 +1,6 @@
 //! Moderator moves and `ext:permissions` (EXTENSIONS.md), ported from
 //! apron-server-cloudflare's test/admin.integration.test.ts.
 
-use super::admin_test::{account, admin, admin_test_server, private_reply, token_auth};
 use super::helpers::*;
 use crate::obj;
 use crate::server::protocol::*;

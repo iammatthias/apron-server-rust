@@ -2627,7 +2627,7 @@ fn test_push_register_rate_limit() {
     }
     let _ = a.ws.close(ws::STATUS_NORMAL_CLOSURE, "bye");
     let (mut second, _) = dial_origin(&server, TEST_PASSKEY_ORIGIN);
-    super::admin_test::token_auth(&mut second, &token);
+    super::helpers::token_auth(&mut second, &token);
     let over = reply(&mut second, "push_register", "over", params);
     let error = over["error"].as_object().expect("an error");
     assert_eq!(error["code"], Json::from(CODE_RETRY_AFTER), "{over:?}");
@@ -2689,10 +2689,10 @@ fn test_joined_only_for_admins_and_mods() {
     let mut config = default_config();
     config.allow_insecure_push = true;
     config.push_hosts = PushHosts::Any;
-    config.admin_token = super::admin_test::admin_config().admin_token;
+    config.admin_token = super::helpers::admin_config().admin_token;
     config.push_delay = Duration::from_secs(0);
     let server = new_test_server(config);
-    let mut admin = super::admin_test::admin_on(&server, "http://localhost:5173");
+    let mut admin = super::helpers::admin_on(&server, "http://localhost:5173");
     let mut regular = push_client(&server);
     let mut moderator = push_client(&server);
     grant_role(&server, &moderator.user_id, "mod");
@@ -2746,7 +2746,7 @@ fn test_joined_only_for_admins_and_mods() {
     assert_eq!(admin.user_id, "admin");
     let (mut again, frame) = dial_origin(&server, "http://localhost:5173");
     assert_eq!(server_wake(&frame), plain, "before sign-in");
-    super::admin_test::token_auth(&mut again, super::admin_test::ADMIN_TOKEN);
+    super::helpers::token_auth(&mut again, super::helpers::ADMIN_TOKEN);
     assert_eq!(
         server_wake(&again.read()),
         joined,
@@ -2757,18 +2757,18 @@ fn test_joined_only_for_admins_and_mods() {
     // now gives.
     let regular_id = regular.user_id.clone();
     regular.drain();
-    super::admin_test::private_reply(&mut admin, &format!("/role {regular_id} mod"));
+    super::helpers::private_reply(&mut admin, &format!("/role {regular_id} mod"));
     let you = regular.read();
     assert!(
         notification_params(&you, "user").contains_key("you"),
         "{you:?}"
     );
     assert_eq!(server_wake(&regular.read()), joined, "after the grant");
-    super::admin_test::private_reply(&mut admin, &format!("/role {regular_id} mod"));
+    super::helpers::private_reply(&mut admin, &format!("/role {regular_id} mod"));
     regular.notification("user");
     assert_eq!(server_wake(&regular.read()), plain, "after the revocation");
     // Another role changes no scopes, so no server frame follows.
-    super::admin_test::private_reply(&mut admin, &format!("/role {regular_id} friend"));
+    super::helpers::private_reply(&mut admin, &format!("/role {regular_id} friend"));
     regular.notification("user");
     regular.expect_quiet();
 }

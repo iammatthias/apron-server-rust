@@ -29,7 +29,7 @@ fn account(server: &TestServer) -> (TestClient, String) {
 
 /// Runs a command and returns the text of the one ~private notice before its
 /// empty result.
-fn private_reply(c: &mut TestClient, text: &str) -> String {
+fn only_notice(c: &mut TestClient, text: &str) -> String {
     let id = c.next_id("command");
     let (before, result) = c.request("command", &id, obj! {"body" => obj! {"text" => text}});
     assert!(
@@ -67,7 +67,7 @@ fn invite_device_linked(
     replaces: bool,
     link_server: &str,
 ) -> String {
-    let text = private_reply(c, &format!("/invite-device {name}"));
+    let text = only_notice(c, &format!("/invite-device {name}"));
     let token = text
         .split("```\n")
         .nth(1)
@@ -179,7 +179,7 @@ fn test_invite_device_links_the_public_url() {
 fn test_invite_device_has_no_link_without_a_public_url() {
     let server = passkey_test_server();
     let (mut ada, _) = account(&server);
-    let text = private_reply(&mut ada, "/invite-device phone");
+    let text = only_notice(&mut ada, "/invite-device phone");
     assert!(!text.contains("link.apron.chat"), "notice: {text:?}");
 }
 
@@ -446,14 +446,14 @@ fn test_help_lists_invite_device_for_accounts() {
     ada.drain();
     let listed = "- `/invite-device <name>`: get a token that signs in as you on another device, named <name>; at most 3 names, and a name again replaces its token";
     assert_eq!(
-        private_reply(&mut ada, "/help"),
+        only_notice(&mut ada, "/help"),
         format!(
             "- `/help`: list the commands you can use here\n- `/avatar`: with one image attached: set your avatar\n{listed}\n- `/invite-bot`: get a token that signs in as your bot, named after you; again, it replaces the token and renames the bot\n- `/passkeys [remove <n>]`: list your account's passkeys, or remove one of them"
         ),
         "account's help"
     );
     assert_eq!(
-        private_reply(&mut guest, "/help"),
+        only_notice(&mut guest, "/help"),
         "- `/help`: list the commands you can use here",
         "guest's help"
     );

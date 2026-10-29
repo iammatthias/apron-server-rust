@@ -63,7 +63,7 @@ fn test_write_names_posting_refusals_of_its_row_only() {
         ("room_leave", obj! {"room_id" => "general"}),
     ];
     for (i, (method, params)) in refusals.into_iter().enumerate() {
-        let frame = reply_to(&mut a, method, &format!("w{i}"), params);
+        let frame = reply(&mut a, method, &format!("w{i}"), params);
         assert_eq!(category(&frame).as_deref(), Some("write"), "{method}");
     }
 }
@@ -76,9 +76,9 @@ fn test_me_refusal_names_no_category() {
     });
     let mut a = dial_test_client(&server);
     make_account(&server, &a.user_id);
-    let frame = reply_to(&mut a, "me", "one", obj! {"name" => "One"});
+    let frame = reply(&mut a, "me", "one", obj! {"name" => "One"});
     assert!(frame.contains_key("result"), "{frame:?}");
-    let frame = reply_to(&mut a, "me", "two", obj! {"name" => "Two"});
+    let frame = reply(&mut a, "me", "two", obj! {"name" => "Two"});
     assert_eq!(retry_after_of(&frame).0, "Posting limit reached");
     assert_eq!(category(&frame), None);
 }
@@ -93,10 +93,10 @@ fn test_room_list_limit_names_read() {
     });
     let mut a = dial_test_client(&server);
     for filter in ["joined", "all"] {
-        let frame = reply_to(&mut a, "room_list", filter, obj! {"filter" => filter});
+        let frame = reply(&mut a, "room_list", filter, obj! {"filter" => filter});
         assert!(frame.contains_key("result"), "{filter}: {frame:?}");
     }
-    let frame = reply_to(&mut a, "room_list", "again", obj! {"filter" => "joined"});
+    let frame = reply(&mut a, "room_list", "again", obj! {"filter" => "joined"});
     assert_eq!(retry_after_of(&frame).0, "Room listing limited");
     assert_eq!(category(&frame).as_deref(), Some("read"));
 }
@@ -112,15 +112,15 @@ fn test_upload_limits_name_upload() {
     });
     let mut a = dial_test_client(&server);
     make_account(&server, &a.user_id);
-    let frame = reply_to(&mut a, "message", "one", {
+    let frame = reply(&mut a, "message", "one", {
         let mut params = upload("one");
         params.insert("room_id".into(), "general".into());
         params
     });
     assert!(frame.contains_key("result"), "{frame:?}");
-    let frame = reply_to(&mut a, "command", "avatar", upload("/avatar"));
+    let frame = reply(&mut a, "command", "avatar", upload("/avatar"));
     assert!(frame.contains_key("result"), "{frame:?}");
-    let frame = reply_to(&mut a, "command", "again", upload("/avatar"));
+    let frame = reply(&mut a, "command", "again", upload("/avatar"));
     assert_eq!(retry_after_of(&frame).0, "Daily upload limit reached");
     assert_eq!(category(&frame).as_deref(), Some("upload"));
     save(
@@ -132,9 +132,9 @@ fn test_upload_limits_name_upload() {
     let mut b = dial_test_client(&server);
     let mut params = upload("two");
     params.insert("room_id".into(), "general".into());
-    let frame = reply_to(&mut b, "message", "b1", params.clone());
+    let frame = reply(&mut b, "message", "b1", params.clone());
     assert!(frame.contains_key("result"), "{frame:?}");
-    let frame = reply_to(&mut b, "message", "b2", params);
+    let frame = reply(&mut b, "message", "b2", params);
     assert_eq!(
         retry_after_of(&frame).0,
         "Daily upload limit reached for the server"

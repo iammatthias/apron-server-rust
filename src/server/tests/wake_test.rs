@@ -46,14 +46,14 @@ fn subscribe(c: &mut TestClient, relay: &TestRelay, name: &str) {
 fn passkey_account(server: &TestServer) -> (TestClient, String) {
     let (mut c, _) = dial_origin(server, TEST_PASSKEY_ORIGIN);
     let registered = register_test_passkey(&mut c, &mut new_test_authenticator());
-    c.user_id = super::admin_test::user_id_of(&registered);
+    c.user_id = super::helpers::user_id_of(&registered);
     c.drain();
     (c, registered["token"].as_str().unwrap().to_owned())
 }
 
 fn second_connection(server: &TestServer, user_id: &str, token: &str) -> TestClient {
     let (mut c, _) = dial_origin(server, TEST_PASSKEY_ORIGIN);
-    super::admin_test::token_auth(&mut c, token);
+    super::helpers::token_auth(&mut c, token);
     c.user_id = user_id.to_owned();
     c.drain();
     c
