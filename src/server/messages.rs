@@ -61,7 +61,12 @@ pub const MAX_MENTIONS: usize = 256;
 /// message carries.
 pub const MAX_MESSAGE_EXT_BYTES: usize = 64 << 10;
 pub const MAX_EMOJI_BYTES: usize = 64;
-pub const MAX_DISTINCT_EMOJI: usize = 20;
+/// Most emoji in one user's reaction set (apron-server-cloudflare's
+/// reactionEmojisPerUser).
+pub const MAX_DISTINCT_EMOJI: usize = 8;
+/// Most users with a reaction set on one message (Cloudflare's
+/// reactionUsersPerMessage).
+pub const MAX_REACTING_USERS: usize = 32;
 
 pub fn valid_message_id(id: &str) -> bool {
     let bytes = id.as_bytes();
@@ -200,7 +205,7 @@ fn parse_emojis(params: &Params) -> Result<Vec<String>, RpcError> {
         // A count limit the server sets is denied (§1.1).
         return Err(RpcError::new(
             CODE_DENIED,
-            format!("At most {MAX_DISTINCT_EMOJI} distinct emoji per message"),
+            format!("A reaction set holds at most {MAX_DISTINCT_EMOJI} emoji"),
         ));
     }
     Ok(emojis)
@@ -637,6 +642,24 @@ impl State {
             .get(&user_id)
             .map(|s| s.emojis.clone())
             .unwrap_or_default();
+        // Clients hide a tombstone's reactions, so it takes no new ones.
+        if !emojis.is_empty()
+            && self
+                .snapshot(&message_id)
+                .get("deleted")
+                .is_some_and(Json::is_true)
+        {
+            return Err(RpcError::new(
+                CODE_DENIED,
+                "cannot react to a deleted message",
+            ));
+        }
+        if current.is_empty() && !emojis.is_empty() && m.reactions.len() >= MAX_REACTING_USERS {
+            return Err(RpcError::new(
+                CODE_DENIED,
+                "reaction limit reached for this message",
+            ));
+        }
         if !same_emoji_set(&current, &emojis) {
             self.touch_message(&message_id);
             let from = self.users[&user_id].from();
