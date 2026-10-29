@@ -20,9 +20,11 @@ use super::messages::mentions;
 use super::outbound::{self, public_address};
 use super::protocol::*;
 use super::server::{Client as Connection, Server, State};
+use super::status::retry_after;
 use super::users::UserState;
 use super::webpush::{self, PushKeys, VapidKey};
 use crate::obj;
+use crate::rate::{every, Limiter};
 
 pub const MAX_PUSH_TEXT_RUNES: usize = 1000;
 pub const MAX_PUSHES_PER_USER: usize = 10;
@@ -53,9 +55,98 @@ pub const MAX_PUSH_QUEUED: usize = 1024;
 /// Bounds the pushes delivered to one user in a UTC day, counting only those
 /// the endpoint accepted (2xx).
 pub const MAX_PUSHES_PER_USER_DAY: i64 = 1000;
+/// `push_register` requests one user may make a minute, across their
+/// connections, refused ones included (apron-server-cloudflare's
+/// `registersPerUserMinute`).
+pub const PUSH_REGISTERS_PER_MINUTE: i64 = 10;
 /// How much of a push service's answer is read so that its connection can
 /// be reused.
 pub const MAX_PUSH_RESPONSE_DRAIN: u64 = 64 << 10;
+
+/// The browsers' own push services, which endpoints may name when
+/// `--push.hosts` is not set (apron-server-cloudflare's `PUSH_HOSTS`).
+pub const DEFAULT_PUSH_HOSTS: [&str; 5] = [
+    "fcm.googleapis.com",
+    "*.push.services.mozilla.com",
+    "web.push.apple.com",
+    "*.push.apple.com",
+    "*.notify.windows.com",
+];
+
+/// The push services endpoints may name (`--push.hosts`), for every kind:
+/// a relay's host is allowed only once it is listed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PushHosts {
+    Any,
+    /// Exact host names, and `*.` suffixes, lowercase.
+    Listed(Vec<String>),
+}
+
+impl Default for PushHosts {
+    fn default() -> PushHosts {
+        PushHosts::Listed(DEFAULT_PUSH_HOSTS.iter().map(|h| (*h).to_owned()).collect())
+    }
+}
+
+impl PushHosts {
+    /// Reads `--push.hosts`: host names or `*.` suffixes, or a standalone
+    /// `*`; none gives DEFAULT_PUSH_HOSTS.
+    pub fn parse(entries: &[String]) -> Result<PushHosts, String> {
+        let hosts: Vec<String> = entries
+            .iter()
+            .flat_map(|entry| entry.split(','))
+            .map(|host| host.trim().to_ascii_lowercase())
+            .filter(|host| !host.is_empty())
+            .collect();
+        if hosts.is_empty() {
+            return Ok(PushHosts::default());
+        }
+        if hosts == ["*"] {
+            return Ok(PushHosts::Any);
+        }
+        for host in &hosts {
+            if !valid_host_pattern(host) {
+                return Err(format!(
+                    "invalid --push.hosts {}: list host names, *.host suffixes, or a standalone *",
+                    rust_stdlib::strconv::quote(host)
+                ));
+            }
+        }
+        Ok(PushHosts::Listed(hosts))
+    }
+
+    /// Whether an endpoint's host, lowercase without a trailing dot, is one
+    /// of these.
+    pub fn allows(&self, host: &str) -> bool {
+        match self {
+            PushHosts::Any => true,
+            PushHosts::Listed(hosts) => hosts.iter().any(|entry| match entry.strip_prefix('*') {
+                Some(suffix) => host.ends_with(suffix),
+                None => host == entry,
+            }),
+        }
+    }
+
+    /// Whether an endpoint URL names an allowed host.
+    pub fn allows_url(&self, endpoint: &str) -> bool {
+        url::parse(endpoint).is_ok_and(|u| self.allows(&u.hostname().to_ascii_lowercase()))
+    }
+}
+
+/// `^(\*\.)?label(\.label)+$`, each label letters, digits and inner `-`.
+fn valid_host_pattern(host: &str) -> bool {
+    let name = host.strip_prefix("*.").unwrap_or(host);
+    let labels: Vec<&str> = name.split('.').collect();
+    labels.len() >= 2
+        && labels.iter().all(|label| {
+            !label.is_empty()
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        })
+}
 
 /// A set of wake scopes (§4.9).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -339,6 +430,10 @@ impl State {
             return;
         };
         let (room_id, owner) = (m.room_id.clone(), m.owner.clone());
+        // A guest's messages wake no one, as a guest cannot register either.
+        if !self.users.get(&owner).is_some_and(UserState::persists) {
+            return;
+        }
         let mut reasons: BTreeMap<String, WakeScope> = BTreeMap::new();
         for id in mentions(snapshot.get("body").and_then(Json::as_object)) {
             *reasons.entry(id).or_default() |= WakeScope::MENTIONS;
@@ -437,6 +532,11 @@ impl State {
         let Some(p) = self.pushes.get(key) else {
             return;
         };
+        // --push.hosts as configured now: a registration kept from a wider
+        // list is passed over.
+        if !self.config.push_hosts.allows_url(&p.url) {
+            return;
+        }
         let now = time::now();
         let Some(u) = self.users.get_mut(&p.user_id) else {
             return;
@@ -644,24 +744,29 @@ pub fn normalize_push_url(endpoint: &str) -> Result<String, &'static str> {
 }
 
 /// Normalizes an endpoint (normalize_push_url) and requires https (http too
-/// with allow_insecure) and a host that is not an internal address literal
-/// or localhost. Names that resolve to internal addresses are refused when
-/// dialing.
-pub fn check_push_url(endpoint: &str, allow_insecure: bool) -> Result<String, &'static str> {
+/// with allow_insecure), a host that is not an internal address literal or
+/// localhost, and one `hosts` allows. Names that resolve to internal
+/// addresses are refused when dialing.
+pub fn check_push_url(
+    endpoint: &str,
+    allow_insecure: bool,
+    hosts: &PushHosts,
+) -> Result<String, &'static str> {
     let endpoint = normalize_push_url(endpoint)?;
     let parsed = url::parse(&endpoint).map_err(|_| "url must be an absolute URL")?;
     if parsed.scheme != "https" && !(allow_insecure && parsed.scheme == "http") {
         return Err("url must use https");
     }
-    if allow_insecure {
-        return Ok(endpoint);
-    }
     let host = parsed.hostname();
-    if (host.parse::<Addr>().is_ok() && !public_address(&host))
-        || host == "localhost"
-        || host.ends_with(".localhost")
+    if !allow_insecure
+        && ((host.parse::<Addr>().is_ok() && !public_address(&host))
+            || host == "localhost"
+            || host.ends_with(".localhost"))
     {
         return Err("url must name a public host");
+    }
+    if !hosts.allows(&host) {
+        return Err("push service not allowed here");
     }
     Ok(endpoint)
 }
@@ -1010,12 +1115,18 @@ impl Server {
     /// Registering a url again replaces the caller's registration of it and
     /// renews it; other users' registrations of the same url are their own.
     /// A user holds at most MAX_PUSHES_PER_USER: another replaces the one
-    /// least recently registered.
+    /// least recently registered. Accounts and bots only: a guest's identity
+    /// lasts one connection, so there is no one to wake. At most
+    /// PUSH_REGISTERS_PER_MINUTE a user, counted before the params are
+    /// checked, so refused registrations count too.
     pub(crate) fn register_push(
         self: &Arc<Self>,
         c: &Arc<Connection>,
         req: &Request,
     ) -> Result<(Json, bool), RpcError> {
+        let mut st = self.lock();
+        let user_id = st.push_user(c)?;
+        admit_push_register(st.users.get_mut(&user_id).expect("user exists"))?;
         let kind = parse_string(&req.params, "kind", true)?;
         if kind != "relay" && kind != "webpush" {
             return Err(invalid_params(format!(
@@ -1025,15 +1136,29 @@ impl Server {
         }
         let endpoint = parse_string(&req.params, "url", true)?;
         let mut token = parse_string(&req.params, "token", false)?;
-        let endpoint =
-            check_push_url(&endpoint, self.config.allow_insecure_push).map_err(invalid_params)?;
-        if endpoint.len() > MAX_PUSH_URL_BYTES || token.len() > MAX_PUSH_TOKEN_LEN {
-            return Err(RpcError::new(
-                CODE_TOO_LARGE,
-                format!(
-                    "url is at most {MAX_PUSH_URL_BYTES} bytes and token at most {MAX_PUSH_TOKEN_LEN}"
-                ),
-            ));
+        let too_large = |endpoint: &str| {
+            (endpoint.len() > MAX_PUSH_URL_BYTES || token.len() > MAX_PUSH_TOKEN_LEN).then(|| {
+                RpcError::new(
+                    CODE_TOO_LARGE,
+                    format!(
+                        "url is at most {MAX_PUSH_URL_BYTES} bytes and token at most {MAX_PUSH_TOKEN_LEN}"
+                    ),
+                )
+            })
+        };
+        // Its size first, so a url past it is too_large whatever else is
+        // wrong with it (§1.1), then again as kept.
+        if let Some(err) = too_large(&endpoint) {
+            return Err(err);
+        }
+        let endpoint = check_push_url(
+            &endpoint,
+            self.config.allow_insecure_push,
+            &self.config.push_hosts,
+        )
+        .map_err(invalid_params)?;
+        if let Some(err) = too_large(&endpoint) {
+            return Err(err);
         }
         let push_id = parse_string(&req.params, "push_id", false)?;
         if req.params.contains_key("push_id") && !valid_push_id(&push_id) {
@@ -1060,10 +1185,6 @@ impl Server {
             wake = parse_wake_names(&names);
         }
 
-        let mut st = self.lock();
-        let Some(user_id) = st.client_user(c) else {
-            return Err(RpcError::new(CODE_DENIED, "Not authenticated"));
-        };
         let device = st.clients[&c.id].device;
         let now = time::now();
         st.expire_pushes_locked(&user_id, &now);
@@ -1106,11 +1227,47 @@ impl Server {
             endpoint = normalized;
         }
         let mut st = self.lock();
-        if let Some(user_id) = st.client_user(c) {
-            st.remove_push_locked(&push_key(&user_id, &endpoint));
-        }
+        let user_id = st.push_user(c)?;
+        st.remove_push_locked(&push_key(&user_id, &endpoint));
         Ok((Json::Object(Object::new()), false))
     }
+}
+
+impl State {
+    /// The caller of push_register or push_unregister: an account or a bot.
+    fn push_user(&self, c: &Connection) -> Result<String, RpcError> {
+        let Some(user_id) = self.client_user(c) else {
+            return Err(RpcError::new(CODE_DENIED, "Not authenticated"));
+        };
+        if !self.users[&user_id].persists() {
+            return Err(RpcError::new(
+                CODE_DENIED,
+                "Sign in to receive push notifications",
+            ));
+        }
+        Ok(user_id)
+    }
+}
+
+/// Takes one of the user's PUSH_REGISTERS_PER_MINUTE, or says how long to
+/// wait for the next.
+fn admit_push_register(u: &mut UserState) -> Result<(), RpcError> {
+    let limiter = u.push_registers.get_or_insert_with(|| {
+        Limiter::new(
+            every(Duration::from_nanos(
+                time::MINUTE.as_nanos() / PUSH_REGISTERS_PER_MINUTE,
+            )),
+            PUSH_REGISTERS_PER_MINUTE,
+        )
+    });
+    let now = time::now();
+    let reservation = limiter.reserve_n(&now, 1);
+    let delay = reservation.delay_from(&now);
+    if delay.as_nanos() > 0 {
+        limiter.cancel_at(&reservation, &now);
+        return Err(retry_after("Push registrations limited", delay));
+    }
+    Ok(())
 }
 
 /// Reads a registration's optional keys (§4.9).

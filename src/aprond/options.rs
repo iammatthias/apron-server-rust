@@ -77,6 +77,7 @@ pub struct EmailOptions {
 pub struct PushOptions {
     pub disable: bool,
     pub allow_insecure: bool,
+    pub hosts: Vec<String>,
     pub vapid_private_key: String,
     pub vapid_subject: String,
 }
@@ -250,6 +251,7 @@ pub static GROUPS: &[Group] = &[
         options: &[
             spec!("disable", Bool, push.disable, [], [], "Do not offer push registration"),
             spec!("allow-insecure", Bool, push.allow_insecure, [], [], "Accept http push endpoints and ones on internal addresses, so any client can make the server POST into its network (tests only; refused with --public-url or --tls.domain)"),
+            spec!("hosts", List, push.hosts, [], [], "Push service an endpoint may name, for relay and webpush alike: a host name, a *.host suffix, or a standalone * for any; repeat for more (default: fcm.googleapis.com, *.push.services.mozilla.com, web.push.apple.com, *.push.apple.com and *.notify.windows.com; not in the Go aprond)"),
             spec!("vapid-private-key", Str, push.vapid_private_key, [], [], "Web Push VAPID private key, the P-256 scalar in base64url as web-push tools print it (default: one generated at the first start and kept in the store)"),
             spec!("vapid-subject", Str, push.vapid_subject, [], [], "Contact push services may use, a mailto: or https: URL, sent with Web Push (default: --public-url)"),
         ],

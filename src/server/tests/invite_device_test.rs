@@ -282,13 +282,13 @@ fn push_urls(server: &TestServer, user_id: &str) -> Vec<String> {
     urls
 }
 
-/// Registers https://push.example/<name>, with name as the request id,
+/// Registers https://fcm.googleapis.com/fcm/send/<name>, with name as the request id,
 /// which a user may use once.
 fn register_push(c: &mut TestClient, name: &str) {
     c.result(
         "push_register",
         name,
-        obj! {"kind" => "relay", "url" => format!("https://push.example/{name}")},
+        obj! {"kind" => "relay", "url" => format!("https://fcm.googleapis.com/fcm/send/{name}")},
     );
 }
 
@@ -324,7 +324,10 @@ fn test_invite_device_same_name_revokes_old_token() {
     other.expect_quiet();
     assert_eq!(
         push_urls(&server, &ada_id),
-        ["https://push.example/ada", "https://push.example/tablet"],
+        [
+            "https://fcm.googleapis.com/fcm/send/ada",
+            "https://fcm.googleapis.com/fcm/send/tablet"
+        ],
         "push registrations after a replacement"
     );
     let (_, frame) = device(&server, OTHER_ORIGIN, &old);
@@ -475,7 +478,7 @@ fn test_invite_device_tokens_survive_restart() {
     // token has none.
     server.app.lock().add_push_locked(PushRegistration {
         user_id: ada_id.clone(),
-        url: "https://push.example/untagged".into(),
+        url: "https://fcm.googleapis.com/fcm/send/untagged".into(),
         ..PushRegistration::default()
     });
     drop(ada);
@@ -501,8 +504,8 @@ fn test_invite_device_tokens_survive_restart() {
     assert_eq!(
         push_urls(&server, &ada_id),
         [
-            "https://push.example/tablet",
-            "https://push.example/untagged"
+            "https://fcm.googleapis.com/fcm/send/tablet",
+            "https://fcm.googleapis.com/fcm/send/untagged"
         ],
         "push registrations after a restart and a replacement"
     );

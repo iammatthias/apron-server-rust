@@ -46,6 +46,8 @@ pub struct Settings {
     pub admin_token: Option<[u8; 32]>,
     pub disable_push: bool,
     pub allow_insecure_push: bool,
+    /// `--push.hosts`, an extension Go lacks.
+    pub push_hosts: crate::server::push::PushHosts,
     pub vapid_private_key: String,
     pub vapid_subject: String,
     pub upload_dir: String,
@@ -138,6 +140,7 @@ pub fn server_settings(options: &Options) -> Result<Settings, String> {
         return Err("--push.allow-insecure lets any client make the server POST to http and internal addresses; it is for tests and refused with --public-url or --tls.domain".to_string());
     }
     config.allow_insecure_push = options.push.allow_insecure;
+    config.push_hosts = crate::server::push::PushHosts::parse(&options.push.hosts)?;
     config.vapid_private_key = options.push.vapid_private_key.clone();
     config.vapid_subject = options.push.vapid_subject.clone();
     let subject = &config.vapid_subject;

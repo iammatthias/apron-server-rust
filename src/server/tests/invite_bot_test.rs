@@ -216,7 +216,7 @@ fn test_invite_bot_again_revokes_old_token() {
     first.result(
         "push_register",
         "push",
-        obj! {"kind" => "relay", "url" => "https://relay.example/bot"},
+        obj! {"kind" => "relay", "url" => "https://fcm.googleapis.com/fcm/send/bot"},
     );
     assert_eq!(server.app.lock().pushes.len(), 1, "the bot's registration");
 

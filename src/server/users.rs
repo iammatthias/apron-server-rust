@@ -131,6 +131,7 @@ pub struct UserState {
     /// against MAX_PUSHES_PER_USER_DAY.
     pub push_day: String,
     pub pushes_today: i64,
+    pub push_registers: Option<Limiter>,
 }
 
 impl UserState {
@@ -174,6 +175,7 @@ impl UserState {
             badge_timer: None,
             push_day: String::new(),
             pushes_today: 0,
+            push_registers: None,
         }
     }
 

@@ -147,6 +147,14 @@ Push:
                                      the server POST into its network (tests
                                      only; refused with --public-url or
                                      --tls.domain)
+      --push.hosts=                  Push service an endpoint may name, for
+                                     relay and webpush alike: a host name, a
+                                     *.host suffix, or a standalone * for any;
+                                     repeat for more (default:
+                                     fcm.googleapis.com,
+                                     *.push.services.mozilla.com,
+                                     web.push.apple.com, *.push.apple.com and
+                                     *.notify.windows.com; not in the Go aprond)
       --push.vapid-private-key=      Web Push VAPID private key, the P-256
                                      scalar in base64url as web-push tools
                                      print it (default: one generated at the
@@ -391,6 +399,14 @@ Push:
                                      the server POST into its network (tests
                                      only; refused with --public-url or
                                      --tls.domain)
+      --push.hosts=                  Push service an endpoint may name, for
+                                     relay and webpush alike: a host name, a
+                                     *.host suffix, or a standalone * for any;
+                                     repeat for more (default:
+                                     fcm.googleapis.com,
+                                     *.push.services.mozilla.com,
+                                     web.push.apple.com, *.push.apple.com and
+                                     *.notify.windows.com; not in the Go aprond)
       --push.vapid-private-key=      Web Push VAPID private key, the P-256
                                      scalar in base64url as web-push tools
                                      print it (default: one generated at the
@@ -635,6 +651,14 @@ Push:
                                      the server POST into its network (tests
                                      only; refused with --public-url or
                                      --tls.domain)
+      --push.hosts=                  Push service an endpoint may name, for
+                                     relay and webpush alike: a host name, a
+                                     *.host suffix, or a standalone * for any;
+                                     repeat for more (default:
+                                     fcm.googleapis.com,
+                                     *.push.services.mozilla.com,
+                                     web.push.apple.com, *.push.apple.com and
+                                     *.notify.windows.com; not in the Go aprond)
       --push.vapid-private-key=      Web Push VAPID private key, the P-256
                                      scalar in base64url as web-push tools
                                      print it (default: one generated at the

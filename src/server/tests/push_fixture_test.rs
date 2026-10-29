@@ -181,8 +181,12 @@ fn test_push_fixture_payloads() {
 #[test]
 fn test_push_fixture_registrations() {
     let fixture = fixture();
-    let server = new_test_server(default_config());
+    let mut config = default_config();
+    config.push_hosts = crate::server::push::PushHosts::Any;
+    let server = new_test_server(config);
     let mut c = dial_test_client(&server);
+    make_account(&server, &c.user_id);
+    unlimit_push_registers(&server, &c.user_id);
     for case in cases(&fixture, "registrations") {
         let name = case["name"].as_str().unwrap();
         let mut params = case["params"].as_object().unwrap().clone();
