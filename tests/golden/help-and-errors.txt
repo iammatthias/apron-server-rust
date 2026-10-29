@@ -85,7 +85,17 @@ Uploads:
                                      /home/aprond/Library/Application
                                      Support/aprond/uploads)
       --upload.max-mb=               Maximum size of one upload, in MiB
-                                     (default: 20)
+                                     (default: 5)
+      --upload.max-avatar-kb=        Maximum size of an /avatar image, in KiB
+                                     (not in the Go aprond) (default: 256)
+      --upload.type=                 Type an upload may be, as a MIME type,
+                                     type/* or */*; repeat for more. A PNG,
+                                     JPEG, GIF, WebP, WebM, Ogg or MP4 file is
+                                     typed from its bytes, any other from its
+                                     declared type (not in the Go aprond)
+                                     (default: image/png, image/jpeg,
+                                     image/gif, image/webp, audio/webm,
+                                     audio/ogg, audio/mp4)
       --upload.max-message-mb=       Maximum total size of one message's
                                      uploads, in MiB (default: 20)
       --upload.max-storage-mb=       Total size of hosted uploads, in MiB,
@@ -301,7 +311,17 @@ Uploads:
                                      /home/aprond/Library/Application
                                      Support/aprond/uploads)
       --upload.max-mb=               Maximum size of one upload, in MiB
-                                     (default: 20)
+                                     (default: 5)
+      --upload.max-avatar-kb=        Maximum size of an /avatar image, in KiB
+                                     (not in the Go aprond) (default: 256)
+      --upload.type=                 Type an upload may be, as a MIME type,
+                                     type/* or */*; repeat for more. A PNG,
+                                     JPEG, GIF, WebP, WebM, Ogg or MP4 file is
+                                     typed from its bytes, any other from its
+                                     declared type (not in the Go aprond)
+                                     (default: image/png, image/jpeg,
+                                     image/gif, image/webp, audio/webm,
+                                     audio/ogg, audio/mp4)
       --upload.max-message-mb=       Maximum total size of one message's
                                      uploads, in MiB (default: 20)
       --upload.max-storage-mb=       Total size of hosted uploads, in MiB,
@@ -517,7 +537,17 @@ Uploads:
                                      /home/aprond/Library/Application
                                      Support/aprond/uploads)
       --upload.max-mb=               Maximum size of one upload, in MiB
-                                     (default: 20)
+                                     (default: 5)
+      --upload.max-avatar-kb=        Maximum size of an /avatar image, in KiB
+                                     (not in the Go aprond) (default: 256)
+      --upload.type=                 Type an upload may be, as a MIME type,
+                                     type/* or */*; repeat for more. A PNG,
+                                     JPEG, GIF, WebP, WebM, Ogg or MP4 file is
+                                     typed from its bytes, any other from its
+                                     declared type (not in the Go aprond)
+                                     (default: image/png, image/jpeg,
+                                     image/gif, image/webp, audio/webm,
+                                     audio/ogg, audio/mp4)
       --upload.max-message-mb=       Maximum total size of one message's
                                      uploads, in MiB (default: 20)
       --upload.max-storage-mb=       Total size of hosted uploads, in MiB,

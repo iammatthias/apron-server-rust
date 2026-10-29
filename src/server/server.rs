@@ -18,7 +18,7 @@ use super::commands::{PRIVATE_NOTICE_ID, PRIVATE_NOTICE_NAME};
 use super::devices::DeviceTokens;
 use super::email::{EmailSender, EmailState, ProposalId};
 use super::embeds::EmbedState;
-use super::embeds::AVATAR_TYPES;
+use super::embeds::{AVATAR_TYPES, UPLOAD_TYPES};
 use super::invites::{InviteTokens, JoinInvite};
 use super::messages::MessageState;
 use super::outbound;
@@ -43,8 +43,9 @@ pub const MAX_HISTORY_PAGE_SIZE: usize = 1000;
 pub const DEFAULT_PING_INTERVAL: Duration = Duration::from_secs(30);
 pub const DEFAULT_PING_TIMEOUT: Duration = Duration::from_secs(10);
 pub const DEFAULT_WRITE_TIMEOUT: Duration = Duration::from_secs(10);
-pub const DEFAULT_MAX_UPLOAD_BYTES: i64 = 20 << 20;
-pub const DEFAULT_MAX_AVATAR_BYTES: i64 = 2 << 20;
+/// apron-server-cloudflare's maxFileBytes and maxAvatarBytes.
+pub const DEFAULT_MAX_UPLOAD_BYTES: i64 = 5 << 20;
+pub const DEFAULT_MAX_AVATAR_BYTES: i64 = 256 << 10;
 pub const DEFAULT_MAX_MESSAGE_UPLOADS: i64 = 20 << 20;
 pub const DEFAULT_MAX_UPLOAD_STORAGE: i64 = 1000 << 20;
 /// Bounds the records in one history page; a page always holds at least one
@@ -89,6 +90,9 @@ pub struct Config {
     pub public_url: String,
     pub max_upload_bytes: i64,
     pub max_avatar_bytes: i64,
+    /// The types an attachment may be, as `ext:media` patterns: a MIME
+    /// type, `type/*`, or `*/*`; empty takes UPLOAD_TYPES.
+    pub upload_types: Vec<String>,
     pub max_message_upload_bytes: i64,
     pub max_upload_storage_bytes: i64,
     pub upload_dir: String,
@@ -188,6 +192,7 @@ pub fn default_config() -> Config {
         public_url: String::new(),
         max_upload_bytes: DEFAULT_MAX_UPLOAD_BYTES,
         max_avatar_bytes: DEFAULT_MAX_AVATAR_BYTES,
+        upload_types: Vec::new(),
         max_message_upload_bytes: DEFAULT_MAX_MESSAGE_UPLOADS,
         max_upload_storage_bytes: DEFAULT_MAX_UPLOAD_STORAGE,
         upload_dir: String::new(),
@@ -244,6 +249,9 @@ impl Config {
         }
         if self.max_upload_bytes <= 0 {
             self.max_upload_bytes = defaults.max_upload_bytes;
+        }
+        if self.upload_types.is_empty() {
+            self.upload_types = UPLOAD_TYPES.iter().map(|t| t.to_string()).collect();
         }
         if self.max_avatar_bytes <= 0 {
             self.max_avatar_bytes = defaults.max_avatar_bytes;
@@ -1687,9 +1695,10 @@ impl State {
         if self.config.max_private_rooms > 0 {
             settings.insert("private_rooms".into(), self.config.max_private_rooms.into());
         }
-        // ext:media (EXT.md §6): uploads are served from this server's own
-        // origin, an attachment may be any type, and an avatar one of the
-        // image types /avatar keeps, each up to its configured size.
+        // ext:media (EXTENSIONS.md): uploads are served from this server's
+        // own origin, an attachment may be one of Config.upload_types and
+        // an avatar one of the image types /avatar keeps, each up to its
+        // configured size.
         let sized = |max_bytes: i64| Json::from(obj! {"max_bytes" => max_bytes});
         let avatar: Object = AVATAR_TYPES
             .iter()
@@ -1697,10 +1706,13 @@ impl State {
             .collect();
         let mut media = Object::new();
         if uploads {
-            media.insert(
-                "upload".into(),
-                obj! {"*/*" => sized(self.config.max_upload_bytes)}.into(),
-            );
+            let upload: Object = self
+                .config
+                .upload_types
+                .iter()
+                .map(|t| (t.clone(), sized(self.config.max_upload_bytes)))
+                .collect();
+            media.insert("upload".into(), upload.into());
             media.insert("avatar".into(), avatar.into());
         }
         capabilities.extend([

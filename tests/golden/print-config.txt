@@ -66,7 +66,13 @@ origin = ["http://localhost:5173", "http://localhost:8080"]
 dir = "/home/aprond/Library/Application Support/aprond/uploads"
 
 # Maximum size of one upload, in MiB
-max-mb = 20
+max-mb = 5
+
+# Maximum size of an /avatar image, in KiB (not in the Go aprond)
+max-avatar-kb = 256
+
+# Type an upload may be, as a MIME type, type/* or */*; repeat for more. A PNG, JPEG, GIF, WebP, WebM, Ogg or MP4 file is typed from its bytes, any other from its declared type (not in the Go aprond)
+type = ["image/png", "image/jpeg", "image/gif", "image/webp", "audio/webm", "audio/ogg", "audio/mp4"]
 
 # Maximum total size of one message's uploads, in MiB
 max-message-mb = 20
@@ -244,7 +250,13 @@ origin = ["http://localhost:5173", "http://localhost:8080"]
 dir = "/home/aprond/Library/Application Support/aprond/uploads"
 
 # Maximum size of one upload, in MiB
-max-mb = 20
+max-mb = 5
+
+# Maximum size of an /avatar image, in KiB (not in the Go aprond)
+max-avatar-kb = 256
+
+# Type an upload may be, as a MIME type, type/* or */*; repeat for more. A PNG, JPEG, GIF, WebP, WebM, Ogg or MP4 file is typed from its bytes, any other from its declared type (not in the Go aprond)
+type = ["image/png", "image/jpeg", "image/gif", "image/webp", "audio/webm", "audio/ogg", "audio/mp4"]
 
 # Maximum total size of one message's uploads, in MiB
 max-message-mb = 20
@@ -423,7 +435,13 @@ origin = ["https://only.example"]
 dir = "/home/aprond/Library/Application Support/aprond/uploads"
 
 # Maximum size of one upload, in MiB
-max-mb = 20
+max-mb = 5
+
+# Maximum size of an /avatar image, in KiB (not in the Go aprond)
+max-avatar-kb = 256
+
+# Type an upload may be, as a MIME type, type/* or */*; repeat for more. A PNG, JPEG, GIF, WebP, WebM, Ogg or MP4 file is typed from its bytes, any other from its declared type (not in the Go aprond)
+type = ["image/png", "image/jpeg", "image/gif", "image/webp", "audio/webm", "audio/ogg", "audio/mp4"]
 
 # Maximum total size of one message's uploads, in MiB
 max-message-mb = 20
@@ -602,6 +620,12 @@ dir = "/home/aprond/Library/Application Support/aprond/uploads"
 
 # Maximum size of one upload, in MiB
 max-mb = 9
+
+# Maximum size of an /avatar image, in KiB (not in the Go aprond)
+max-avatar-kb = 256
+
+# Type an upload may be, as a MIME type, type/* or */*; repeat for more. A PNG, JPEG, GIF, WebP, WebM, Ogg or MP4 file is typed from its bytes, any other from its declared type (not in the Go aprond)
+type = ["image/png", "image/jpeg", "image/gif", "image/webp", "audio/webm", "audio/ogg", "audio/mp4"]
 
 # Maximum total size of one message's uploads, in MiB
 max-message-mb = 20

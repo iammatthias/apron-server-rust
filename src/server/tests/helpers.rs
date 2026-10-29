@@ -1060,3 +1060,11 @@ pub fn error_code(frame: &Object) -> Option<i64> {
         _ => None,
     }
 }
+
+/// A body of `size` bytes, at least 16, that starts with a PNG signature,
+/// so uploads that only need some image take it.
+pub fn png_of_size(size: usize) -> Vec<u8> {
+    let mut body = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR".to_vec();
+    body.resize(size.max(body.len()), 0);
+    body
+}

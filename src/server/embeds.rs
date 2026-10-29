@@ -642,6 +642,72 @@ fn active_type(media_type: &str) -> bool {
 /// The image types `/avatar` keeps, which `ext.media.avatar` lists.
 pub const AVATAR_TYPES: [&str; 4] = ["image/png", "image/jpeg", "image/gif", "image/webp"];
 
+/// The types an attachment may be by default, the ones `sniff_upload`
+/// recognizes (apron-server-cloudflare's IMAGE_TYPES and AUDIO_TYPES).
+pub const UPLOAD_TYPES: [&str; 7] = [
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+    "audio/webm",
+    "audio/ogg",
+    "audio/mp4",
+];
+
+/// The image or audio type a file's first bytes show, from its signature,
+/// as apron-server-cloudflare's sniffImage and sniffAudio read it: only the
+/// container is checked, so a WebM or MP4 holding video counts as audio.
+pub fn sniff_upload(head: &[u8]) -> Option<&'static str> {
+    let at = |start: usize, text: &[u8]| head.get(start..start + text.len()) == Some(text);
+    if at(0, b"\x89PNG\r\n\x1a\n") && at(12, b"IHDR") {
+        return Some("image/png");
+    }
+    if at(0, b"GIF87a") || at(0, b"GIF89a") {
+        return Some("image/gif");
+    }
+    if at(0, b"RIFF") && at(8, b"WEBP") {
+        return Some("image/webp");
+    }
+    if at(0, &[0xff, 0xd8, 0xff]) {
+        return Some("image/jpeg");
+    }
+    // EBML whose header names the DocType (element 0x4282, size 4) webm.
+    if at(0, &[0x1a, 0x45, 0xdf, 0xa3]) {
+        let end = head.len().min(64);
+        return (4..end)
+            .any(|i| at(i, &[0x42, 0x82, 0x84]) && at(i + 3, b"webm"))
+            .then_some("audio/webm");
+    }
+    // The first Ogg page starts a stream whose first packet names its codec.
+    if head.len() >= 28 && at(0, b"OggS") {
+        let packet = 27 + usize::from(head[26]);
+        return (at(packet, b"OpusHead") || at(packet, b"\x01vorbis") || at(packet, b"\x7fFLAC"))
+            .then_some("audio/ogg");
+    }
+    if at(4, b"ftyp") {
+        const IMAGE_BRANDS: [&[u8]; 10] = [
+            b"heic", b"heix", b"hevc", b"hevx", b"heim", b"heis", b"mif1", b"msf1", b"avif",
+            b"avis",
+        ];
+        let brand = head.get(8..12)?;
+        return (!IMAGE_BRANDS.contains(&brand)).then_some("audio/mp4");
+    }
+    None
+}
+
+/// Reports whether `media_type` matches one of `patterns`: a MIME type,
+/// `type/*`, or `*/*`, without regard to case (EXTENSIONS.md, `ext:media`).
+pub fn type_matches(patterns: &[String], media_type: &str) -> bool {
+    let media_type = media_type.to_ascii_lowercase();
+    let major = media_type.split('/').next().unwrap_or("");
+    patterns.iter().any(|pattern| {
+        let pattern = pattern.to_ascii_lowercase();
+        pattern == "*/*"
+            || pattern == media_type
+            || pattern.strip_suffix("/*").is_some_and(|p| p == major)
+    })
+}
+
 pub fn avatar_type(content_type: &str) -> bool {
     AVATAR_TYPES.contains(&content_type)
 }
@@ -717,6 +783,8 @@ fn inline_type(content_type: &str) -> bool {
 enum UploadError {
     TooLarge,
     NotAvatar,
+    /// An attachment of a type Config.upload_types leaves out.
+    NotAccepted,
     Other,
 }
 
@@ -841,12 +909,33 @@ impl Server {
         let _ = ResponseController::new(w).set_read_deadline(&time::now().add(UPLOAD_READ_TIMEOUT));
         let (file, size, mut err) = self.receive_upload(w, r, limit);
         let head = file.as_ref().map(head_of).unwrap_or_default();
-        let content_type = upload_content_type(r.header.get("Content-Type").unwrap_or(""), &head);
+        let declared = r.header.get("Content-Type").unwrap_or("").to_owned();
+        // The type comes from the bytes where they show one, so a sender
+        // cannot have the server serve one it does not keep.
+        let content_type = match sniff_upload(&head) {
+            Some(sniffed) => sniffed.to_owned(),
+            // A type the sniffer knows must show in the bytes.
+            None => match upload_content_type(&declared, &head) {
+                known if UPLOAD_TYPES.contains(&known.as_str()) => {
+                    "application/octet-stream".into()
+                }
+                other => other,
+            },
+        };
         if err.is_none()
             && avatar_for.is_some()
             && !valid_avatar_image(&content_type, file.as_ref())
         {
             err = Some(UploadError::NotAvatar);
+        }
+        let (declared_type, _) = mime::parse_media_type(&declared);
+        if err.is_none()
+            && avatar_for.is_none()
+            && (!type_matches(&self.config.upload_types, &content_type)
+                || !(declared_type.is_empty()
+                    || type_matches(&self.config.upload_types, &declared_type)))
+        {
+            err = Some(UploadError::NotAccepted);
         }
         let file_name = file.as_ref().map(|f| f.name().to_owned());
 
@@ -895,6 +984,18 @@ impl Server {
                     w,
                     http::STATUS_UNSUPPORTED_MEDIA_TYPE,
                     "Avatars must be PNG, JPEG, GIF, or WebP images",
+                );
+                return;
+            }
+            Some(UploadError::NotAccepted) => {
+                fail(
+                    &mut st,
+                    w,
+                    http::STATUS_UNSUPPORTED_MEDIA_TYPE,
+                    &format!(
+                        "Uploads here must be {}",
+                        self.config.upload_types.join(", ")
+                    ),
                 );
                 return;
             }

@@ -895,7 +895,7 @@ fn write_url(result: &Object) -> String {
 }
 
 fn put(write_url: &str, size: usize) -> u16 {
-    http_do("PUT", write_url, Some(&vec![b'a'; size]), "text/plain").0
+    http_do("PUT", write_url, Some(&png_of_size(size)), "image/png").0
 }
 
 #[test]

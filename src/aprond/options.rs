@@ -52,6 +52,8 @@ pub struct WebAuthnOptions {
 pub struct UploadOptions {
     pub dir: String,
     pub max_mb: i64,
+    pub max_avatar_kb: i64,
+    pub types: Vec<String>,
     pub max_message_mb: i64,
     pub max_storage_mb: i64,
 }
@@ -210,7 +212,9 @@ pub static GROUPS: &[Group] = &[
         namespace: "upload",
         options: &[
             spec!("dir", Str, upload.dir, [], [], "Directory holding uploaded files; upload files the store does not refer to are removed at start"),
-            spec!("max-mb", Int64, upload.max_mb, ["20"], [], "Maximum size of one upload, in MiB"),
+            spec!("max-mb", Int64, upload.max_mb, ["5"], [], "Maximum size of one upload, in MiB"),
+            spec!("max-avatar-kb", Int64, upload.max_avatar_kb, ["256"], [], "Maximum size of an /avatar image, in KiB (not in the Go aprond)"),
+            spec!("type", List, upload.types, ["image/png", "image/jpeg", "image/gif", "image/webp", "audio/webm", "audio/ogg", "audio/mp4"], [], "Type an upload may be, as a MIME type, type/* or */*; repeat for more. A PNG, JPEG, GIF, WebP, WebM, Ogg or MP4 file is typed from its bytes, any other from its declared type (not in the Go aprond)"),
             spec!("max-message-mb", Int64, upload.max_message_mb, ["20"], [], "Maximum total size of one message's uploads, in MiB"),
             spec!("max-storage-mb", Int64, upload.max_storage_mb, ["1000"], [], "Total size of hosted uploads, in MiB, beyond which the oldest are removed from their messages"),
         ],

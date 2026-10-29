@@ -86,7 +86,7 @@ fn test_retention_expires_old_history() {
         .unwrap()
         .to_owned();
     assert_eq!(
-        http_do("PUT", &write_url, Some(b"hello"), "text/plain").0,
+        http_do("PUT", &write_url, Some(&png_of_size(16)), "image/png").0,
         201
     );
     a.drain();
