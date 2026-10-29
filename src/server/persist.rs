@@ -7,7 +7,8 @@
 //! Entry kinds and IDs:
 //!
 //! ```text
-//! meta     "counters"   log_id, guest, embed, and upload sequences
+//! meta     "counters"   log_id, guest, embed, and upload sequences, and
+//!                       the --role grants given
 //! meta     "vapid"      the webpush VAPID private key (§4.9)
 //! used_id  lowercased user_id ever assigned
 //! record   log_id       a logged record and the rooms whose logs hold it
@@ -45,7 +46,7 @@ use super::push::{parse_wake_names, PushRegistration};
 use super::rooms::{ReadCursor, RoomState};
 use super::server::{LogRecord, RecordKind, Server, State};
 use super::status::*;
-use super::users::UserState;
+use super::users::{valid_role, UserState, MAX_ROLES};
 use super::webauthn::{PasskeyUser, Session};
 use super::webpush::{encode_base64_url, parse_push_keys, VapidKey};
 use crate::store::{Entry, StoreError};
@@ -99,6 +100,9 @@ pub struct StoredMeta {
     /// `State.rooms_removed_at`, absent until retention removes a thread.
     #[json("rooms_removed_at,omitzero")]
     pub rooms_removed_at: i64,
+    /// `State.role_grants`, sorted.
+    #[json("role_grants,omitzero")]
+    pub role_grants: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, MarshalTo, UnmarshalFrom)]
@@ -192,6 +196,10 @@ pub struct StoredUser {
     /// A bot's owner (bots.rs). Go's decoder skips the member.
     #[json("bot,omitzero")]
     pub bot: String,
+    /// The user's roles (§3.3), in the order given. Go's decoder skips the
+    /// member.
+    #[json("roles,omitzero")]
+    pub roles: Vec<String>,
     /// The chosen status (§4.5.1), absent for online.
     #[json("status,omitzero")]
     pub status: Option<String>,
@@ -335,6 +343,7 @@ impl State {
             upload_seq: self.upload_seq,
             history_floor: self.history_floor,
             rooms_removed_at: self.rooms_removed_at,
+            role_grants: self.role_grants.iter().cloned().collect(),
         }
     }
 
@@ -573,6 +582,7 @@ pub fn stored_user_of(u: &UserState) -> StoredUser {
         }),
         email: u.email.clone(),
         bot: u.owner.clone().unwrap_or_default(),
+        roles: u.roles.clone(),
         status: if u.chosen != STATUS_ONLINE {
             Some(u.chosen.clone())
         } else {
@@ -647,6 +657,7 @@ impl Server {
             st.upload_seq = st.stored_meta.upload_seq;
             st.history_floor = st.stored_meta.history_floor;
             st.rooms_removed_at = st.stored_meta.rooms_removed_at;
+            st.role_grants = st.stored_meta.role_grants.iter().cloned().collect();
         }
         Server::restore_vapid_locked(st, of(ENTRY_META).get("vapid"))?;
         for id in of(ENTRY_USED_ID).keys() {
@@ -776,6 +787,11 @@ impl Server {
             }
             if !stored.bot.is_empty() {
                 u.owner = Some(stored.bot.clone());
+            }
+            for role in &stored.roles {
+                if valid_role(role) && !u.has_role(role) && u.roles.len() < MAX_ROLES {
+                    u.roles.push(role.clone());
+                }
             }
             u.left_at = stored.left_at.clone();
             match &stored.status {

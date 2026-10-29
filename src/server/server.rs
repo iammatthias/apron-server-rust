@@ -618,6 +618,9 @@ pub struct State {
     /// The user_ids Config.roles names, lowercased, which are never assigned
     /// to a new identity unless already used.
     pub granted_ids: BTreeSet<String>,
+    /// The Config.roles grants given, as `role=holder` with the holder
+    /// lowercased (`grant_roles_locked`).
+    pub role_grants: BTreeSet<String>,
     pub guest_number: u64,
     /// Numbers the user_<n> of new email accounts.
     pub account_number: u64,
@@ -813,6 +816,7 @@ pub fn open(config: Config) -> Result<Arc<Server>, store::StoreError> {
                 users: BTreeMap::new(),
                 used_ids: BTreeSet::new(),
                 granted_ids,
+                role_grants: BTreeSet::new(),
                 guest_number: 0,
                 account_number: 0,
                 embed_number: 0,

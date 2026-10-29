@@ -43,7 +43,7 @@ client-ip-header = ""
 # Markdown clients show on their sign-in screen (server.welcome), such as how this server's sign-in methods fit together (default: general's description, else a summary of how guests and sign-in work here)
 welcome = ""
 
-# Grant a role to an account as role=user_id or role=email, such as admin=ada; repeat for more. admin and moderator may remove others from rooms
+# Grant a role to an account as role=user_id or role=email, such as admin=ada, once: the account keeps it until an admin takes it away; repeat for more. admin and mod (or moderator) may remove others from rooms
 # role = []
 
 [webauthn]
@@ -215,7 +215,7 @@ client-ip-header = ""
 # Markdown clients show on their sign-in screen (server.welcome), such as how this server's sign-in methods fit together (default: general's description, else a summary of how guests and sign-in work here)
 welcome = ""
 
-# Grant a role to an account as role=user_id or role=email, such as admin=ada; repeat for more. admin and moderator may remove others from rooms
+# Grant a role to an account as role=user_id or role=email, such as admin=ada, once: the account keeps it until an admin takes it away; repeat for more. admin and mod (or moderator) may remove others from rooms
 role = ["admin=ada"]
 
 [webauthn]
@@ -388,7 +388,7 @@ client-ip-header = ""
 # Markdown clients show on their sign-in screen (server.welcome), such as how this server's sign-in methods fit together (default: general's description, else a summary of how guests and sign-in work here)
 welcome = "Line one\nSay \"hi\" \\ tab\there \u0001 del\u007f é"
 
-# Grant a role to an account as role=user_id or role=email, such as admin=ada; repeat for more. admin and moderator may remove others from rooms
+# Grant a role to an account as role=user_id or role=email, such as admin=ada, once: the account keeps it until an admin takes it away; repeat for more. admin and mod (or moderator) may remove others from rooms
 # role = []
 
 [webauthn]
@@ -560,7 +560,7 @@ client-ip-header = ""
 # Markdown clients show on their sign-in screen (server.welcome), such as how this server's sign-in methods fit together (default: general's description, else a summary of how guests and sign-in work here)
 welcome = ""
 
-# Grant a role to an account as role=user_id or role=email, such as admin=ada; repeat for more. admin and moderator may remove others from rooms
+# Grant a role to an account as role=user_id or role=email, such as admin=ada, once: the account keeps it until an admin takes it away; repeat for more. admin and mod (or moderator) may remove others from rooms
 role = ["admin=ada"]
 
 [webauthn]

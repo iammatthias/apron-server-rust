@@ -22,6 +22,25 @@ pub const MAX_DEDUP_ENTRIES: usize = 1024;
 /// Bounds a profile's ext, which is sent to everyone who shares a room with
 /// the user.
 pub const MAX_PROFILE_EXT_BYTES: usize = 16 << 10;
+/// Most roles one user holds (apron-server-cloudflare's MAX_ROLES_PER_USER).
+pub const MAX_ROLES: usize = 8;
+/// The role that lets a user run the admin commands.
+pub const ADMIN_ROLE: &str = "admin";
+/// The role that lets a user remove others from rooms, as `admin` does.
+pub const MOD_ROLE: &str = "mod";
+pub const INVALID_ROLE: &str =
+    "A role is 1 to 24 lowercase letters, digits, _ or -, starting with a letter";
+
+/// Reports whether `role` is a role name: 1 to 24 lowercase letters,
+/// digits, `_` or `-`, starting with a letter.
+pub fn valid_role(role: &str) -> bool {
+    let bytes = role.as_bytes();
+    (1..=24).contains(&bytes.len())
+        && bytes[0].is_ascii_lowercase()
+        && bytes
+            .iter()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'_' | b'-'))
+}
 
 /// Everything the server keeps for one user_id across its connections: the
 /// profile (§3.3), joined rooms (§4.2.2), request deduplication (§1.2), and
@@ -35,8 +54,8 @@ pub struct UserState {
     /// The account's sign-in address (§4.11), lowercased; empty for guests
     /// and passkey users without one.
     pub email: String,
-    /// The server roles (§3.3) Config.roles grants the account, sorted;
-    /// guests have none. Derived from the configuration, not stored.
+    /// The server roles (§3.3), in the order given, at most MAX_ROLES;
+    /// guests have none. Stored with the user.
     pub roles: Vec<String>,
     /// The hosted /avatar upload behind avatar, if any (an embed_id).
     pub avatar_embed: Option<String>,
@@ -176,7 +195,7 @@ impl UserState {
         // An account's roles are always sent, [] when it has none, so a
         // role taken away clears the one a client kept (§3.3); guests hold
         // none.
-        if !self.roles.is_empty() || self.account() {
+        if self.persists() {
             value.insert("roles".into(), self.roles.clone().into());
         }
         if !self.ext.is_empty() {
@@ -821,32 +840,42 @@ impl State {
         Ok((result.into(), true))
     }
 
-    /// Sets the roles Config.roles grants an account, by its user_id or
-    /// email address, and reports whether they changed. Guests hold no
-    /// roles, and a bot only `bot`.
+    /// Gives an account the roles Config.roles grants it, by its user_id or
+    /// email address, and a bot `bot`, and reports whether its roles
+    /// changed. Each grant is given once and remembered in
+    /// `State.role_grants`, so a role an admin took away stays away across
+    /// restarts while the grant stays configured.
     pub fn grant_roles_locked(&mut self, user_id: &str) -> bool {
         let Some(u) = self.users.get_mut(user_id) else {
             return false;
         };
-        let mut roles = Vec::new();
-        if u.bot() {
-            roles.push(super::bots::BOT_ROLE.to_owned());
+        let mut changed = false;
+        if u.owner.is_some() {
+            if !u.has_role(super::bots::BOT_ROLE) {
+                u.roles = vec![super::bots::BOT_ROLE.to_owned()];
+                changed = true;
+            }
         } else if u.account() {
             for (role, holders) in &self.config.roles {
-                if holders.iter().any(|h| {
-                    h.eq_ignore_ascii_case(&u.id)
-                        || (!u.email.is_empty() && h.eq_ignore_ascii_case(&u.email))
-                }) {
-                    roles.push(role.to_lowercase());
+                for holder in holders {
+                    let held = holder.eq_ignore_ascii_case(&u.id)
+                        || (!u.email.is_empty() && holder.eq_ignore_ascii_case(&u.email));
+                    let grant = format!("{role}={}", holder.to_lowercase());
+                    if !held || self.role_grants.contains(&grant) {
+                        continue;
+                    }
+                    self.role_grants.insert(grant);
+                    if !u.has_role(role) && u.roles.len() < MAX_ROLES {
+                        u.roles.push(role.clone());
+                        changed = true;
+                    }
                 }
             }
-            roles.sort();
         }
-        if roles == u.roles {
-            return false;
+        if changed {
+            self.dirty.users.insert(user_id.to_owned());
         }
-        u.roles = roles;
-        true
+        changed
     }
 }
 

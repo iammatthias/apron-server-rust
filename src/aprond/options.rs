@@ -190,7 +190,7 @@ pub static GROUPS: &[Group] = &[
             spec!("store", Str, store, [], [], "Where state is kept: sqlite:<path> for a SQLite database, or memory to keep nothing across restarts"),
             spec!("client-ip-header", Str, client_ip_header, [], [], "Request header a reverse proxy puts the client's address in, such as X-Forwarded-For (its last entry) or X-Real-IP, for per-client limits; set only behind a proxy that sets it"),
             spec!("welcome", Str, welcome, [], [], "Markdown clients show on their sign-in screen (server.welcome), such as how this server's sign-in methods fit together (default: general's description, else a summary of how guests and sign-in work here)"),
-            spec!("role", List, roles, [], [], "Grant a role to an account as role=user_id or role=email, such as admin=ada; repeat for more. admin and moderator may remove others from rooms"),
+            spec!("role", List, roles, [], [], "Grant a role to an account as role=user_id or role=email, such as admin=ada, once: the account keeps it until an admin takes it away; repeat for more. admin and mod (or moderator) may remove others from rooms"),
         ],
     },
     Group {

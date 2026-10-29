@@ -56,9 +56,10 @@ Application Options:
                                      summary of how guests and sign-in work
                                      here)
       --role=                        Grant a role to an account as role=user_id
-                                     or role=email, such as admin=ada; repeat
-                                     for more. admin and moderator may remove
-                                     others from rooms
+                                     or role=email, such as admin=ada, once:
+                                     the account keeps it until an admin takes
+                                     it away; repeat for more. admin and mod
+                                     (or moderator) may remove others from rooms
 
 Passkeys:
       --webauthn.rp-id=              Passkey relying party domain; empty
@@ -260,9 +261,10 @@ Application Options:
                                      summary of how guests and sign-in work
                                      here)
       --role=                        Grant a role to an account as role=user_id
-                                     or role=email, such as admin=ada; repeat
-                                     for more. admin and moderator may remove
-                                     others from rooms
+                                     or role=email, such as admin=ada, once:
+                                     the account keeps it until an admin takes
+                                     it away; repeat for more. admin and mod
+                                     (or moderator) may remove others from rooms
 
 Passkeys:
       --webauthn.rp-id=              Passkey relying party domain; empty
@@ -464,9 +466,10 @@ Application Options:
                                      summary of how guests and sign-in work
                                      here)
       --role=                        Grant a role to an account as role=user_id
-                                     or role=email, such as admin=ada; repeat
-                                     for more. admin and moderator may remove
-                                     others from rooms
+                                     or role=email, such as admin=ada, once:
+                                     the account keeps it until an admin takes
+                                     it away; repeat for more. admin and mod
+                                     (or moderator) may remove others from rooms
 
 Passkeys:
       --webauthn.rp-id=              Passkey relying party domain; empty
