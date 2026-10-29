@@ -76,6 +76,18 @@ pub struct Settings {
     pub retention: Option<Duration>,
     /// The `--frame.*` bounds, an extension Go lacks.
     pub frame: FrameLimits,
+    /// The `--limit.*` limits, apron-server-cloudflare's.
+    pub limits: crate::server::limits::Limits,
+}
+
+fn nonnegative(flag: &str, value: i64) -> Result<usize, String> {
+    usize::try_from(value)
+        .map_err(|_| format!("invalid --{flag} {value}: use a number, or 0 for no limit"))
+}
+
+fn rate(flag: &str, value: i64) -> Result<u32, String> {
+    u32::try_from(nonnegative(flag, value)?)
+        .map_err(|_| format!("invalid --{flag} {value}: use a smaller number"))
 }
 
 fn positive(flag: &str, value: i64) -> Result<usize, String> {
@@ -229,6 +241,19 @@ pub fn server_settings(options: &Options) -> Result<Settings, String> {
         max_depth: positive("frame.max-depth", f.max_depth)?,
         max_nodes: positive("frame.max-nodes", f.max_nodes)?,
         max_id_bytes: positive("frame.max-id-bytes", f.max_id_bytes)?,
+    };
+    let l = &options.limit;
+    config.limits = crate::server::limits::Limits {
+        connections_per_ip: nonnegative("limit.connections-per-ip", l.connections_per_ip)?,
+        guest_connections_per_ip: nonnegative(
+            "limit.guest-connections-per-ip",
+            l.guest_connections_per_ip,
+        )?,
+        connections_per_user: nonnegative("limit.connections-per-user", l.connections_per_user)?,
+        admissions_per_ip_minute: rate(
+            "limit.admissions-per-ip-minute",
+            l.admissions_per_ip_minute,
+        )?,
     };
     Ok(config)
 }

@@ -21,7 +21,7 @@ use super::email::{EmailSender, EmailState, ProposalId};
 use super::embeds::EmbedState;
 use super::embeds::{AVATAR_TYPES, UPLOAD_TYPES};
 use super::invites::{InviteTokens, JoinInvite};
-use super::limits::IpKey;
+use super::limits::{Allowance, Charge, IpKey, LimitTable, Limits, Principal, Scope};
 use super::messages::MessageState;
 use super::metadata::{ServerMetadata, StoredServer};
 use super::outbound;
@@ -61,7 +61,9 @@ pub const DEFAULT_STREAM_MAX_DURATION: Duration = Duration::from_hours(1);
 pub const DEFAULT_MAX_LISTED_MEMBERS: usize = 1000;
 /// The delay suggested by connection-level retry_after errors (capacity and
 /// shutdown).
-pub const RETRY_AFTER_SECONDS: i64 = 30;
+pub const RETRY_AFTER_SECONDS: i64 = 60;
+/// apron-server-cloudflare's open_connections.
+pub const DEFAULT_MAX_CONNECTIONS: usize = 100;
 /// Refuses a connection whose client address the proxy did not give.
 pub const UNTRUSTED_ADDRESS: &str = "Trusted client address unavailable";
 
@@ -126,6 +128,9 @@ pub struct Config {
     pub vapid_subject: String,
     /// Bounds concurrent WebSockets; 0 is unlimited.
     pub max_connections: usize,
+    /// The per-client limits (limits.rs), apron-server-cloudflare's by
+    /// default.
+    pub limits: Limits,
     /// Bounds each user's new messages; 0 is unlimited.
     pub messages_per_minute: i64,
     /// Bounds a room's members in room_list and room_update joined; a larger
@@ -225,7 +230,8 @@ pub fn default_config() -> Config {
         push_delay: super::wake::PUSH_DELAY,
         vapid_private_key: String::new(),
         vapid_subject: String::new(),
-        max_connections: 0,
+        max_connections: DEFAULT_MAX_CONNECTIONS,
+        limits: Limits::default(),
         messages_per_minute: 0,
         max_listed_members: DEFAULT_MAX_LISTED_MEMBERS,
         max_private_rooms: 20,
@@ -693,6 +699,8 @@ pub struct State {
     pub stored_meta: StoredMeta,
     pub pushes: BTreeMap<String, PushRegistration>,
     pub closed: bool,
+    /// Counts each principal's use of the limits (Config.limits).
+    pub limits: LimitTable,
     /// Sign-in addresses to their accounts (§4.11).
     pub emails: BTreeMap<String, String>,
     /// Each registered passkey's credential ID to its account's user_id.
@@ -900,6 +908,7 @@ pub fn open(config: Config) -> Result<Arc<Server>, store::StoreError> {
                 stored_meta: StoredMeta::default(),
                 pushes: BTreeMap::new(),
                 closed: false,
+                limits: LimitTable::default(),
                 emails: BTreeMap::new(),
                 credentials: BTreeMap::new(),
                 sessions: Sessions::default(),
@@ -1095,16 +1104,11 @@ impl Server {
                     "Server is shutting down",
                     None,
                 ))
-            } else if self.config.max_connections > 0
-                && st.clients.len() >= self.config.max_connections
-            {
-                Some((
-                    http::STATUS_TOO_MANY_REQUESTS,
-                    "Server at capacity; try again shortly",
-                    Some(RETRY_AFTER_SECONDS),
-                ))
             } else {
-                None
+                let ip = self.client_ip(r).expect("checked above");
+                st.capacity_locked(&ip).map(|(message, retry_after)| {
+                    (http::STATUS_TOO_MANY_REQUESTS, message, Some(retry_after))
+                })
             }
         };
         let header = w.header();
@@ -1258,14 +1262,10 @@ impl Server {
             if st.closed {
                 return;
             }
-            if self.config.max_connections > 0 && st.clients.len() >= self.config.max_connections {
+            if let Err(refusal) = st.admit_locked(&client.ip_key) {
                 // An error about the connection as a whole omits id (§1.1).
                 client.enqueue(&obj! {"method" => "server", "params" => st.server_params(&client)});
-                client.close_with_error(RpcError::with_data(
-                    CODE_RETRY_AFTER,
-                    "Server at capacity; try again shortly",
-                    obj! {"retry_after" => RETRY_AFTER_SECONDS},
-                ));
+                client.close_with_error(refusal);
                 drop(st);
                 client.done.wait();
                 return;
@@ -1663,6 +1663,66 @@ impl Drop for ConnectionDone<'_> {
 impl State {
     pub fn client_user(&self, c: &Client) -> Option<String> {
         self.clients.get(&c.id).and_then(|conn| conn.user.clone())
+    }
+
+    /// Why a new connection from `ip` would be refused now, with the
+    /// seconds to wait: the server's connection cap, then the IP's caps.
+    /// A connection not signed in to an account counts as a guest's.
+    pub fn capacity_locked(&self, ip: &IpKey) -> Option<(&'static str, i64)> {
+        let limits = &self.config.limits;
+        let full = |max: usize, n: usize| max > 0 && n >= max;
+        if full(self.config.max_connections, self.clients.len()) {
+            return Some(("Server at capacity", RETRY_AFTER_SECONDS));
+        }
+        let from_ip: Vec<&Conn> = self
+            .clients
+            .values()
+            .filter(|conn| conn.client.ip_key == *ip)
+            .collect();
+        let guests = from_ip
+            .iter()
+            .filter(|conn| {
+                conn.user
+                    .as_ref()
+                    .and_then(|id| self.users.get(id))
+                    .is_none_or(|u| !u.persists())
+            })
+            .count();
+        if full(limits.connections_per_ip, from_ip.len())
+            || full(limits.guest_connections_per_ip, guests)
+        {
+            return Some((
+                "Connection limit reached for this network",
+                RETRY_AFTER_SECONDS,
+            ));
+        }
+        None
+    }
+
+    /// Admits a new connection from `ip`, or the retry_after error that
+    /// refuses it: the caps of `capacity_locked`, then the IP's admissions
+    /// a minute.
+    pub fn admit_locked(&mut self, ip: &IpKey) -> Result<(), RpcError> {
+        if let Some((message, retry_after)) = self.capacity_locked(ip) {
+            return Err(RpcError::with_data(
+                CODE_RETRY_AFTER,
+                message,
+                obj! {"retry_after" => retry_after},
+            ));
+        }
+        let principal = Principal::Ip(ip.clone());
+        let charge = Charge {
+            scope: Scope::Admission,
+            principal: &principal,
+            allowance: Allowance::minute(self.config.limits.admissions_per_ip_minute),
+        };
+        self.limits.charge(&[charge], 1).map_err(|refusal| {
+            RpcError::with_data(
+                CODE_RETRY_AFTER,
+                "Connection admission limit reached",
+                obj! {"retry_after" => refusal.retry_after()},
+            )
+        })
     }
 
     /// Queues a frame to every connection of the user.

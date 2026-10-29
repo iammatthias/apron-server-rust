@@ -64,10 +64,7 @@ fn test_probe_reports_capacity_and_shutdown() {
     let held = dial_test_client(&server);
     let (status, header, body) = probe(&server, PROBE, &[]);
     assert_eq!(status, 429);
-    assert_eq!(
-        body,
-        Json::from(obj! {"error" => "Server at capacity; try again shortly"})
-    );
+    assert_eq!(body, Json::from(obj! {"error" => "Server at capacity"}));
     assert_eq!(
         header.get("Retry-After"),
         Some(RETRY_AFTER_SECONDS.to_string().as_str())

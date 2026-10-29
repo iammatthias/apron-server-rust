@@ -108,6 +108,7 @@ fn server_config(settings: Settings) -> Result<server::Config, String> {
     config.server = settings.server.clone();
     config.retention = settings.retention;
     config.frame = settings.frame;
+    config.limits = settings.limits;
     if let Some(rp) = settings.webauthn {
         let web_authn = WebAuthn::new(webauthn::Config {
             rpid: rp.rp_id,

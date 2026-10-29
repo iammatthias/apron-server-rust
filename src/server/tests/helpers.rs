@@ -80,12 +80,15 @@ impl Drop for TempDir {
     }
 }
 
-/// The server's defaults with guest posting on: the tests ported from Go sign
-/// in as guests to post, and `guest_posting_test` covers the read-only
-/// default.
+/// The server's defaults with guest posting on and no per-client limits:
+/// the tests ported from Go sign in as guests to post, all from one
+/// address. `guest_posting_test` covers the read-only default, and the
+/// limit tests set the limits they test.
 pub fn default_config() -> Config {
     Config {
         guest_posting: true,
+        max_connections: 0,
+        limits: crate::server::limits::Limits::unlimited(),
         ..crate::server::default_config()
     }
 }
@@ -1102,4 +1105,14 @@ pub fn png_of_size(size: usize) -> Vec<u8> {
     let mut body = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR".to_vec();
     body.resize(size.max(body.len()), 0);
     body
+}
+
+/// Waits up to five seconds for `done`, as a closed connection's handler
+/// detaches it after the test drops its end.
+pub fn wait_for(mut done: impl FnMut() -> bool) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !done() {
+        assert!(std::time::Instant::now() < deadline, "timed out waiting");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
 }

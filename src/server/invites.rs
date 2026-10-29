@@ -311,7 +311,7 @@ impl State {
         let user_id = candidate_user_id(&name, |id| self.user_id_taken_locked(id));
         let own = self.create_invited_locked(&user_id, &name);
         Ok(self
-            .switch_user_locked(c, req, &user_id, obj! {"token" => own}, true, true)
+            .switch_user_locked(c, req, &user_id, obj! {"token" => own}, true, true)?
             .into())
     }
 
@@ -339,7 +339,7 @@ impl State {
     ) -> Result<Json, RpcError> {
         let sign_in = self.client_user(c).as_deref() != Some(user_id);
         Ok(self
-            .switch_user_locked(c, req, user_id, Object::new(), sign_in, created)
+            .switch_user_locked(c, req, user_id, Object::new(), sign_in, created)?
             .into())
     }
 }

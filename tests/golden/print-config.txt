@@ -17,7 +17,7 @@ allow-any-origin = false
 public-url = ""
 
 # Maximum concurrent WebSockets; 0 is unlimited
-max-connections = 0
+max-connections = 100
 
 # Maximum concurrent TCP connections on the listener, HTTP included; 0 is unlimited
 max-listener-connections = 0
@@ -186,6 +186,20 @@ max-nodes = 2048
 # Longest request id, in bytes (not in the Go aprond)
 max-id-bytes = 128
 
+[limit]
+
+# Open WebSockets from one client address (an IPv4 address or an IPv6 /56); 0 is unlimited (not in the Go aprond)
+connections-per-ip = 10
+
+# Open WebSockets from one client address that are not signed in to an account, guests included; 0 is unlimited (not in the Go aprond)
+guest-connections-per-ip = 6
+
+# Open WebSockets of one account; 0 is unlimited (not in the Go aprond)
+connections-per-user = 3
+
+# New WebSockets one client address may open a minute; 0 is unlimited (not in the Go aprond)
+admissions-per-ip-minute = 12
+
 [server]
 
 # Plain name clients show for this server, as server.title, unless an admin's /server title sets one (default: none, so clients show the server's address; not in the Go aprond)
@@ -218,7 +232,7 @@ allow-any-origin = false
 public-url = ""
 
 # Maximum concurrent WebSockets; 0 is unlimited
-max-connections = 0
+max-connections = 100
 
 # Maximum concurrent TCP connections on the listener, HTTP included; 0 is unlimited
 max-listener-connections = 0
@@ -386,6 +400,20 @@ max-nodes = 2048
 
 # Longest request id, in bytes (not in the Go aprond)
 max-id-bytes = 128
+
+[limit]
+
+# Open WebSockets from one client address (an IPv4 address or an IPv6 /56); 0 is unlimited (not in the Go aprond)
+connections-per-ip = 10
+
+# Open WebSockets from one client address that are not signed in to an account, guests included; 0 is unlimited (not in the Go aprond)
+guest-connections-per-ip = 6
+
+# Open WebSockets of one account; 0 is unlimited (not in the Go aprond)
+connections-per-user = 3
+
+# New WebSockets one client address may open a minute; 0 is unlimited (not in the Go aprond)
+admissions-per-ip-minute = 12
 
 [server]
 
@@ -589,6 +617,20 @@ max-nodes = 2048
 # Longest request id, in bytes (not in the Go aprond)
 max-id-bytes = 128
 
+[limit]
+
+# Open WebSockets from one client address (an IPv4 address or an IPv6 /56); 0 is unlimited (not in the Go aprond)
+connections-per-ip = 10
+
+# Open WebSockets from one client address that are not signed in to an account, guests included; 0 is unlimited (not in the Go aprond)
+guest-connections-per-ip = 6
+
+# Open WebSockets of one account; 0 is unlimited (not in the Go aprond)
+connections-per-user = 3
+
+# New WebSockets one client address may open a minute; 0 is unlimited (not in the Go aprond)
+admissions-per-ip-minute = 12
+
 [server]
 
 # Plain name clients show for this server, as server.title, unless an admin's /server title sets one (default: none, so clients show the server's address; not in the Go aprond)
@@ -621,7 +663,7 @@ allow-any-origin = false
 public-url = "https://chat.example"
 
 # Maximum concurrent WebSockets; 0 is unlimited
-max-connections = 0
+max-connections = 100
 
 # Maximum concurrent TCP connections on the listener, HTTP included; 0 is unlimited
 max-listener-connections = 0
@@ -789,6 +831,20 @@ max-nodes = 2048
 
 # Longest request id, in bytes (not in the Go aprond)
 max-id-bytes = 128
+
+[limit]
+
+# Open WebSockets from one client address (an IPv4 address or an IPv6 /56); 0 is unlimited (not in the Go aprond)
+connections-per-ip = 10
+
+# Open WebSockets from one client address that are not signed in to an account, guests included; 0 is unlimited (not in the Go aprond)
+guest-connections-per-ip = 6
+
+# Open WebSockets of one account; 0 is unlimited (not in the Go aprond)
+connections-per-user = 3
+
+# New WebSockets one client address may open a minute; 0 is unlimited (not in the Go aprond)
+admissions-per-ip-minute = 12
 
 [server]
 
