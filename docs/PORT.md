@@ -88,7 +88,9 @@ Phases 2a, 2b, and 2c run in parallel once phase 1 lands.
 Accounts registered before 2026-10-28, such as the live `guest_1` with its
 bot `bot_guest_1`, keep their user_ids until an admin moves them with
 `/rename <old_user_id> <new_user_id>` (`src/server/rename.rs`,
-docs/DEVIATIONS.md). For the account itself:
+docs/DEVIATIONS.md). The live `guest_1` became `matthias` on 2026-10-29,
+after a copy of the `apron_data` volume was kept on the host in
+`~/apron-backups/pre-rename-202610291340`. For the account itself:
 
 - Its passkeys, device tokens, invite token, roles, memberships, read
   cursors, rooms it created, messages, reactions, avatar, push

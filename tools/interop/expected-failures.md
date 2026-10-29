@@ -7,7 +7,7 @@ instead (docs/DEVIATIONS.md), those tests fail by design. The shim
 coalescing and read-only guests. The tests below still fail, and they are the
 expected result.
 
-Last full run: 2026-10-29, at 47b0d73 (a retired guest's thread stays): 32
+Last full run: 2026-10-29, at 09a99cd (a retired guest's thread stays): 32
 passed, 12 failed, all of them listed here. The run before, 2026-10-28
 after Track E (E1 to E9), was 30 passed and 14 failed.
 
