@@ -2,7 +2,7 @@
 //! and conversions, in Go's order and with Go's messages. The core maps
 //! [`Settings`] onto `server::Config`.
 
-use super::email::SmtpSender;
+use super::email::{HttpSender, SmtpSender};
 use super::options::Options;
 use rust_stdlib::time::Duration;
 use std::collections::BTreeMap;
@@ -13,6 +13,8 @@ pub enum EmailSender {
     /// `server.LogEmailSender`: codes go to the server log.
     Log,
     Smtp(SmtpSender),
+    /// An extension Go lacks: a JSON POST to a mail API.
+    Http(HttpSender),
 }
 
 /// The passkey relying party, for `webauthn.New`.
@@ -157,6 +159,10 @@ pub fn server_settings(options: &Options) -> Result<Settings, String> {
             email.smtp_insecure,
         )?;
         config.email_sender = Some(EmailSender::Smtp(sender));
+    } else if options.email.sender == "http" {
+        let email = &options.email;
+        let sender = HttpSender::new(&email.http_url, &email.from, &email.http_headers)?;
+        config.email_sender = Some(EmailSender::Http(sender));
     }
     config.email_link_url = options.email.link_url.clone();
     if config.email_link_url.is_empty() {

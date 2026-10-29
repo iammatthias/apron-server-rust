@@ -108,7 +108,7 @@ fn test_config_file_errors_are_gos() {
         ),
         (
             "[email]\nsender = \"mail\"",
-            "setting \"email.sender\": Invalid value `mail' for option `--email.sender'. Allowed values are: smtp or log",
+            "setting \"email.sender\": Invalid value `mail' for option `--email.sender'. Allowed values are: smtp, http or log",
         ),
     ] {
         let mut parser = parse(&[]);
@@ -324,6 +324,27 @@ fn test_email_senders() {
             "accepted {args:?}"
         );
     }
+    // http POSTs to a mail API with the given headers.
+    let parser = parse(&[
+        "--email.enable",
+        "--email.sender",
+        "http",
+        "--email.http-url",
+        "https://api.example/send",
+        "--email.from",
+        "chat@example.com",
+        "--email.http-header",
+        "Authorization: Bearer secret",
+    ]);
+    let config = server_settings(&parser.options).unwrap();
+    match &config.email_sender {
+        Some(EmailSender::Http(sender))
+            if sender.url == "https://api.example/send"
+                && sender.from == "<chat@example.com>"
+                && sender.headers
+                    == [("Authorization".to_string(), "Bearer secret".to_string())] => {}
+        other => panic!("http sender {other:?}"),
+    }
 }
 
 #[test]
@@ -360,7 +381,7 @@ fn test_flag_errors_are_go_flags() {
         (
             &["--email.sender", "mail"][..],
             ErrorKind::InvalidChoice,
-            "Invalid value `mail' for option `--email.sender'. Allowed values are: smtp or log",
+            "Invalid value `mail' for option `--email.sender'. Allowed values are: smtp, http or log",
         ),
         (
             &["--help=1"][..],

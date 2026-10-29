@@ -1,7 +1,8 @@
-//! cmd/aprond/email.go: email sign-in codes through an SMTP relay.
+//! cmd/aprond/email.go: email sign-in codes through an SMTP relay, and,
+//! an extension Go lacks, through an HTTP mail API.
 
 use rust_stdlib::context::Context;
-use rust_stdlib::net::{self, mail, smtp, AddrRef, Conn, NetError};
+use rust_stdlib::net::{self, http, mail, smtp, AddrRef, Conn, NetError};
 use rust_stdlib::time::{self, Time};
 use rust_stdlib_tls::tls;
 use std::any::Any;
@@ -9,6 +10,108 @@ use std::io::Write;
 use std::sync::Arc;
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
+
+fn subject(code: &str, add: bool) -> String {
+    if add {
+        format!("Your code to add this address is {code}")
+    } else {
+        format!("Your sign-in code is {code}")
+    }
+}
+
+/// Parses `--email.from`, which must be an email address.
+fn sender_address(from: &str) -> Result<mail::Address, String> {
+    match mail::parse_address(from) {
+        Ok(parsed) if !from.is_empty() => Ok(parsed),
+        _ => Err(format!(
+            "invalid --email.from {}: an email address is required",
+            rust_stdlib::strconv::quote(from)
+        )),
+    }
+}
+
+/// Sends email sign-in codes as a JSON POST to a mail API, such as
+/// Cloudflare Email Service's REST API or Resend: `{"from", "to",
+/// "subject", "text"}`, with the configured headers, such as an
+/// `Authorization` bearer token. Any 2xx status is a delivery.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HttpSender {
+    pub url: String,
+    pub from: String,
+    pub headers: Vec<(String, String)>,
+}
+
+impl HttpSender {
+    /// Checks `--email.http-url`, `--email.from` and each
+    /// `--email.http-header`, given as `Name: value`.
+    pub fn new(url: &str, from: &str, headers: &[String]) -> Result<HttpSender, String> {
+        let valid_url = rust_stdlib::net::url::parse(url)
+            .is_ok_and(|u| (u.scheme == "https" || u.scheme == "http") && !u.host.is_empty());
+        if !valid_url {
+            return Err(format!(
+                "invalid --email.http-url {}: use the mail API's http(s) URL",
+                rust_stdlib::strconv::quote(url)
+            ));
+        }
+        let from = sender_address(from)?.to_string();
+        let headers = headers
+            .iter()
+            .map(|header| match header.split_once(':') {
+                Some((name, value)) if !name.trim().is_empty() && !name.contains(' ') => {
+                    Ok((name.trim().to_string(), value.trim().to_string()))
+                }
+                _ => Err(format!(
+                    "invalid --email.http-header {}: use Name: value, such as \"Authorization: Bearer <token>\"",
+                    rust_stdlib::strconv::quote(header)
+                )),
+            })
+            .collect::<Result<_, _>>()?;
+        Ok(HttpSender {
+            url: url.to_string(),
+            from,
+            headers,
+        })
+    }
+
+    /// The JSON body of a sign-in email. `text` is
+    /// `server.SignInEmail.Text()`.
+    pub fn body(&self, to: &str, code: &str, add: bool, text: &str) -> Vec<u8> {
+        let fields: std::collections::BTreeMap<String, String> = [
+            ("from", self.from.clone()),
+            ("to", to.to_string()),
+            ("subject", subject(code, add)),
+            ("text", text.to_string()),
+        ]
+        .map(|(k, v)| (k.to_string(), v))
+        .into();
+        rust_stdlib::encoding::json::v2::marshal(&fields, &[]).expect("strings encode")
+    }
+
+    pub fn send_sign_in_code(
+        &self,
+        ctx: &Context,
+        to: &str,
+        code: &str,
+        add: bool,
+        text: &str,
+    ) -> Result<(), Error> {
+        let mut request = http::Request::new("POST", &self.url)?
+            .with_body(self.body(to, code, add, text))
+            .with_context(ctx);
+        request.header.set("Content-Type", "application/json");
+        for (name, value) in &self.headers {
+            request.header.set(name, value);
+        }
+        let response = http::client::DEFAULT_CLIENT.do_request(request)?;
+        if let Some(body) = &response.body {
+            let _ = body.read_all();
+        }
+        if !(200..300).contains(&response.status_code) {
+            return Err(format!("mail API answered {}", response.status).into());
+        }
+        Ok(())
+    }
+}
 
 /// Sends email sign-in codes through an SMTP relay. On port 465 it speaks TLS
 /// from the start; otherwise it requires STARTTLS unless `insecure` is set.
@@ -42,15 +145,7 @@ impl SmtpSender {
                 ))
             }
         };
-        let parsed = match mail::parse_address(from) {
-            Ok(parsed) if !from.is_empty() => parsed,
-            _ => {
-                return Err(format!(
-                    "invalid --email.from {}: an email address is required",
-                    rust_stdlib::strconv::quote(from)
-                ))
-            }
-        };
+        let parsed = sender_address(from)?;
         Ok(SmtpSender {
             addr: addr.to_string(),
             host,
@@ -75,11 +170,7 @@ impl SmtpSender {
 
     /// Renders a sign-in email. `text` is `server.SignInEmail.Text()`.
     pub fn message(&self, to: &str, code: &str, add: bool, text: &str) -> Vec<u8> {
-        let subject = if add {
-            format!("Your code to add this address is {code}")
-        } else {
-            format!("Your sign-in code is {code}")
-        };
+        let subject = subject(code, add);
         let mut message = String::new();
         message += &format!("From: {}\r\n", self.from);
         message += &format!("To: {to}\r\n");
