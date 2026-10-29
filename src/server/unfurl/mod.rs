@@ -5,13 +5,12 @@
 //! og:image is downloaded and hosted as an upload, so clients load it from
 //! the server's own origin.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::mpsc;
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak};
 use std::thread;
 
-use rust_stdlib::concurrent::WaitGroup;
 use rust_stdlib::os;
-use rust_stdlib::time::{self, Duration};
+use rust_stdlib::time::{self, Duration, Time};
 
 use super::embeds::{new_upload_file, MAX_EMBEDS_PER_MESSAGE};
 use super::protocol::*;
@@ -32,40 +31,107 @@ pub const MAX_URLS_PER_MESSAGE: usize = 3;
 /// Bounds each user's unfurled URLs: a burst of this many, refilled evenly
 /// over a minute.
 pub const UNFURLS_PER_MINUTE: i64 = 10;
+/// Bounds the server's unfurled URLs, across users, the same way.
+pub const SERVER_UNFURLS_PER_MINUTE: i64 = 60;
 /// Bounds the unfurls running at once; a message posted beyond it is not
 /// unfurled.
 pub const MAX_JOBS: usize = 16;
 
-/// One message's unfurl: its URLs, and where its images are hosted.
-pub struct Job {
-    pub message_id: String,
-    pub base_url: String,
-    pub upload_dir: String,
-    pub urls: Vec<String>,
+fn per_minute(n: i64) -> Limiter {
+    Limiter::new(every(Duration::from_nanos(time::MINUTE.as_nanos() / n)), n)
 }
 
-/// Runs unfurls in the background, one thread per message and one per URL
-/// within it.
+/// One message's unfurl: its URLs, and where its images are hosted.
+struct Job {
+    message_id: String,
+    base_url: String,
+    upload_dir: String,
+    urls: Vec<String>,
+}
+
+/// Counts the jobs running, at most MAX_JOBS.
+#[derive(Default)]
+struct Jobs {
+    running: Mutex<usize>,
+    idle: Condvar,
+}
+
+/// A running job's place in `Jobs`, given back when dropped, so a job that
+/// panics or never starts frees it.
+struct Slot(Arc<Unfurler>);
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        let mut running = self.0.running();
+        *running -= 1;
+        if *running == 0 {
+            self.0.jobs.idle.notify_all();
+        }
+    }
+}
+
+/// Runs unfurls in the background: a thread per message, which gives up on
+/// the URLs not unfurled within the fetch timeout, and a thread per URL.
 pub struct Unfurler {
     fetcher: Fetcher,
+    /// How long a job waits for its URLs. A fetch stuck where its own
+    /// timeout does not reach, as in a DNS lookup, is left to finish alone.
+    timeout: Duration,
     cache: Mutex<Cache>,
-    running: AtomicUsize,
-    /// The unfurls in progress, which `shutdown` awaits.
-    pub pending: WaitGroup,
+    jobs: Jobs,
+    limiter: Mutex<Limiter>,
 }
 
 impl Unfurler {
-    pub fn new(fetcher: Fetcher) -> Arc<Unfurler> {
+    pub fn new(fetcher: Fetcher, timeout: Duration) -> Arc<Unfurler> {
         Arc::new(Unfurler {
             fetcher,
+            timeout,
             cache: Mutex::new(Cache::default()),
-            running: AtomicUsize::new(0),
-            pending: WaitGroup::new(),
+            jobs: Jobs::default(),
+            limiter: Mutex::new(per_minute(SERVER_UNFURLS_PER_MINUTE)),
         })
     }
 
-    fn cache(&self) -> std::sync::MutexGuard<'_, Cache> {
+    fn cache(&self) -> MutexGuard<'_, Cache> {
         self.cache.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn running(&self) -> MutexGuard<'_, usize> {
+        self.jobs.running.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Takes a job's slot, unless MAX_JOBS are running.
+    fn try_start(self: &Arc<Self>) -> Option<Slot> {
+        let mut running = self.running();
+        if *running >= MAX_JOBS {
+            return None;
+        }
+        *running += 1;
+        Some(Slot(self.clone()))
+    }
+
+    /// Waits until no job runs. Each job gives up on its fetches after the
+    /// fetch timeout, so the wait is bounded.
+    pub(crate) fn wait(&self) {
+        let mut running = self.running();
+        while *running > 0 {
+            running = self
+                .jobs
+                .idle
+                .wait(running)
+                .unwrap_or_else(|e| e.into_inner());
+        }
+    }
+
+    /// How many URLs the server may unfurl now, at most `wanted`.
+    fn allowance(&self, now: &Time, wanted: usize) -> usize {
+        let tokens = self.limiter().tokens_at(now).max(0.0) as usize;
+        tokens.min(wanted)
+    }
+
+    fn limiter(&self) -> MutexGuard<'_, Limiter> {
+        self.limiter.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     /// The preview of url, from the cache or fetched.
@@ -88,30 +154,41 @@ impl Unfurler {
         }
     }
 
-    /// Unfurls a message's URLs in the background, then attaches the
-    /// previews to the message as it is then. Beyond MAX_JOBS the message is
-    /// not unfurled.
-    pub fn start(self: &Arc<Self>, server: Weak<Server>, job: Job) {
-        if self.running.fetch_add(1, Ordering::SeqCst) >= MAX_JOBS {
-            self.running.fetch_sub(1, Ordering::SeqCst);
-            return;
-        }
-        self.pending.add(1);
-        let unfurler = self.clone();
-        thread::spawn(move || {
-            let previews: Vec<(String, Arc<Preview>)> = thread::scope(|scope| {
-                let fetches: Vec<_> = job
-                    .urls
-                    .iter()
-                    .map(|u| scope.spawn(|| (u.clone(), unfurler.preview(u))))
-                    .collect();
-                fetches
-                    .into_iter()
-                    .filter_map(|f| f.join().ok())
-                    .filter_map(|(u, p)| p.map(|p| (u, p)))
-                    .collect()
+    /// The previews of urls, in their order, fetched in parallel. A URL not
+    /// unfurled within the timeout is skipped; its fetch finishes in the
+    /// background and fills the cache.
+    pub fn previews(self: &Arc<Self>, urls: &[String]) -> Vec<(String, Arc<Preview>)> {
+        let deadline = std::time::Instant::now()
+            + std::time::Duration::from_nanos(self.timeout.as_nanos().max(0) as u64);
+        let (tx, rx) = mpsc::channel();
+        for (i, url) in urls.iter().enumerate() {
+            let (unfurler, url, tx) = (self.clone(), url.clone(), tx.clone());
+            let _ = thread::Builder::new().spawn(move || {
+                let preview = unfurler.preview(&url);
+                let _ = tx.send((i, url, preview));
             });
-            let hosted: Vec<Hosted> = previews
+        }
+        drop(tx);
+        let mut previews = Vec::new();
+        while let Ok((i, url, preview)) =
+            rx.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+        {
+            if let Some(preview) = preview {
+                previews.push((i, url, preview));
+            }
+        }
+        previews.sort_by_key(|(i, _, _)| *i);
+        previews.into_iter().map(|(_, u, p)| (u, p)).collect()
+    }
+
+    /// Unfurls a message's URLs in the background, then attaches the
+    /// previews to the message as it is then.
+    fn start(self: &Arc<Self>, slot: Slot, server: Weak<Server>, job: Job) {
+        let unfurler = self.clone();
+        let _ = thread::Builder::new().spawn(move || {
+            let _slot = slot;
+            let hosted: Vec<Hosted> = unfurler
+                .previews(&job.urls)
                 .into_iter()
                 .map(|(url, preview)| Hosted {
                     file: preview
@@ -125,14 +202,12 @@ impl Unfurler {
             if let Some(server) = server.upgrade() {
                 server.lock().attach_previews_locked(&job, hosted);
             }
-            unfurler.running.fetch_sub(1, Ordering::SeqCst);
-            unfurler.pending.done();
         });
     }
 }
 
 /// A preview to attach, and the upload file holding its image.
-pub struct Hosted {
+struct Hosted {
     url: String,
     preview: Arc<Preview>,
     file: Option<UploadFile>,
@@ -213,20 +288,24 @@ impl State {
         let Some(u) = self.users.get_mut(user_id) else {
             return;
         };
-        let limiter = u.unfurls.get_or_insert_with(|| {
-            Limiter::new(
-                every(Duration::from_nanos(
-                    time::MINUTE.as_nanos() / UNFURLS_PER_MINUTE,
-                )),
-                UNFURLS_PER_MINUTE,
-            )
-        });
+        let limiter = u
+            .unfurls
+            .get_or_insert_with(|| per_minute(UNFURLS_PER_MINUTE));
         let now = time::now();
-        urls.retain(|_| limiter.allow_n(&now, 1));
-        if urls.is_empty() {
+        let admitted = unfurler
+            .allowance(&now, urls.len())
+            .min(limiter.tokens_at(&now).max(0.0) as usize);
+        if admitted == 0 {
             return;
         }
+        let Some(slot) = unfurler.try_start() else {
+            return;
+        };
+        urls.truncate(admitted);
+        limiter.allow_n(&now, admitted as i64);
+        unfurler.limiter().allow_n(&now, admitted as i64);
         unfurler.start(
+            slot,
             self.server.clone(),
             Job {
                 message_id: message_id.to_owned(),
@@ -240,7 +319,7 @@ impl State {
     /// Republishes a message once with a link embed for each preview whose
     /// URL its text still has and no embed links yet. The images become
     /// hosted files of the message.
-    pub fn attach_previews_locked(&mut self, job: &Job, hosted: Vec<Hosted>) {
+    fn attach_previews_locked(&mut self, job: &Job, hosted: Vec<Hosted>) {
         let snapshot = self.snapshot(&job.message_id);
         let body = body_of(&snapshot);
         if self.closed || !self.messages.contains_key(&job.message_id) || body.is_none() {

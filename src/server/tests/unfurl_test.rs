@@ -2,7 +2,6 @@
 //! fetcher's limits, the cache, and the republished link embeds. Pages come
 //! from local fixture servers; nothing reaches the internet.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use rust_stdlib::net::http::{handler_func, httptest, ResponseController, ResponseWriter};
@@ -85,6 +84,36 @@ fn redirect(to: String) -> Route {
     Box::new(move |w, _| {
         w.header().set("Location", &to);
         w.write_header(302);
+    })
+}
+
+/// Holds requests until opened.
+#[derive(Clone, Default)]
+struct Gate(Arc<(Mutex<bool>, std::sync::Condvar)>);
+
+impl Gate {
+    fn wait(&self) {
+        let (open, changed) = &*self.0;
+        let mut open = open.lock().unwrap();
+        while !*open {
+            open = changed.wait(open).unwrap();
+        }
+    }
+
+    fn open(&self) {
+        *self.0 .0.lock().unwrap() = true;
+        self.0 .1.notify_all();
+    }
+}
+
+/// A page titled "Slow", answered once the gate opens.
+fn gated(gate: &Gate) -> Route {
+    let gate = gate.clone();
+    Box::new(move |w, _| {
+        gate.wait();
+        w.header().set("Content-Type", "text/html");
+        w.write_header(200);
+        let _ = std::io::Write::write_all(w, b"<title>Slow</title>");
     })
 }
 
@@ -425,20 +454,41 @@ fn test_fetcher_size_caps() {
 
 #[test]
 fn test_fetcher_timeout() {
-    let stall: Route = Box::new(|w, _| {
+    let gate = Gate::default();
+    let held = gate.clone();
+    let stall: Route = Box::new(move |w, _| {
         w.header().set("Content-Type", "text/html");
         w.write_header(200);
         let _ = std::io::Write::write_all(w, b"<html><head>");
         let _ = ResponseController::new(w).flush();
-        std::thread::sleep(std::time::Duration::from_millis(1500));
+        held.wait();
         let _ = std::io::Write::write_all(w, b"<title>Too late</title>");
     });
     let page = fixture(vec![("/slow", stall)]);
     let started = time::now();
-    let preview = Fetcher::new(allow_all(), Duration::from_millis(300)).preview(&page.url("/slow"));
+    let preview = Fetcher::new(allow_all(), Duration::from_millis(100)).preview(&page.url("/slow"));
     let took = time::since(&started);
+    gate.open();
     assert_eq!(preview, None);
-    assert!(took < Duration::from_millis(1200), "took {took:?}");
+    assert!(took < Duration::from_millis(1000), "took {took:?}");
+}
+
+/// A dial that blocks the way a lookup with no deadline does is given up
+/// on at the unfurler's timeout, not awaited.
+#[test]
+fn test_unfurler_gives_up_on_a_stuck_dial() {
+    let page = fixture(vec![("/post", html(ARTICLE))]);
+    let stuck: DialCheck = Arc::new(|_: &str| {
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        true
+    });
+    let timeout = Duration::from_millis(100);
+    let unfurler = Unfurler::new(Fetcher::new(stuck, timeout), timeout);
+    let started = time::now();
+    let previews = unfurler.previews(&[page.url("/post")]);
+    let took = time::since(&started);
+    assert!(previews.is_empty());
+    assert!(took < Duration::from_millis(1000), "took {took:?}");
 }
 
 #[test]
@@ -447,7 +497,7 @@ fn test_cache() {
         ("/post", html(ARTICLE)),
         ("/before.png", respond("image/png", test_png())),
     ]);
-    let unfurler = Unfurler::new(fetcher(allow_all()));
+    let unfurler = Unfurler::new(fetcher(allow_all()), FETCH_TIMEOUT);
     let first = unfurler.preview(&page.url("/post")).unwrap();
     assert_eq!(unfurler.preview(&page.url("/post")).unwrap(), first);
     assert_eq!(unfurler.preview(&page.url("/missing")), None);
@@ -518,20 +568,37 @@ fn test_cache_byte_budget() {
 }
 
 fn unfurl_server() -> (TestServer, TempDir) {
+    unfurl_server_with(Config::default())
+}
+
+fn unfurl_server_with(config: Config) -> (TestServer, TempDir) {
     let dir = TempDir::new("unfurl-uploads-");
     let server = new_test_server(Config {
         unfurl: true,
         unfurl_allow_internal: true,
         upload_dir: dir.to_string(),
-        ..Config::default()
+        ..config
     });
     (server, dir)
 }
 
+/// The upload files in dir.
+fn upload_files(dir: &TempDir) -> usize {
+    std::fs::read_dir(dir.to_string())
+        .unwrap()
+        .filter(|e| {
+            e.as_ref()
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".upload")
+        })
+        .count()
+}
+
 /// Waits for the server's unfurls to land.
 fn settle(server: &TestServer) {
-    let unfurler = server.app.lock().unfurler.clone().expect("unfurl enabled");
-    unfurler.pending.wait();
+    server.app.unfurler.as_ref().expect("unfurl enabled").wait();
 }
 
 fn post(c: &mut TestClient, text: &str, format: &str) -> String {
@@ -728,10 +795,8 @@ fn test_unfurl_edit_adds_one_url() {
 fn test_unfurl_off_by_default() {
     let page = fixture(vec![("/post", html(ARTICLE))]);
     let mut server = new_test_server(Config::default());
-    assert!(server.app.lock().unfurler.is_none());
     let mut c = dial_test_client(&server);
     post(&mut c, &page.url("/post"), "");
-    std::thread::sleep(std::time::Duration::from_millis(200));
     c.expect_quiet();
     assert_eq!(page.hits("/post"), 0);
     server.stop();
@@ -739,17 +804,8 @@ fn test_unfurl_off_by_default() {
 
 #[test]
 fn test_unfurl_skips_removed_urls() {
-    let release = Arc::new(AtomicUsize::new(0));
-    let gate = release.clone();
-    let slow: Route = Box::new(move |w, _| {
-        while gate.load(Ordering::SeqCst) == 0 {
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-        w.header().set("Content-Type", "text/html");
-        w.write_header(200);
-        let _ = std::io::Write::write_all(w, b"<title>Slow</title>");
-    });
-    let page = fixture(vec![("/slow", slow)]);
+    let gate = Gate::default();
+    let page = fixture(vec![("/slow", gated(&gate))]);
     let (mut server, _dir) = unfurl_server();
     let mut c = dial_test_client(&server);
     let message_id = post(&mut c, &page.url("/slow"), "");
@@ -759,9 +815,53 @@ fn test_unfurl_skips_removed_urls() {
         &id,
         obj! {"message_id" => message_id.as_str(), "body" => obj! {"text" => "never mind"}},
     );
-    release.store(1, Ordering::SeqCst);
+    gate.open();
     settle(&server);
     c.expect_quiet();
     assert!(server.app.lock().embeds.is_empty());
     server.stop();
+}
+
+#[test]
+fn test_unfurl_jobs_saturate() {
+    let gate = Gate::default();
+    let paths: Vec<&'static str> = (0..=MAX_JOBS)
+        .map(|i| &*format!("/slow{i}").leak())
+        .collect();
+    let page = fixture(paths.iter().map(|p| (*p, gated(&gate))).collect());
+    let (mut server, _dir) = unfurl_server();
+    let mut clients: Vec<TestClient> = paths.iter().map(|_| dial_test_client(&server)).collect();
+    for (c, path) in clients.iter_mut().zip(&paths) {
+        post(c, &page.url(path), "");
+    }
+    gate.open();
+    settle(&server);
+    let hits: Vec<usize> = paths.iter().map(|p| page.hits(p)).collect();
+    let mut want = vec![1; MAX_JOBS];
+    want.push(0);
+    assert_eq!(hits, want);
+    server.stop();
+}
+
+#[test]
+fn test_shutdown_with_unfurl_in_flight() {
+    let gate = Gate::default();
+    let page = fixture(vec![("/slow", gated(&gate))]);
+    let (mut server, dir) = unfurl_server_with(Config {
+        unfurl_timeout: Duration::from_millis(200),
+        ..Config::default()
+    });
+    let mut c = dial_test_client(&server);
+    post(&mut c, &page.url("/slow"), "");
+    let started = time::now();
+    while page.hits("/slow") == 0 {
+        assert!(time::since(&started) < time::SECOND, "never fetched");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let started = time::now();
+    server.stop();
+    let took = time::since(&started);
+    gate.open();
+    assert!(took < Duration::from_millis(1500), "shutdown took {took:?}");
+    assert_eq!(upload_files(&dir), 0);
 }

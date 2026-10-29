@@ -132,8 +132,11 @@ pub struct Config {
     /// An extension Go lacks (docs/DEVIATIONS.md): unfurls the links of
     /// messages into `link` embeds with og (§4.8.1).
     pub unfurl: bool,
-    /// Lets unfurls reach internal addresses, for tests.
+    /// Lets unfurls reach internal addresses on any port, for tests.
     pub unfurl_allow_internal: bool,
+    /// How long an unfurl waits for its pages; FETCH_TIMEOUT unless a test
+    /// shortens it.
+    pub unfurl_timeout: Duration,
 }
 
 impl Default for Config {
@@ -186,6 +189,7 @@ pub fn default_config() -> Config {
         apple_app_ids: Vec::new(),
         unfurl: false,
         unfurl_allow_internal: false,
+        unfurl_timeout: unfurl::FETCH_TIMEOUT,
     }
 }
 
@@ -649,6 +653,8 @@ pub struct Server {
     /// Pending badge pushes and push deliveries, which `shutdown` awaits.
     pub(crate) badges: WaitGroup,
     pub(crate) push: Arc<PushDeliverer>,
+    /// Link previews in progress, which `shutdown` awaits.
+    pub(crate) unfurler: Option<Arc<Unfurler>>,
     /// Set by `shutdown`; ends the sweep of expired registrations.
     pub(crate) stopped: Arc<Done>,
     pub(crate) ops: BTreeMap<&'static str, Operation>,
@@ -742,7 +748,10 @@ pub fn open(config: Config) -> Result<Arc<Server>, store::StoreError> {
         } else {
             unfurl::dial_check()
         };
-        Unfurler::new(Fetcher::new(check, unfurl::FETCH_TIMEOUT))
+        Unfurler::new(
+            Fetcher::new(check, config.unfurl_timeout),
+            config.unfurl_timeout,
+        )
     });
     let badges = WaitGroup::new();
     let store: Arc<dyn Store> = match config.store.take() {
@@ -809,6 +818,7 @@ pub fn open(config: Config) -> Result<Arc<Server>, store::StoreError> {
             mailing: WaitGroup::new(),
             badges,
             push,
+            unfurler,
             stopped: Arc::new(Done::default()),
             ops: operations(&config),
         }
@@ -978,9 +988,8 @@ impl Server {
             server.badges.wait();
             server.push.wait();
             server.mailing.wait();
-            let unfurler = server.lock().unfurler.clone();
-            if let Some(unfurler) = unfurler {
-                unfurler.pending.wait();
+            if let Some(unfurler) = &server.unfurler {
+                unfurler.wait();
             }
             {
                 let mut st = server.lock();
