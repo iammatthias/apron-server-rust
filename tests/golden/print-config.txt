@@ -144,6 +144,23 @@ posting = false
 
 # Delete messages, reactions, and their uploads older than this, such as 168h, checking hourly; emptied threads go, other rooms stay (default: keep forever; not in the Go aprond)
 retention = ""
+
+[frame]
+
+# Largest WebSocket message a client may send, in bytes; a larger one closes the connection with 1009 (not in the Go aprond)
+max-bytes = 16384
+
+# Largest body.text of a message or command, in bytes (not in the Go aprond)
+max-text-bytes = 4096
+
+# Deepest nesting of objects and arrays in a frame, the frame itself at depth 1 (not in the Go aprond)
+max-depth = 8
+
+# Most JSON values in a frame, object keys not counted (not in the Go aprond)
+max-nodes = 2048
+
+# Longest request id, in bytes (not in the Go aprond)
+max-id-bytes = 128
 --- stderr
 
 
@@ -293,6 +310,23 @@ posting = false
 
 # Delete messages, reactions, and their uploads older than this, such as 168h, checking hourly; emptied threads go, other rooms stay (default: keep forever; not in the Go aprond)
 retention = ""
+
+[frame]
+
+# Largest WebSocket message a client may send, in bytes; a larger one closes the connection with 1009 (not in the Go aprond)
+max-bytes = 16384
+
+# Largest body.text of a message or command, in bytes (not in the Go aprond)
+max-text-bytes = 4096
+
+# Deepest nesting of objects and arrays in a frame, the frame itself at depth 1 (not in the Go aprond)
+max-depth = 8
+
+# Most JSON values in a frame, object keys not counted (not in the Go aprond)
+max-nodes = 2048
+
+# Longest request id, in bytes (not in the Go aprond)
+max-id-bytes = 128
 --- stderr
 
 
@@ -443,6 +477,23 @@ posting = false
 
 # Delete messages, reactions, and their uploads older than this, such as 168h, checking hourly; emptied threads go, other rooms stay (default: keep forever; not in the Go aprond)
 retention = ""
+
+[frame]
+
+# Largest WebSocket message a client may send, in bytes; a larger one closes the connection with 1009 (not in the Go aprond)
+max-bytes = 16384
+
+# Largest body.text of a message or command, in bytes (not in the Go aprond)
+max-text-bytes = 4096
+
+# Deepest nesting of objects and arrays in a frame, the frame itself at depth 1 (not in the Go aprond)
+max-depth = 8
+
+# Most JSON values in a frame, object keys not counted (not in the Go aprond)
+max-nodes = 2048
+
+# Longest request id, in bytes (not in the Go aprond)
+max-id-bytes = 128
 --- stderr
 
 
@@ -592,6 +643,23 @@ posting = false
 
 # Delete messages, reactions, and their uploads older than this, such as 168h, checking hourly; emptied threads go, other rooms stay (default: keep forever; not in the Go aprond)
 retention = ""
+
+[frame]
+
+# Largest WebSocket message a client may send, in bytes; a larger one closes the connection with 1009 (not in the Go aprond)
+max-bytes = 16384
+
+# Largest body.text of a message or command, in bytes (not in the Go aprond)
+max-text-bytes = 4096
+
+# Deepest nesting of objects and arrays in a frame, the frame itself at depth 1 (not in the Go aprond)
+max-depth = 8
+
+# Most JSON values in a frame, object keys not counted (not in the Go aprond)
+max-nodes = 2048
+
+# Longest request id, in bytes (not in the Go aprond)
+max-id-bytes = 128
 --- stderr
 
 

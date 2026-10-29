@@ -37,7 +37,12 @@ fn test_unauthenticated_connection_is_closed() {
             "Authentication timed out".to_owned()
         )
     );
-    assert!(server.app.lock().clients.is_empty(), "connection kept");
+    // The handler detaches the connection once its read fails.
+    let deadline = time::now().add(time::SECOND * 2);
+    while !server.app.lock().clients.is_empty() {
+        assert!(time::now().before(&deadline), "connection kept");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
 }
 
 /// A passkey ceremony in progress is not a sign-in: the deadline counts from

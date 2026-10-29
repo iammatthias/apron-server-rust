@@ -40,3 +40,9 @@ exit 1
 --- stderr
 level=ERROR msg="server stopped" error="creating the schema in $TMP/bad.db: file is not a database (26)"
 
+$ aprond --upload.dir $TMP/uploads --store memory --frame.max-depth 0
+exit 1
+--- stdout
+--- stderr
+level=ERROR msg="server stopped" error="invalid --frame.max-depth 0: use a positive number"
+

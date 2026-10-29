@@ -7,6 +7,7 @@ mod auth_deadline_test;
 mod connection_status_test;
 mod email_test;
 mod ext_test;
+mod frame_limits_test;
 mod guest_posting_test;
 mod helpers;
 mod invite_bot_test;

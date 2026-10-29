@@ -293,7 +293,58 @@ pub(crate) fn decode_non_null<T: UnmarshalFrom>(raw: &[u8]) -> Option<T> {
     Some(value)
 }
 
-pub fn parse_request(payload: &[u8]) -> (Request, Option<RpcError>) {
+/// Bounds on a frame (Config.frame), apron-server-cloudflare's by default:
+/// its size, read before it is parsed; the nesting and count of its JSON
+/// values and the size of its request id, checked before it is decoded;
+/// and the size of a message's `body.text`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FrameLimits {
+    pub max_bytes: usize,
+    pub max_text_bytes: usize,
+    pub max_depth: usize,
+    pub max_nodes: usize,
+    pub max_id_bytes: usize,
+}
+
+impl Default for FrameLimits {
+    fn default() -> FrameLimits {
+        FrameLimits {
+            max_bytes: 16 << 10,
+            max_text_bytes: 4 << 10,
+            max_depth: 8,
+            max_nodes: 2048,
+            max_id_bytes: 128,
+        }
+    }
+}
+
+/// Counts the values of `payload`, valid JSON, and the deepest nesting of
+/// its objects and arrays, the top-level one at depth 1. Object keys are
+/// not values.
+fn json_shape(payload: &[u8]) -> (usize, usize) {
+    let mut decoder = jsontext::Decoder::from_buffer(payload.to_vec(), &[]);
+    let (mut nodes, mut depth) = (0, 0);
+    while let Ok(token) = decoder.read_token() {
+        let kind = token.kind();
+        if kind == jsontext::KIND_END_OBJECT || kind == jsontext::KIND_END_ARRAY {
+            continue;
+        }
+        let level = decoder.stack_depth();
+        if kind == jsontext::KIND_BEGIN_OBJECT || kind == jsontext::KIND_BEGIN_ARRAY {
+            depth = depth.max(level);
+        } else if kind == jsontext::KIND_STRING {
+            // A name leaves its object an odd number of tokens long.
+            let (parent, length) = decoder.stack_index(level);
+            if parent == jsontext::KIND_BEGIN_OBJECT && length % 2 == 1 {
+                continue;
+            }
+        }
+        nodes += 1;
+    }
+    (nodes, depth)
+}
+
+pub fn parse_request(payload: &[u8], limits: &FrameLimits) -> (Request, Option<RpcError>) {
     let mut req = Request::default();
     if !Value::from(payload).is_valid(&[]) {
         return (req, Some(RpcError::new(CODE_PARSE_ERROR, "Parse error")));
@@ -322,14 +373,14 @@ pub fn parse_request(payload: &[u8]) -> (Request, Option<RpcError>) {
         if !notification_only(&req.method) {
             req.has_id = true;
             match decode_non_null::<String>(&raw_id.0) {
-                Some(id) => req.id = id,
-                None => {
+                Some(id) if id.len() <= limits.max_id_bytes => req.id = id,
+                _ => {
                     req.has_id = false;
                     return (
                         req,
                         Some(RpcError::new(
                             CODE_INVALID_REQUEST,
-                            "Request id must be a string",
+                            "Request id must be a bounded string",
                         )),
                     );
                 }
@@ -340,6 +391,19 @@ pub fn parse_request(payload: &[u8]) -> (Request, Option<RpcError>) {
         return (
             req,
             Some(RpcError::new(CODE_INVALID_REQUEST, "Invalid request")),
+        );
+    }
+    let (nodes, depth) = json_shape(payload);
+    if nodes > limits.max_nodes {
+        return (
+            req,
+            Some(RpcError::new(CODE_TOO_LARGE, "JSON structure is too large")),
+        );
+    }
+    if depth > limits.max_depth {
+        return (
+            req,
+            Some(RpcError::new(CODE_TOO_LARGE, "JSON nesting is too deep")),
         );
     }
     if let Some(raw_params) = object.get("params") {
@@ -605,7 +669,7 @@ mod tests {
                 "",
             ),
         ] {
-            let (req, err) = parse_request(input);
+            let (req, err) = parse_request(input, &FrameLimits::default());
             let err = err.unwrap_or_else(|| panic!("{}: no error", String::from_utf8_lossy(input)));
             assert_eq!(
                 (err.code, req.id.as_str()),
@@ -626,7 +690,7 @@ mod tests {
             br#"{"jsonrpc":"1.0","method":"history","id":"x"}"#,
             br#"{"jsonrpc":2,"method":"history","id":"x","extra":{}}"#,
         ] {
-            let (req, err) = parse_request(input);
+            let (req, err) = parse_request(input, &FrameLimits::default());
             assert!(
                 err.is_none() && req.method == "history" && req.id == "x",
                 "{}: {req:?}, {err:?}",
