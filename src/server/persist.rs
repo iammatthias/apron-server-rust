@@ -21,6 +21,8 @@
 //!          ignores the kind)
 //! bot      hex SHA-256 of the /invite-bot token (an extension; Go ignores
 //!          the kind)
+//! invite   hex SHA-256 of an account's /invite-token token (an extension;
+//!          Go ignores the kind)
 //! embed    embed_id
 //! push     user_id, a space, and url
 //! ```
@@ -40,6 +42,7 @@ use rust_stdlib_derive::{MarshalTo, UnmarshalFrom};
 use super::bots::BotToken;
 use super::devices::DeviceToken;
 use super::embeds::{EmbedState, StreamBuffer};
+use super::invites::InviteToken;
 use super::messages::{MessageState, ReactionSet};
 use super::protocol::*;
 use super::push::{parse_wake_names, PushRegistration};
@@ -61,6 +64,7 @@ pub const ENTRY_USER: &str = "user";
 pub const ENTRY_SESSION: &str = "session";
 pub const ENTRY_DEVICE: &str = "device";
 pub const ENTRY_BOT: &str = "bot";
+pub const ENTRY_INVITE: &str = "invite";
 pub const ENTRY_EMBED: &str = "embed";
 pub const ENTRY_PUSH: &str = "push";
 
@@ -75,6 +79,7 @@ pub struct DirtySet {
     pub sessions: BTreeSet<[u8; 32]>,
     pub devices: BTreeSet<[u8; 32]>,
     pub bots: BTreeSet<[u8; 32]>,
+    pub invites: BTreeSet<[u8; 32]>,
     pub embeds: BTreeSet<String>,
     pub pushes: BTreeSet<String>,
     pub used_ids: Vec<String>,
@@ -289,6 +294,14 @@ pub struct StoredBot {
     pub created: Time,
 }
 
+#[derive(Clone, Debug, Default, MarshalTo, UnmarshalFrom)]
+pub struct StoredInvite {
+    #[json("user")]
+    pub user: String,
+    #[json("created")]
+    pub created: Time,
+}
+
 /// The store ID of a session: the hex SHA-256 of its bearer token.
 pub fn session_id(key: &[u8; 32]) -> String {
     hex::encode(key)
@@ -450,6 +463,20 @@ impl State {
                     },
                 ),
                 None => batch.push(Entry::delete(ENTRY_BOT, &session_id(key))),
+            }
+        }
+        for key in &d.invites {
+            match self.invites.get(key) {
+                Some(invite) => put(
+                    &mut batch,
+                    ENTRY_INVITE,
+                    &session_id(key),
+                    &StoredInvite {
+                        user: invite.user.clone(),
+                        created: invite.created.clone(),
+                    },
+                ),
+                None => batch.push(Entry::delete(ENTRY_INVITE, &session_id(key))),
             }
         }
         for id in &d.embeds {
@@ -973,6 +1000,27 @@ impl Server {
                     created: stored.created,
                 },
             );
+        }
+
+        for (id, raw) in of(ENTRY_INVITE) {
+            let Some(key) = hex::decode(id)
+                .ok()
+                .and_then(|key| <[u8; 32]>::try_from(key).ok())
+            else {
+                continue;
+            };
+            let stored = decode::<StoredInvite>(ENTRY_INVITE, id, raw)?;
+            if st.users.get(&stored.user).is_some_and(|u| u.persists()) {
+                st.invites.insert(
+                    key,
+                    InviteToken {
+                        user: stored.user,
+                        created: stored.created,
+                    },
+                );
+            } else {
+                st.touch_invite(key);
+            }
         }
 
         // A bot holds one token. Batches apply whole, so a store never holds

@@ -130,6 +130,14 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         writes: true,
         run: State::role_command,
     },
+    ServerCommand {
+        name: "invite-token",
+        usage: "/invite-token <user_id>",
+        help: "create a user who signs in with a token instead of a passkey, and get the token",
+        audience: Audience::Admins,
+        writes: true,
+        run: State::invite_token_command,
+    },
 ];
 
 /// Renders a notice for the one connection it is queued on: unlogged,

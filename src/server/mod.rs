@@ -7,6 +7,7 @@ pub mod commands;
 pub mod devices;
 pub mod email;
 pub mod embeds;
+pub mod invites;
 pub mod messages;
 pub mod outbound;
 pub mod persist;

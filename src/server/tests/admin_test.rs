@@ -91,10 +91,17 @@ pub fn who(server: &TestServer, user_id: &str) -> String {
     format!("**{name}** (`{user_id}`)")
 }
 
-/// Runs a command that fails and returns its error.
+/// Runs a command that fails and returns its error, skipping the
+/// notifications before it.
 pub fn command_error(c: &mut TestClient, text: &str) -> (i64, String) {
     let id = c.next_id("command");
-    let frame = c.call("command", &id, obj! {"body" => obj! {"text" => text}});
+    c.write(&obj! {"method" => "command", "id" => id.as_str(), "params" => obj! {"body" => obj! {"text" => text}}});
+    let frame = loop {
+        let frame = c.read();
+        if frame.contains_key("id") {
+            break frame;
+        }
+    };
     let error = frame
         .get("error")
         .and_then(Json::as_object)
@@ -467,5 +474,242 @@ fn test_roles_persist_and_seed_once() {
     assert_eq!(
         private_reply(&mut boss, &format!("/role {ada_id}")),
         format!("{who} has the roles `friend`.")
+    );
+}
+
+/// The token in a notice's first code block.
+pub fn token_in(text: &str) -> String {
+    text.split("```\n")
+        .nth(1)
+        .and_then(|block| block.split('\n').next())
+        .unwrap_or_else(|| panic!("no token block in {text:?}"))
+        .to_owned()
+}
+
+/// /invite-token makes an account that signs in with the token from any
+/// origin, named after its user_id, in general; the notice carries a
+/// link.apron.chat link. Taken, guest and bot user_ids, and non-admins, are
+/// refused. (Cloudflare's test also moves the token with /rename and
+/// revokes it with /purge, which this server does not have.)
+#[test]
+fn test_invite_token_makes_a_token_account() {
+    let server = new_test_server(Config {
+        public_url: "https://chat.example".into(),
+        ..admin_config()
+    });
+    let mut admin = admin(&server);
+    let mut watcher = dial_test_client(&server);
+    let text = private_reply(&mut admin, "/invite-token @invited");
+    let token = token_in(&text);
+    assert!(
+        token.starts_with("apron_invite_") && token.len() == "apron_invite_".len() + 43,
+        "token {token:?}"
+    );
+    assert_eq!(
+        text,
+        format!(
+            "Created `invited`, who signs in with this token instead of a passkey. It does not expire, and anyone who has it signs in as `invited`, so hand it over privately.\n\n```\n{token}\n```\n\nOr send them this link, which signs them in with any Apron app: <https://link.apron.chat/#server=wss://chat.example/ws&token={token}>\n\nTo sign in, authenticate with the token scheme: `{{\"method\": \"auth\", \"params\": {{\"scheme\": \"token\", \"token\": \"{token}\"}}}}`"
+        )
+    );
+    expect_membership(&watcher, "general", "invited", true);
+    watcher.drain();
+
+    let (mut first, _) = dial_raw(&server);
+    let result = passkey_result(&token_auth(&mut first, &token));
+    assert_eq!(
+        result,
+        obj! {"you" => obj! {
+            "user_id" => "invited", "name" => "invited", "roles" => strings(&[]), "status" => "online",
+        }},
+    );
+    first.drain();
+    let you = you_of(&first.result("me", "rename", obj! {"name" => "Newcomer"}));
+    assert_eq!(you["name"], Json::from("Newcomer"));
+    // An account may add a passkey later.
+    let (mut keyed, _) = dial_origin(&server, TEST_PASSKEY_ORIGIN);
+    passkey_result(&token_auth(&mut keyed, &token));
+    keyed.drain();
+    let begin = passkey_call(&mut keyed, "add", "register", "begin", Object::new());
+    assert!(begin.contains_key("result"), "passkey begin: {begin:?}");
+
+    for (text, want) in [
+        (
+            "/invite-token invited",
+            (
+                CODE_INVALID_PARAMS,
+                "The user_id invited is taken".to_owned(),
+            ),
+        ),
+        (
+            "/invite-token INVITED",
+            (
+                CODE_INVALID_PARAMS,
+                "The user_id INVITED is taken".to_owned(),
+            ),
+        ),
+        (
+            "/invite-token admin",
+            (CODE_INVALID_PARAMS, "The user_id admin is taken".to_owned()),
+        ),
+        (
+            "/invite-token general",
+            (
+                CODE_INVALID_PARAMS,
+                "The user_id general is taken".to_owned(),
+            ),
+        ),
+        (
+            "/invite-token",
+            (
+                CODE_INVALID_PARAMS,
+                "Usage: /invite-token <user_id>".to_owned(),
+            ),
+        ),
+    ] {
+        assert_eq!(command_error(&mut admin, text), want, "{text}");
+    }
+    for bad in [
+        "guest_9",
+        "bot_x",
+        "Bot",
+        "-a",
+        "a-",
+        "a.b",
+        &"a".repeat(65),
+    ] {
+        let (code, message) = command_error(&mut admin, &format!("/invite-token {bad}"));
+        assert!(
+            code == CODE_INVALID_PARAMS && message.starts_with("A user_id is 1 to 64"),
+            "{bad}: {message}"
+        );
+    }
+    let mut plain = account(&server);
+    assert_eq!(
+        command_error(&mut plain, "/invite-token other"),
+        (CODE_DENIED, "Only an admin can use /invite-token".into()),
+    );
+    // Signed in as another account, the token is refused; unknown ones are too.
+    assert_eq!(
+        token_auth(&mut plain, &token).get("error"),
+        Some(&Json::from(
+            obj! {"code" => CODE_DENIED, "message" => "Identity switching requires reconnect"}
+        )),
+    );
+    let (mut stranger, _) = dial_raw(&server);
+    assert_eq!(
+        token_auth(&mut stranger, &format!("{token}x")).get("error"),
+        Some(&Json::from(
+            obj! {"code" => CODE_DENIED, "message" => "This invite token is not valid; ask an admin for a new one"}
+        )),
+    );
+}
+
+/// An account token, and its account, survive a restart; a --role grant
+/// for the user_id seeds its roles.
+#[test]
+fn test_invite_token_persists() {
+    let kept: Arc<dyn Store> = Arc::new(store::Memory::new());
+    let dir = TempDir::new("apron-invite-");
+    let configure = |config: &mut Config| {
+        config.admin_token = admin_config().admin_token;
+        config.roles = std::collections::BTreeMap::from([("mod".into(), vec!["Friend".into()])]);
+    };
+    let mut server = start_with(kept.clone(), &format!("{dir}/a"), configure);
+    let mut boss = admin(&server);
+    let token = token_in(&private_reply(&mut boss, "/invite-token friend"));
+    drop(boss);
+    server.stop();
+    let server = start_with(kept, &format!("{dir}/b"), configure);
+    let (mut c, _) = dial_raw(&server);
+    let result = passkey_result(&token_auth(&mut c, &token));
+    assert_eq!(you_of(&result)["user_id"], Json::from("friend"));
+    assert_eq!(you_of(&result)["roles"], strings(&["mod"]));
+}
+
+/// /role <user_id> bot makes a token account a bot in full, but not a
+/// passkey holder or an admin; taking the role away makes it an account
+/// again. (Cloudflare's test also refuses a bot's /rename, which this server
+/// does not have.)
+#[test]
+fn test_role_bot_makes_a_token_account_a_bot() {
+    let server = admin_test_server();
+    let mut admin = admin(&server);
+    let person = account(&server);
+    let token = token_in(&private_reply(&mut admin, "/invite-token announcer"));
+    let (mut bot, _) = dial_raw(&server);
+    assert_eq!(
+        you_of(&passkey_result(&token_auth(&mut bot, &token)))["roles"],
+        strings(&[])
+    );
+    bot.drain();
+    assert_eq!(
+        private_reply(&mut admin, "/role announcer bot"),
+        "**announcer** (`announcer`) now has the role `bot`."
+    );
+    assert_eq!(user_update(&bot, "you")["roles"], strings(&["bot"]));
+    assert_eq!(
+        command_error(&mut bot, "/invite-bot"),
+        (CODE_DENIED, "A bot can't use /invite-bot".into()),
+    );
+    let renamed = bot.call("me", "rename-self", obj! {"name" => "Other"});
+    assert_eq!(
+        renamed.get("error"),
+        Some(&Json::from(
+            obj! {"code" => CODE_DENIED, "message" => "A bot can't change its name"}
+        )),
+    );
+    assert_eq!(
+        command_error(&mut admin, "/admin announcer"),
+        (CODE_DENIED, "A bot can't be an admin".into()),
+    );
+    bot.user_id = "announcer".into();
+    save(&mut bot, "post", obj! {"body" => obj! {"text" => "beep"}});
+
+    assert_eq!(
+        command_error(&mut admin, &format!("/role {} bot", person.user_id)).0,
+        CODE_DENIED
+    );
+    private_reply(&mut admin, "/invite-token boss");
+    private_reply(&mut admin, "/admin boss");
+    assert_eq!(
+        command_error(&mut admin, "/role boss bot"),
+        (
+            CODE_DENIED,
+            "An admin can't be a bot; take away admin first".into()
+        ),
+    );
+    assert_eq!(
+        command_error(&mut admin, "/role bot_nobody bot").0,
+        CODE_INVALID_PARAMS
+    );
+
+    bot.drain();
+    private_reply(&mut admin, "/role announcer bot");
+    assert_eq!(user_update(&bot, "you")["roles"], strings(&[]));
+    let you = you_of(&bot.result("me", "rename-after", obj! {"name" => "Other"}));
+    assert_eq!(you["name"], Json::from("Other"));
+}
+
+/// An admin by --role, with the admin user never made, still cannot make a
+/// user `admin` with /invite-token.
+#[test]
+fn test_invite_token_never_makes_admin() {
+    let kept: Arc<dyn Store> = Arc::new(store::Memory::new());
+    let dir = TempDir::new("apron-invite-admin-");
+    let mut server = start_with(kept.clone(), &format!("{dir}/a"), |_| {});
+    let (mut ada, _) = dial_origin(&server, TEST_PASSKEY_ORIGIN);
+    let registered = register_test_passkey(&mut ada, &mut new_test_authenticator());
+    let ada_id = user_id_of(&registered);
+    drop(ada);
+    server.stop();
+    let server = start_with(kept, &format!("{dir}/b"), |config| {
+        config.roles = std::collections::BTreeMap::from([("admin".into(), vec![ada_id])]);
+    });
+    let (mut ada, _) = dial_origin(&server, TEST_PASSKEY_ORIGIN);
+    passkey_result(&token_auth(&mut ada, registered["token"].as_str().unwrap()));
+    ada.drain();
+    assert_eq!(
+        command_error(&mut ada, "/invite-token Admin"),
+        (CODE_INVALID_PARAMS, "The user_id Admin is taken".into()),
     );
 }

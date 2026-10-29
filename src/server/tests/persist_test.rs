@@ -50,6 +50,7 @@ impl State {
         all.sessions = self.sessions.keys().copied().collect();
         all.devices = self.devices.keys().copied().collect();
         all.bots = self.bots.keys().copied().collect();
+        all.invites = self.invites.keys().copied().collect();
         all.embeds = self.embeds.keys().cloned().collect();
         all.pushes = self.pushes.keys().cloned().collect();
         all.vapid = self.vapid_stored;
