@@ -272,6 +272,34 @@ fn test_emoji_limits() {
     assert_eq!(st.emoji.entries[":b:"].width, 2);
 }
 
+/// A new key's write that finishes after another add filled the catalog
+/// fails, as on Cloudflare, rather than succeeding and dropping the image.
+#[test]
+fn test_emoji_add_that_no_longer_fits_fails() {
+    let server = new_test_server(Config {
+        max_emoji: 1,
+        ..admin_config()
+    });
+    let mut ada = admin(&server);
+    let (_, first) = command_with(&mut ada, "/emoji add :one:", upload_embed());
+    let (_, second) = command_with(&mut ada, "/emoji add :two:", upload_embed());
+    assert_eq!(
+        http_do("PUT", &write_url(&first), Some(&png(1, 1)), "image/png").0,
+        201
+    );
+    next_server(&ada);
+    let (status, _, body) = http_do("PUT", &write_url(&second), Some(&png(1, 1)), "image/png");
+    assert_eq!(status, 410, "{}", String::from_utf8_lossy(&body));
+    assert!(
+        String::from_utf8_lossy(&body).contains("at most 1 custom emoji"),
+        "{}",
+        String::from_utf8_lossy(&body)
+    );
+    let st = server.app.lock();
+    assert_eq!(st.emoji.entries.keys().collect::<Vec<_>>(), [":one:"]);
+    assert_eq!(st.embeds.len(), 1, "the refused image was kept");
+}
+
 /// The catalog, its URL and the previous catalog survive a restart.
 #[test]
 fn test_emoji_catalog_persists() {
@@ -313,4 +341,35 @@ fn test_emoji_catalog_persists() {
     assert_eq!(st.emoji.current.as_ref(), Some(&current));
     assert_eq!(st.emoji.previous.as_ref(), Some(&previous));
     assert!(first.ends_with(&format!("{}.json", previous.hash)));
+}
+
+/// An avatar's, a custom emoji's or the server's avatar's write whose
+/// declared type is not an image type it keeps is 415 before the body is
+/// read, and stays open; parameters are ignored (Cloudflare's "refuses
+/// what is not an image").
+#[test]
+fn test_declared_non_image_types_are_refused_before_the_body() {
+    let server = admin_test_server();
+    let mut ada = admin(&server);
+    for command in ["/avatar", "/emoji add :late:", "/server avatar"] {
+        let (_, started) = command_with(&mut ada, command, upload_embed());
+        let url = write_url(&started);
+        for declared in ["text/plain", "image/svg+xml", "audio/ogg; codecs=opus"] {
+            let (status, _, body) = http_do("PUT", &url, Some(&png(8, 8)), declared);
+            assert_eq!(status, 415, "{command} declared {declared}");
+            assert!(
+                String::from_utf8_lossy(&body).contains("PNG, JPEG, GIF, or WebP")
+                    || String::from_utf8_lossy(&body).contains("PNG, JPEG, GIF, and WebP"),
+                "{command}: {}",
+                String::from_utf8_lossy(&body)
+            );
+        }
+        let declared = "Image/PNG; charset=binary";
+        assert_eq!(
+            http_do("PUT", &url, Some(&png(8, 8)), declared).0,
+            201,
+            "{command} after the refusals"
+        );
+        ada.drain();
+    }
 }
