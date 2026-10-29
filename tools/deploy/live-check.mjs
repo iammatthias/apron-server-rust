@@ -1,0 +1,300 @@
+#!/usr/bin/env node
+// Checks the deployed server over its public URL and prints PASS or FAIL per
+// check, exiting 1 on any FAIL. Node 24; it uses the built-in WebSocket,
+// which sends no Origin header.
+//
+//   node tools/deploy/live-check.mjs [--slow]
+//
+//   APRON_PUBLIC_URL        the server (default: https://apron.farfield.systems)
+//   APRON_APP_ID            the app ID the AASA lists (default:
+//                           MP92RCAPRG.app.ladle.ios)
+//   APRON_ADMIN_TOKEN_FILE  a local file holding the admin token; without it
+//                           the admin checks are skipped. The token is never
+//                           printed.
+//   --slow                  also waits out the 30 s authentication timeout
+//
+// It posts nothing in any room. The admin checks make accounts named
+// livecheck_<random>: one from /invite-token and one from a /invite sign-up.
+// There is no /purge yet, so they stay until B8's /purge removes the
+// livecheck_ accounts.
+import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
+
+const base = (process.env.APRON_PUBLIC_URL ?? "https://apron.farfield.systems").replace(/\/$/, "");
+const wsURL = `${base.replace(/^http/, "ws")}/ws`;
+const appID = process.env.APRON_APP_ID ?? "MP92RCAPRG.app.ladle.ios";
+const slow = process.argv.includes("--slow");
+const welcome = "Guests can read along. Create a passkey to post, react and start threads. Messages are kept for 7 days.";
+const suffix = randomBytes(4).toString("hex");
+
+let failed = 0;
+function report(name, ok, detail = "") {
+  if (!ok) failed++;
+  console.log(`${ok ? "PASS" : "FAIL"} ${name}${!ok && detail ? ` (${detail})` : ""}`);
+}
+async function check(name, fn) {
+  try {
+    const out = await fn();
+    report(name, out === undefined || out === true, typeof out === "string" ? out : "");
+  } catch (e) {
+    report(name, false, e.message);
+  }
+}
+const same = (got, want) => got === want || `got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`;
+
+// One WebSocket with every frame it received, in order.
+class Conn {
+  frames = [];
+  closed = null;
+  #waiters = [];
+  #next = 1;
+  constructor(url = wsURL) {
+    this.ws = new WebSocket(url);
+    this.ws.onmessage = (event) => {
+      this.frames.push(JSON.parse(event.data));
+      this.#wake();
+    };
+    this.ws.onclose = (event) => {
+      this.closed = { code: event.code, reason: event.reason };
+      this.#wake();
+    };
+    this.opened = new Promise((resolve, reject) => {
+      this.ws.onopen = resolve;
+      this.ws.onerror = () => reject(new Error("connection failed"));
+    });
+  }
+  #wake() {
+    for (const w of this.#waiters.splice(0)) w();
+  }
+  async until(pred, ms = 8000, what = "a frame") {
+    const end = Date.now() + ms;
+    for (;;) {
+      const found = pred();
+      if (found) return found;
+      if (this.closed) throw new Error(`closed ${this.closed.code} waiting for ${what}`);
+      const left = end - Date.now();
+      if (left <= 0) throw new Error(`timed out waiting for ${what}`);
+      await new Promise((resolve) => {
+        const t = setTimeout(resolve, left);
+        this.#waiters.push(() => (clearTimeout(t), resolve()));
+      });
+    }
+  }
+  server() {
+    return this.until(() => this.frames.find((f) => f.method === "server"), 8000, "the server frame");
+  }
+  // Sends a request and returns its reply and the frames that arrived since
+  // the send, which hold a command's ~private notice.
+  async call(method, params) {
+    const id = `c${this.#next++}`;
+    const from = this.frames.length;
+    this.ws.send(JSON.stringify({ method, id, params }));
+    const reply = await this.until(() => this.frames.slice(from).find((f) => f.id === id), 8000, `the ${method} reply`);
+    return { reply, frames: this.frames.slice(from), result: reply.result, error: reply.error };
+  }
+  notices(from = 0) {
+    return this.frames.slice(from).filter((f) => f.method === "message" && f.params?.from?.user_id === "~private");
+  }
+  close() {
+    try {
+      this.ws.close(1000, "done");
+    } catch {}
+  }
+}
+async function connect() {
+  const c = new Conn();
+  await c.opened;
+  return c;
+}
+const noticeText = (frames) =>
+  frames
+    .filter((f) => f.method === "message" && f.params?.from?.user_id === "~private")
+    .map((f) => f.params.body?.text ?? "")
+    .join("\n");
+
+// HTTP.
+await check("GET /healthz is 200", async () => same((await fetch(`${base}/healthz`)).status, 200));
+await check("GET / serves the web client", async () => {
+  const r = await fetch(`${base}/`);
+  const body = await r.text();
+  return r.status === 200 && /<html|<!doctype html/i.test(body) ? true : `status ${r.status}`;
+});
+await check(`AASA lists ${appID}`, async () => {
+  const r = await fetch(`${base}/.well-known/apple-app-site-association`);
+  const text = await r.text();
+  return (r.status === 200 && text.includes(appID)) || `status ${r.status}`;
+});
+await check("GET /ws?apron_connection_status=1 is available", async () => {
+  const r = await fetch(`${wsURL.replace(/^ws/, "http")}?apron_connection_status=1`);
+  const body = await r.json();
+  return body.available === true || `body ${JSON.stringify(body)}`;
+});
+
+// The server frame and welcome notice, with no Origin.
+await check("server frame: settings, welcome, ext:media, signup, auth", async () => {
+  const c = await connect();
+  try {
+    const p = (await c.server()).params;
+    const problems = [];
+    const settings = p.ext?.settings ?? p.ext?.["ext:settings"] ?? p.settings;
+    if (settings?.guest_posting !== false) problems.push(`guest_posting ${JSON.stringify(settings?.guest_posting)}`);
+    if (p.welcome !== welcome) problems.push("welcome text differs");
+    if (!p.ext || !JSON.stringify(p.ext).includes("media")) problems.push("no ext:media");
+    if (!p.signup?.includes("token")) problems.push(`signup ${JSON.stringify(p.signup)}`);
+    if (!p.auth?.includes("token") || !p.auth?.includes("guest")) problems.push(`auth ${JSON.stringify(p.auth)}`);
+    if (p.auth?.includes("webauthn")) problems.push("webauthn offered with no Origin");
+    return problems.length === 0 || problems.join("; ");
+  } finally {
+    c.close();
+  }
+});
+
+// A guest.
+await check("guest: Guest <n> name, requested name ignored", async () => {
+  const c = await connect();
+  try {
+    await c.server();
+    const { result, error } = await c.call("auth", { scheme: "guest", name: "Livecheck Name" });
+    if (error) return `error ${JSON.stringify(error)}`;
+    return /^Guest \d+$/.test(result.you.name) || `name ${JSON.stringify(result.you.name)}`;
+  } finally {
+    c.close();
+  }
+});
+await check("guest: private welcome notice precedes the auth result", async () => {
+  const c = await connect();
+  try {
+    await c.server();
+    const { frames } = await c.call("auth", { scheme: "guest" });
+    const all = c.frames;
+    const notice = all.findIndex((f) => f.method === "message" && f.params?.from?.user_id === "~private");
+    const result = all.findIndex((f) => f.id !== undefined && f.result);
+    return (notice >= 0 && notice < result) || `notice at ${notice}, result at ${result}, ${frames.length} frames after send`;
+  } finally {
+    c.close();
+  }
+});
+await check("guest: posting is denied, history reads", async () => {
+  const c = await connect();
+  try {
+    await c.server();
+    await c.call("auth", { scheme: "guest" });
+    const post = await c.call("message", { room_id: "general", body: { text: "livecheck must never post" } });
+    if (!post.error) return "post was not denied";
+    if (!/Guests can only read/.test(post.error.message)) return `message ${JSON.stringify(post.error.message)}`;
+    const history = await c.call("history", { room_id: "general" });
+    return !history.error || `history ${JSON.stringify(history.error)}`;
+  } finally {
+    c.close();
+  }
+});
+
+// Oversized frame.
+await check("17 KiB frame closes with 1009", async () => {
+  const c = await connect();
+  await c.server();
+  c.ws.send(JSON.stringify({ method: "auth", id: "big", params: { scheme: "guest", name: "x".repeat(17 * 1024) } }));
+  const end = Date.now() + 8000;
+  while (!c.closed && Date.now() < end) await new Promise((r) => setTimeout(r, 50));
+  return same(c.closed?.code, 1009);
+});
+
+// Admin.
+const tokenFile = process.env.APRON_ADMIN_TOKEN_FILE;
+if (!tokenFile) {
+  console.log("SKIP admin checks (set APRON_ADMIN_TOKEN_FILE)");
+} else {
+  const adminToken = readFileSync(tokenFile, "utf8").trim();
+  const admin = await connect();
+  await check("admin: signs in", async () => {
+    await admin.server();
+    const { result, error } = await admin.call("auth", { scheme: "token", token: adminToken });
+    if (error) return `error ${JSON.stringify(error)}`;
+    return result.you.user_id === "admin" || `user_id ${result.you.user_id}`;
+  });
+
+  const commandRoom = "general";
+  const run = (text) => admin.call("command", { room_id: commandRoom, body: { text } });
+  const linkToken = (text) => {
+    const m = text.match(/https:\/\/link\.apron\.chat\/\S*?token=([^&>\s]+)/);
+    return m ? decodeURIComponent(m[1]) : null;
+  };
+
+  await check("admin: guest_1 holds the admin role (--role)", async () => {
+    const { frames, error } = await run("/role guest_1");
+    if (error) return `error ${JSON.stringify(error)}`;
+    return /guest_1.*roles? .*`admin`/s.test(noticeText(frames)) || `notice ${noticeText(frames)}`;
+  });
+
+  const accountID = `livecheck_${suffix}`;
+  await check("admin: /invite-token makes an account that signs in from no Origin", async () => {
+    const { frames, error } = await run(`/invite-token ${accountID}`);
+    if (error) return `error ${JSON.stringify(error)}`;
+    const token = linkToken(noticeText(frames));
+    if (!token) return "no link.apron.chat link in the notice";
+    const c = await connect();
+    try {
+      await c.server();
+      const signIn = await c.call("auth", { scheme: "token", token });
+      if (signIn.error) return `error ${JSON.stringify(signIn.error)}`;
+      return signIn.result.you.user_id === accountID || `user_id ${signIn.result.you.user_id}`;
+    } finally {
+      c.close();
+    }
+  });
+
+  await check("admin: /invite 1 signs up once, then is denied, /invite 0 revokes", async () => {
+    const { frames, error } = await run("/invite 1");
+    if (error) return `error ${JSON.stringify(error)}`;
+    const token = noticeText(frames).match(/apron_join_[A-Za-z0-9_-]+/)?.[0];
+    if (!token) return "no join token in the notice";
+    const first = await connect();
+    try {
+      await first.server();
+      const up = await first.call("auth", { scheme: "token", token, name: `livecheck_join_${suffix}` });
+      if (up.error) return `sign-up error ${JSON.stringify(up.error)}`;
+      if (!up.result.token?.startsWith("apron_invite_")) return "no apron_invite_ token in the result";
+    } finally {
+      first.close();
+    }
+    const second = await connect();
+    try {
+      await second.server();
+      const again = await second.call("auth", { scheme: "token", token, name: `livecheck_again_${suffix}` });
+      if (!again.error) return "a second use was not denied";
+    } finally {
+      second.close();
+    }
+    const revoke = await run("/invite 0");
+    return (!revoke.error && /revoked/.test(noticeText(revoke.frames))) || `revoke ${JSON.stringify(revoke.error ?? noticeText(revoke.frames))}`;
+  });
+
+  for (const [command, usage] of [
+    ["/role", /Usage: \/role/],
+    ["/admin", /Usage: \/admin/],
+    ["/toggle", /Usage: \/toggle/],
+  ]) {
+    await check(`admin: ${command} with no arguments gives its usage`, async () => {
+      const { error } = await run(command);
+      return (error && usage.test(error.message)) || `reply ${JSON.stringify(error)}`;
+    });
+  }
+  admin.close();
+}
+
+// Last, because it takes 30 s.
+if (slow) {
+  await check("unauthenticated connection closes after 30 s", async () => {
+    const c = await connect();
+    await c.server();
+    const start = Date.now();
+    const end = start + 40000;
+    while (!c.closed && Date.now() < end) await new Promise((r) => setTimeout(r, 250));
+    const seconds = (Date.now() - start) / 1000;
+    if (!c.closed) return "still open after 40 s";
+    return (c.closed.code === 1008 && seconds >= 28 && seconds <= 36) || `code ${c.closed.code} after ${seconds.toFixed(1)} s`;
+  });
+}
+
+console.log(failed === 0 ? "ALL PASS" : `${failed} FAILED`);
+process.exit(failed === 0 ? 0 : 1);

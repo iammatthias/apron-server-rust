@@ -215,6 +215,17 @@ Then it waits for `/healthz` through the public URL and prints the container
 table. Rerunning it is safe: the SQLite store and uploads live in the
 `apron_data` volume, which a deploy never removes.
 
+The script also makes the admin token on the host when it is missing, over
+ssh: `umask 077; openssl rand -hex 32` into `admin_token` in
+`APRON_SECRETS_DIR` (default `~/apron-secrets`), a 0700 directory outside the
+bundle, so rsync `--delete` never removes it. The file is 0644 so aprond's
+non-root container user can read it through the bind mount that Compose
+mounts at `/run/secrets/apron_admin_token` for `--admin-token-file`. The
+script never prints the token and never replaces an existing one. Fetch it
+for `tools/deploy/live-check.mjs` with `ssh host 'cat ~/apron-secrets/admin_token'`
+into a 0600 file named by `APRON_ADMIN_TOKEN_FILE`. The live check makes
+`livecheck_` accounts, which stay until `/purge` exists to remove them.
+
 The web client is [apron-web](https://github.com/apron-chat/apron-web), not
 code in this repository. `APRON_WEB_BUILD` names a finished build to ship as
 is. Without it, the script builds the checkout at `APRON_WEB_DIR` (default

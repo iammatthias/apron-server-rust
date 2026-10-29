@@ -12,6 +12,9 @@ services:
     restart: unless-stopped
     volumes:
       - data:/data
+      # Kept outside the bundle, which rsync --delete replaces; deploy.sh
+      # makes it on the host when it is missing.
+      - ${APRON_SECRETS_DIR:?set by deploy.sh}/admin_token:/run/secrets/apron_admin_token:ro
     command:
       - --addr=0.0.0.0:8080
       - --store=sqlite:/data/aprond.db
@@ -30,6 +33,9 @@ services:
       - --max-listener-connections=600
       - --max-private-rooms=20
       - --role=admin=guest_1
+      - --history.retention=168h
+      - --welcome=Guests can read along. Create a passkey to post, react and start threads. Messages are kept for 7 days.
+      - --admin-token-file=/run/secrets/apron_admin_token
   web:
     build:
       context: .

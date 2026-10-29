@@ -6,6 +6,8 @@
 # git ignores:
 #   APRON_DEPLOY_HOST  the SSH destination, such as user@host (required)
 #   APRON_DEPLOY_DIR   the bundle directory on the host (default: apron)
+#   APRON_SECRETS_DIR  a directory on the host, outside the bundle, that holds
+#                      the admin token (default: ~/apron-secrets)
 #   APRON_PUBLIC_URL   the URL to check (default: https://apron.farfield.systems)
 #   APRON_WEB_DIR      a checkout of apron-chat/apron-web (default:
 #                      ~/Developer/forks/apron-web)
@@ -52,17 +54,33 @@ rsync -a --delete "$web/" "$bundle/deploy/web/"
 
 ssh -o BatchMode=yes "$host" "mkdir -p $dest"
 rsync -az --delete -e 'ssh -o BatchMode=yes' "$bundle/" "$host:$dest/"
-ssh -o BatchMode=yes "$host" "cd $dest && docker compose -f deploy/compose.yaml up -d --build \
+# The admin token is made once and never replaced or printed. The directory
+# is 0700, so only the host user reaches the 0644 file, which aprond's
+# non-root container user needs to read through the bind mount.
+secrets=$(ssh -o BatchMode=yes "$host" 'bash -s' -- "${APRON_SECRETS_DIR:-}" <<'REMOTE'
+set -euo pipefail
+dir=${1:-$HOME/apron-secrets}
+umask 077
+mkdir -p "$dir"
+if [[ ! -s $dir/admin_token ]]; then
+	openssl rand -hex 32 >"$dir/admin_token.tmp"
+	mv "$dir/admin_token.tmp" "$dir/admin_token"
+fi
+chmod 0644 "$dir/admin_token"
+cd "$dir" && pwd
+REMOTE
+)
+ssh -o BatchMode=yes "$host" "cd $dest && APRON_SECRETS_DIR='$secrets' docker compose -f deploy/compose.yaml up -d --build \
 	&& docker image prune -f --filter label=systems.farfield.project=apron >/dev/null"
 
 echo "Deployed $(git -C "$root" rev-parse --short HEAD); waiting for $url/healthz"
 for _ in $(seq 60); do
 	if curl -fsS -A apron-deploy -o /dev/null "$url/healthz"; then
-		ssh -o BatchMode=yes "$host" "cd $dest && docker compose -f deploy/compose.yaml ps"
+		ssh -o BatchMode=yes "$host" "cd $dest && APRON_SECRETS_DIR='$secrets' docker compose -f deploy/compose.yaml ps"
 		exit 0
 	fi
 	sleep 2
 done
 echo "$url/healthz did not answer 200. The containers are up; check the reverse proxy in front of them." >&2
-ssh -o BatchMode=yes "$host" "cd $dest && docker compose -f deploy/compose.yaml ps && docker compose -f deploy/compose.yaml logs --tail 20"
+ssh -o BatchMode=yes "$host" "cd $dest && export APRON_SECRETS_DIR='$secrets' && docker compose -f deploy/compose.yaml ps && docker compose -f deploy/compose.yaml logs --tail 20"
 exit 1
