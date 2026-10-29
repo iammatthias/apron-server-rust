@@ -14,6 +14,7 @@ use rust_stdlib_crypto::{rand, subtle};
 use super::admin::{ADMIN_SIGNS_IN_WITH_TOKEN, ADMIN_USER_ID};
 use super::bots::BOT_SIGNS_IN_WITH_TOKEN;
 use super::protocol::*;
+use super::remap::{Fate, Remap};
 use super::server::{Client, Conn, State};
 use super::status::retry_after;
 use super::users::{normalize_name, requestable};
@@ -296,6 +297,35 @@ pub struct EmailState {
 }
 
 impl EmailState {
+    /// Forgets a proposal: its connection's, and its link.
+    pub fn drop_proposal(&mut self, id: ProposalId) {
+        let Some(p) = self.proposals.remove(&id) else {
+            return;
+        };
+        if !p.handle.is_empty() && self.links.get(&p.handle) == Some(&id) {
+            self.links.remove(&p.handle);
+        }
+    }
+
+    /// Drops the proposals of the accounts `remap` drops, or moves the
+    /// renamed account's to the new user_id.
+    pub(super) fn remap_proposals(&mut self, remap: &Remap) {
+        let dropped: Vec<ProposalId> = self
+            .proposals
+            .iter()
+            .filter(|(_, p)| remap.fate(&p.account_id) == Fate::Drop)
+            .map(|(id, _)| *id)
+            .collect();
+        for id in dropped {
+            self.drop_proposal(id);
+        }
+        for p in self.proposals.values_mut() {
+            if let Fate::Rename(to) = remap.fate(&p.account_id) {
+                p.account_id = to.to_owned();
+            }
+        }
+    }
+
     /// The state of an address, pruned, or `None` when there is none to
     /// keep. It creates nothing: a request that is refused leaves no trace
     /// in the table.
@@ -461,16 +491,6 @@ impl State {
             .ok_or_else(|| RpcError::new(CODE_INTERNAL_ERROR, "Internal error"))
     }
 
-    /// Forgets a proposal: its connection's, and its link.
-    pub fn drop_proposal_locked(&mut self, id: ProposalId) {
-        let Some(p) = self.email.proposals.remove(&id) else {
-            return;
-        };
-        if !p.handle.is_empty() && self.email.links.get(&p.handle) == Some(&id) {
-            self.email.links.remove(&p.handle);
-        }
-    }
-
     /// Forgets the proposal of a closed connection unless its link keeps it
     /// approvable elsewhere. Go lets the garbage collector do this once
     /// neither the connection nor `links` points at it.
@@ -482,7 +502,7 @@ impl State {
                 .get(&id)
                 .is_some_and(|p| p.handle.is_empty())
             {
-                self.drop_proposal_locked(id);
+                self.email.drop_proposal(id);
             }
         }
     }
@@ -603,7 +623,7 @@ impl State {
                 })
                 .collect();
             for id in expired {
-                self.drop_proposal_locked(id);
+                self.email.drop_proposal(id);
             }
             if self.email.links.len() >= MAX_EMAIL_LINKS {
                 return Err(busy());
@@ -640,7 +660,7 @@ impl State {
             sends.allow_n(&now, 1);
         }
         if let Some(previous) = conn.proposal.take() {
-            self.drop_proposal_locked(previous);
+            self.email.drop_proposal(previous);
         }
         let add = account.is_some();
         let mut p = EmailProposal {
@@ -747,7 +767,7 @@ impl State {
                     "Open this link where the account that asked for it is signed in",
                 ));
             };
-            self.drop_proposal_locked(id);
+            self.email.drop_proposal(id);
             if account == ADMIN_USER_ID {
                 return Err(denied(ADMIN_SIGNS_IN_WITH_TOKEN));
             }
@@ -783,7 +803,7 @@ impl State {
             ));
         }
         let own = self.clients.get(&c.id).and_then(|conn| conn.proposal) == Some(id);
-        self.drop_proposal_locked(id);
+        self.email.drop_proposal(id);
         if let Some(user_id) = self.emails.get(&p.email).cloned() {
             return self.sign_in_locked(c, req, &user_id, &now, true, false);
         }
@@ -837,7 +857,7 @@ impl State {
                 .get(&id)
                 .is_some_and(|p| now.before(&p.expires));
             if !live {
-                self.drop_proposal_locked(id);
+                self.email.drop_proposal(id);
                 if let Some(conn) = self.clients.get_mut(&c.id) {
                     conn.proposal = None;
                 }
@@ -854,7 +874,7 @@ impl State {
         if let Some(&id) = link_handle(token).and_then(|handle| self.email.links.get(handle)) {
             let p = &self.email.proposals[&id];
             if !now.before(&p.expires) {
-                self.drop_proposal_locked(id);
+                self.email.drop_proposal(id);
                 return None;
             }
             let secret = &token.as_bytes()[LINK_HANDLE_BYTES..];
@@ -867,7 +887,7 @@ impl State {
             if let Some(p) = self.email.proposals.get_mut(&id) {
                 p.attempts += 1;
                 if p.attempts >= MAX_EMAIL_ATTEMPTS {
-                    self.drop_proposal_locked(id);
+                    self.email.drop_proposal(id);
                 }
             }
         }

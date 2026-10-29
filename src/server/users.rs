@@ -687,7 +687,7 @@ impl State {
             .get_mut(&c.id)
             .and_then(|conn| conn.proposal.take());
         if let Some(id) = proposal {
-            self.drop_proposal_locked(id);
+            self.email.drop_proposal(id);
         }
         if let Some(conn) = self.clients.get_mut(&c.id) {
             conn.user = Some(user_id.to_owned());
@@ -744,7 +744,7 @@ impl State {
             return;
         };
         if let Some(proposal) = proposal {
-            self.drop_proposal_locked(proposal);
+            self.email.drop_proposal(proposal);
         }
         let Some(u) = self.users.get_mut(&user_id) else {
             return;

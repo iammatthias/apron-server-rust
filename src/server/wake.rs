@@ -4,11 +4,14 @@
 //! WAKES_PER_MESSAGE users, and what came while a user was attended is held
 //! and pushed if they go idle without having been back since.
 
+use std::collections::BTreeMap;
+
 use rust_stdlib::time::{self, Duration, Time, Timer};
 
 use super::messages::mentions;
 use super::protocol::*;
 use super::push::{push_payload, WakeScope};
+use super::remap::{Fate, Remap};
 use super::server::State;
 
 /// Users one message may wake, counting only those pushed to.
@@ -356,33 +359,9 @@ impl State {
     /// they come back (`idle: false`), or from `room_id`'s when they post
     /// there.
     pub fn drop_wakes_locked(&mut self, user_id: &str, room_id: Option<&str>) {
-        let mut emptied = Vec::new();
-        for (id, wake) in &mut self.pending_wakes {
-            if room_id.is_some_and(|room_id| room_id != wake.room_id) {
-                continue;
-            }
-            wake.reasons.retain(|(id, _)| id != user_id);
-            if wake.reasons.is_empty() {
-                emptied.push(*id);
-            }
-        }
-        for id in emptied {
-            if let Some(timer) = self.pending_wakes.remove(&id).and_then(|w| w.timer) {
-                timer.stop();
-            }
-        }
-    }
-
-    /// Moves a renamed user's place in the waiting wakes to their new
-    /// user_id.
-    pub fn move_wakes_locked(&mut self, from: &str, to: &str) {
-        for wake in self.pending_wakes.values_mut() {
-            for (id, _) in &mut wake.reasons {
-                if id == from {
-                    *id = to.to_owned();
-                }
-            }
-        }
+        drop_reasons(&mut self.pending_wakes, |id, room| {
+            id == user_id && room_id.is_none_or(|room_id| room_id == room)
+        });
     }
 
     /// The users the waiting wakes would wake, for tests.
@@ -516,4 +495,37 @@ fn keep_reasons(reasons: &mut Reasons, before: &Object, after: &Object) {
         *why = kept;
         !kept.is_empty()
     });
+}
+
+/// Drops the reasons `drop` picks from the waiting wakes, and the wakes left
+/// with none.
+fn drop_reasons(wakes: &mut BTreeMap<u64, PendingWake>, drop: impl Fn(&str, &str) -> bool) {
+    let mut emptied = Vec::new();
+    for (id, wake) in wakes.iter_mut() {
+        let PendingWake {
+            reasons, room_id, ..
+        } = wake;
+        reasons.retain(|(user_id, _)| !drop(user_id, room_id));
+        if reasons.is_empty() {
+            emptied.push(*id);
+        }
+    }
+    for id in emptied {
+        if let Some(timer) = wakes.remove(&id).and_then(|w| w.timer) {
+            timer.stop();
+        }
+    }
+}
+
+/// Drops the users `remap` drops from the waiting wakes, or moves the
+/// renamed user's place to the new user_id.
+pub(super) fn remap_wakes(wakes: &mut BTreeMap<u64, PendingWake>, remap: &Remap) {
+    drop_reasons(wakes, |id, _| remap.fate(id) == Fate::Drop);
+    for wake in wakes.values_mut() {
+        for (id, _) in &mut wake.reasons {
+            if let Fate::Rename(to) = remap.fate(id) {
+                *id = to.to_owned();
+            }
+        }
+    }
 }

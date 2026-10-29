@@ -227,8 +227,8 @@ pub(super) fn entangle(
 }
 
 /// Every place the server keeps `user_id`, ignoring case: each store entry
-/// a store holding the state would have, as `<kind> <id>`, and each map
-/// that lives in memory only. Text in `ignore`, such as a longer user_id
+/// a store holding the state would have, as `<kind> <id>`, and each place
+/// in memory (`State::user_id_places`). Text in `ignore`, such as a longer user_id
 /// that contains this one, does not count.
 pub(super) fn traces(server: &TestServer, user_id: &str, ignore: &[&str]) -> BTreeSet<String> {
     let needle = user_id.to_lowercase();
@@ -247,40 +247,10 @@ pub(super) fn traces(server: &TestServer, user_id: &str, ignore: &[&str]) -> BTr
             found.insert(format!("{} {}", entry.kind, entry.id));
         }
     }
-    let mut memory = |place: &str, text: &str| {
-        if has(text) {
+    for (place, text) in st.user_id_places() {
+        if has(&text) {
             found.insert(format!("{place} {text}"));
         }
-    };
-    for id in st.users.keys() {
-        memory("users", id);
-    }
-    for id in st.credentials.values() {
-        memory("credentials", id);
-    }
-    for id in st.emails.values() {
-        memory("emails", id);
-    }
-    for p in st.email.proposals.values() {
-        memory("proposals", &p.account_id);
-    }
-    for (id, room) in st.push_woken.keys() {
-        memory("push_woken", &format!("{id} {room}"));
-    }
-    for id in st.waking_users() {
-        memory("wakes", &id);
-    }
-    for id in st.limits.users() {
-        memory("limits", &id);
-    }
-    for conn in st.clients.values() {
-        memory("connections", conn.user.as_deref().unwrap_or(""));
-    }
-    for m in st.messages.values() {
-        memory("message owners", &m.owner);
-    }
-    for e in st.embeds.values() {
-        memory("embeds", &format!("{:?}", e.purpose));
     }
     found
 }

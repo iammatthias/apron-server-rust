@@ -2,29 +2,17 @@
 //! (docs/DEVIATIONS.md), following apron-server-cloudflare's `/rename` (its
 //! SPEC.md, section 5, Admins, and store.ts `renameIdentity`).
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use super::admin::ADMIN_USER_ID;
 use super::commands::private_notice;
-use super::embeds::EmbedPurpose;
 use super::invites::{issuable, NOT_ISSUABLE};
 use super::protocol::*;
-use super::purge::{truncate_chars, user_id_in, user_list};
-use super::push::push_key;
-use super::server::{Client, Frame, RecordKind, State};
+use super::purge::truncate_chars;
+use super::remap::Remap;
+use super::server::{Client, Frame, State};
 use crate::obj;
-
-/// Points a user object in a record at `to` when it names `from`, keeping
-/// its name, and reports whether it did.
-fn rename_user(user: Option<&mut Json>, from: &str, to: &str) -> bool {
-    if user_id_in(user.as_deref()) != from {
-        return false;
-    }
-    if let Some(user) = user.and_then(Json::as_object_mut) {
-        user.insert("user_id".into(), to.into());
-    }
-    true
-}
 
 impl State {
     /// `/rename <old_user_id> <new_user_id>` (a leading `@` is allowed on
@@ -93,172 +81,12 @@ impl State {
         Ok(Object::new())
     }
 
-    /// Moves everything kept under `from` to `to`: the user, with its
-    /// profile, passkeys, roles, mutes, status and accepted requests; its
-    /// address, invite and device tokens, push registrations, waiting wakes,
-    /// coalescing and limits; its bots, which keep their user_ids, and their
-    /// tokens; its memberships, read cursors and the rooms
-    /// it created; its messages, reaction sets and avatar; and its
-    /// connections. Its logged messages, reaction sets and memberships are
-    /// rewritten to `to`. Its sessions are deleted.
+    /// Moves everything kept under `from` to `to` (`remap_users_locked`)
+    /// and marks `to` used.
     fn move_user_locked(&mut self, from: &str, to: &str) {
         let lower = to.to_lowercase();
         self.used_ids.insert(lower.clone());
         self.touch_used_id(&lower);
-        self.stop_timers_locked(from);
-        let mut u = self.users.remove(from).expect("checked by the caller");
-        u.id = to.to_owned();
-        for (request_id, _) in u.dedup.iter() {
-            self.dirty
-                .dedup
-                .insert((from.to_owned(), request_id.clone()));
-            self.dirty.dedup.insert((to.to_owned(), request_id.clone()));
-        }
-        for id in &u.clients {
-            if let Some(conn) = self.clients.get_mut(id) {
-                conn.user = Some(to.to_owned());
-            }
-        }
-        let room_mutes: Vec<String> = u.room_mutes.keys().cloned().collect();
-        self.users.insert(to.to_owned(), u);
-        self.touch_user(from);
-        self.touch_user(to);
-        self.schedule_mute_locked(to);
-        for room_id in room_mutes {
-            self.schedule_room_mute_locked(to, &room_id);
-        }
-
-        for id in self
-            .credentials
-            .values_mut()
-            .chain(self.emails.values_mut())
-        {
-            if id == from {
-                *id = to.to_owned();
-            }
-        }
-        for p in self.email.proposals.values_mut() {
-            if p.account_id == from {
-                p.account_id = to.to_owned();
-            }
-        }
-        let sessions: Vec<_> = self
-            .sessions
-            .keys()
-            .filter(|key| self.sessions.get(key).expect("listed").user == from)
-            .copied()
-            .collect();
-        for key in sessions {
-            self.sessions.remove(&key);
-            self.touch_session(key);
-        }
-        for key in self.devices.move_user(from, to) {
-            self.touch_device(key);
-        }
-        if let Some(key) = self.invites.move_user(from, to) {
-            self.touch_invite(key);
-        }
-        for key in self.sorted_pushes(from) {
-            let mut p = self.pushes.remove(&key).expect("listed");
-            self.touch_push(&key);
-            p.user_id = to.to_owned();
-            let moved = push_key(to, &p.url);
-            self.pushes.insert(moved.clone(), p);
-            self.touch_push(&moved);
-        }
-        let woken: Vec<_> = self
-            .push_woken
-            .keys()
-            .filter(|(id, _)| id == from)
-            .cloned()
-            .collect();
-        for key in woken {
-            let at = self.push_woken.remove(&key).expect("listed");
-            self.push_woken.insert((to.to_owned(), key.1), at);
-        }
-        self.move_wakes_locked(from, to);
-        self.limits.move_user(from, to);
-
-        let room_ids: Vec<String> = self.rooms.keys().cloned().collect();
-        for room_id in room_ids {
-            let r = self.rooms.get_mut(&room_id).expect("listed");
-            let mut changed = r.members.remove(from);
-            if changed {
-                r.members.insert(to.to_owned());
-            }
-            if let Some(at) = r.active.remove(from) {
-                r.active.insert(to.to_owned(), at);
-                changed = true;
-            }
-            if let Some(mut cursor) = r.reads.remove(from) {
-                cursor.from.insert("user_id".into(), to.into());
-                r.reads.insert(to.to_owned(), cursor);
-                changed = true;
-            }
-            if r.creator == from {
-                r.creator = to.to_owned();
-                changed = true;
-            }
-            if changed {
-                self.touch_room(&room_id);
-            }
-        }
-        let message_ids: Vec<String> = self.messages.keys().cloned().collect();
-        for message_id in message_ids {
-            let m = self.messages.get_mut(&message_id).expect("listed");
-            let mut changed = false;
-            if m.owner == from {
-                m.owner = to.to_owned();
-                m.from.insert("user_id".into(), to.into());
-                changed = true;
-            }
-            if let Some(mut set) = m.reactions.remove(from) {
-                set.from.insert("user_id".into(), to.into());
-                m.reactions.insert(to.to_owned(), set);
-                changed = true;
-            }
-            if changed {
-                self.touch_message(&message_id);
-            }
-        }
-        let log_ids: Vec<i64> = self.records.keys().copied().collect();
-        for log_id in log_ids {
-            let record = self.records.get_mut(&log_id).expect("listed");
-            let mut value = record.value();
-            let mut renamed = false;
-            if record.kind == RecordKind::Message {
-                renamed = rename_user(value.get_mut("from"), from, to);
-            } else if let Some((list, key)) = user_list(record.kind) {
-                if let Some(Json::Array(elements)) = value.get_mut(list) {
-                    for e in elements.iter_mut().filter_map(Json::as_object_mut) {
-                        renamed |= rename_user(e.get_mut(key), from, to);
-                    }
-                }
-            }
-            if renamed {
-                record.rewrite(|v| *v = value);
-                self.touch_record(log_id);
-            }
-        }
-        for bot_id in self.bots_of(from) {
-            self.users.get_mut(&bot_id).expect("listed").owner = Some(to.to_owned());
-            self.touch_user(&bot_id);
-        }
-        for key in self.bots.move_owner(from, to) {
-            self.touch_bot(key);
-        }
-        let avatars: Vec<String> = self
-            .embeds
-            .values()
-            .filter(|e| e.purpose == EmbedPurpose::Avatar(from.to_owned()))
-            .map(|e| e.id.clone())
-            .collect();
-        for id in avatars {
-            self.embeds.get_mut(&id).expect("listed").purpose = EmbedPurpose::Avatar(to.to_owned());
-            self.touch_embed(&id);
-        }
-        for e in self.embeds.values_mut().filter(|e| e.uploader == from) {
-            e.uploader = to.to_owned();
-        }
+        self.remap_users_locked(&Remap::Rename { from, to }, &BTreeSet::new());
     }
 }

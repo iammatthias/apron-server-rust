@@ -16,6 +16,7 @@ use super::commands::private_notice;
 use super::devices::apron_link;
 use super::email::web_socket_url;
 use super::protocol::*;
+use super::remap::{Fate, Remap};
 use super::server::{Client, State};
 use super::users::{candidate_user_id, normalize_name};
 use super::webauthn::SessionKey;
@@ -79,15 +80,28 @@ impl InviteTokens {
         Some(token)
     }
 
-    /// Moves an account's token, if any, to a new user_id and returns its
-    /// key.
-    pub fn move_user(&mut self, from: &str, to: &str) -> Option<SessionKey> {
-        let key = self.by_user.remove(from)?;
-        if let Some(token) = self.by_key.get_mut(&key) {
-            token.user = to.to_owned();
+    /// Removes the token of each account `remap` drops, or moves the
+    /// renamed account's, and returns their keys.
+    pub(super) fn remap(&mut self, remap: &Remap) -> Vec<SessionKey> {
+        let mut changed = Vec::new();
+        for from in remap.sources() {
+            let Some(key) = self.by_user.remove(from) else {
+                continue;
+            };
+            changed.push(key);
+            match remap.fate(from) {
+                Fate::Rename(to) => {
+                    if let Some(token) = self.by_key.get_mut(&key) {
+                        token.user = to.to_owned();
+                    }
+                    self.by_user.insert(to.to_owned(), key);
+                }
+                _ => {
+                    self.by_key.remove(&key);
+                }
+            }
         }
-        self.by_user.insert(to.to_owned(), key);
-        Some(key)
+        changed
     }
 }
 
