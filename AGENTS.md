@@ -144,8 +144,8 @@ where Cloudflare is silent.
   throwaway crates (spikes, downstream checks) as soon as they have answered
   their question. Run `cargo clean` in a worktree you are leaving idle. Before
   handing back, report what you removed and what you left, with its size.
-- Nothing in this repository gets pushed or published without the owner's
-  go-ahead.
+- Keep `main` current on origin; never force-push. Pull requests to the
+  upstream apron-chat repositories wait for the owner's go-ahead.
 
 ## Reference parity
 
@@ -167,6 +167,13 @@ its tests, record a difference you keep in `docs/DEVIATIONS.md`, or skip a
 commit that changes nothing a client sees (a Cloudflare budget, say). Then
 move the pin in the same change. If the script reports rewritten history,
 stop and compare by hand.
+
+`tools/reference/demo-room.mjs [room_id]` reads a room on the demo server
+as a guest, with its threads, and prints what was posted since its last run
+(state and a running log in `tools/reference/.demo-room/`, which git
+ignores). It defaults to "Apron Chefs", where client and server authors
+discuss protocol changes before they land in `REFERENCE`'s repositories.
+Read it alongside `check.sh`.
 
 `tools/smoke/frame-diff.mjs` compares the shape of this server's `server`
 frame (its keys and capabilities, not their values) with the live
@@ -293,10 +300,14 @@ code in this repository. `APRON_WEB_BUILD` names a finished build to ship as
 is. Without it, the script builds the checkout at `APRON_WEB_DIR` (default
 `~/Developer/forks/apron-web`) with `VITE_DEFAULT_SERVER_URL=` and
 `VITE_TRUSTED_MEDIA_ORIGINS=`, so the client connects to the origin that
-serves it. The build needs Node 24. The homelab currently sets
-`APRON_WEB_BUILD` in `local.env` to a build of the `show-sign-in-qr` branch,
-the sign-in QR code change in apron-web pull request #143. Once that merges,
-check out apron-web's `main` there and unset `APRON_WEB_BUILD`.
+serves it. The build needs Node 24. The homelab sets `APRON_WEB_BUILD` in
+`local.env` to the `build/` of a checkout of the fork's `homelab-3` branch
+(upstream `main` with the hide-deleted, og:video and sign-in QR branches
+merged). A build shipped this way must also be same-origin. A plain
+`npm run build` reads apron-web's `.env.production`, which points the client
+at `wss://server.apron.chat/`, so that checkout keeps a gitignored
+`.env.production.local` that empties `VITE_DEFAULT_SERVER_URL` and
+`VITE_TRUSTED_MEDIA_ORIGINS`.
 
 The Compose project runs three containers behind one hostname:
 
