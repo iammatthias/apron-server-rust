@@ -2,9 +2,50 @@
 # Answers `go run ./cmd/aprond ...` with the Rust aprond, so the Go
 # repository's Playwright config starts this port. Everything else reaches the
 # real go.
+#
+# The suites assume the Go server's open defaults, so the shim adds the flags
+# that restore them where the Rust defaults follow apron-server-cloudflare:
+# guests post, the push test's capture endpoint on 127.0.0.1 is an allowed
+# host, the limits are off (every browser context connects from 127.0.0.1,
+# and the suites post and page faster than a person), and status changes
+# reach others at once. Set APROND_EXTRA_FLAGS to add more; a later flag
+# wins.
 set -euo pipefail
 if [[ "${1:-}" == run && "${2:-}" == ./cmd/aprond ]]; then
-	exec "$APROND_BIN" "${@:3}"
+	extra=(
+		--guest.posting
+		--push.hosts='*'
+		--limit.connections-per-ip=0
+		--limit.guest-connections-per-ip=0
+		--limit.connections-per-user=0
+		--limit.admissions-per-ip-minute=0
+		--limit.guest-posts-per-minute=0
+		--limit.guest-posts-per-day=0
+		--limit.posts-per-minute=0
+		--limit.posts-per-day=0
+		--limit.trusted-posts-per-minute=0
+		--limit.trusted-posts-per-day=0
+		--limit.ip-posts-per-minute=0
+		--limit.ip-posts-per-day=0
+		--limit.server-posts-per-minute=0
+		--limit.server-posts-per-day=0
+		--limit.room-lists-per-minute=0
+		--limit.uploads-per-user-day=0
+		--limit.uploads-per-day=0
+		--limit.frames-per-connection-minute=0
+		--limit.frames-per-ip-minute=0
+		--limit.server-frames-per-minute=0
+		--limit.policy-violations=0
+		--limit.status-coalesce-seconds=0
+		--limit.offline-grace-seconds=0
+		--limit.history-per-minute=0
+		--limit.history-per-day=0
+		--limit.ip-history-per-minute=0
+		--limit.ip-history-per-day=0
+		--limit.server-history-per-day=0
+	)
+	# shellcheck disable=SC2206
+	exec "$APROND_BIN" "${@:3}" "${extra[@]}" ${APROND_EXTRA_FLAGS:-}
 fi
 here=$(cd "$(dirname "$0")" && pwd)
 PATH=$(tr ':' '\n' <<<"$PATH" | grep -vx "$here" | paste -sd: -)

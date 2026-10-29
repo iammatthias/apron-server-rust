@@ -48,10 +48,25 @@ async function check(name, fn) {
 }
 const same = (got, want) => got === want || `got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`;
 
+// The server closes a connection past 60 frames a minute and every
+// connection of an address past 120, so the script keeps under both.
+const sent = [];
+async function pace(own) {
+  for (;;) {
+    const now = Date.now();
+    for (const list of [sent, own]) while (list.length && list[0] <= now - 60000) list.shift();
+    if (sent.length < 100 && own.length < 50) break;
+    await new Promise((r) => setTimeout(r, Math.min(sent[0] ?? now, own[0] ?? now) + 60001 - now));
+  }
+  sent.push(Date.now());
+  own.push(Date.now());
+}
+
 // One WebSocket with every frame it received, in order.
 class Conn {
   frames = [];
   closed = null;
+  sent = [];
   #waiters = [];
   #next = 1;
   constructor(url = wsURL) {
@@ -95,6 +110,7 @@ class Conn {
     // The server keeps an account's request ids as idempotency keys, so a
     // rerun as the same admin needs ids no earlier run used.
     const id = `lc-${suffix}-${this.#next++}`;
+    await pace(this.sent);
     const from = this.frames.length;
     this.ws.send(JSON.stringify({ method, id, params }));
     const reply = await this.until(() => this.frames.slice(from).find((f) => f.id === id), 8000, `the ${method} reply`);
@@ -109,10 +125,19 @@ class Conn {
     } catch {}
   }
 }
+// Opens a connection, waiting out a retry_after the server refuses it with
+// (its admission limit, 12 an address a minute), as clients do.
 async function connect() {
-  const c = new Conn();
-  await c.opened;
-  return c;
+  for (let attempt = 0; ; attempt++) {
+    const c = new Conn();
+    await c.opened;
+    await c.until(() => c.frames.some((f) => f.method === "server"), 8000, "the server frame");
+    await c.until(() => c.frames.length > 1 || c.closed, 8000, "the welcome");
+    const refusal = c.frames.find((f) => f.error && f.id === undefined);
+    if (!refusal || attempt >= 5) return c;
+    c.close();
+    await new Promise((r) => setTimeout(r, (refusal.error.data?.retry_after ?? 5) * 1000));
+  }
 }
 const noticeText = (frames) =>
   frames
@@ -148,6 +173,7 @@ await check("server frame: settings, welcome, ext:media, signup, auth", async ()
     const keys = Object.keys(settings ?? {}).sort().join(",");
     if (keys !== "private_rooms,read_cursors") problems.push(`ext.settings keys ${keys}`);
     if (!p.capabilities?.includes("ext:permissions")) problems.push("no ext:permissions capability");
+    if (!p.capabilities?.includes("ext:limits")) problems.push("no ext:limits capability");
     const upload = Object.keys(p.ext?.media?.upload ?? {}).sort().join(",");
     if (upload !== "audio/mp4,audio/ogg,audio/webm,image/gif,image/jpeg,image/png,image/webp") problems.push(`ext.media.upload ${upload}`);
     if (p.welcome !== welcome) problems.push("welcome text differs");
@@ -492,6 +518,28 @@ async function trackC(admin) {
     if (!url) return `no write_url ${JSON.stringify(r.error ?? r.result)}`;
     const put = await fetch(url, { method: "PUT", headers: { "Content-Type": "text/plain" }, body: "livecheck plain text" });
     return same(put.status, 415);
+  });
+  await check("E3: a burst of posts hits the write limit with retry_after, then recovers", async () => {
+    for (let i = 0; i < 40; i++) {
+      const r = await acct.call("message", { room_id: roomID, body: { text: `livecheck burst ${i}` } });
+      if (!r.error) continue;
+      const { code, message, data } = r.error;
+      if (code !== -32002 || data?.ext?.limits !== "write" || !(data.retry_after >= 1)) return `post ${i}: ${JSON.stringify(r.error)}`;
+      if (message !== "Posting limit reached") return `message ${message}`;
+      await new Promise((resolve) => setTimeout(resolve, data.retry_after * 1000 + 250));
+      return ok(await acct.call("message", { room_id: roomID, body: { text: "livecheck after the wait" } }));
+    }
+    return "40 posts were all accepted";
+  });
+  await check("E8: history pages hold 20 records by default and at most 50", async () => {
+    const count = (p) => ["rooms", "messages", "reactions", "memberships"].reduce((n, k) => n + (p?.[k]?.length ?? 0), 0);
+    const first = await admin.call("history", { room_id: roomID });
+    if (first.error) return `default ${JSON.stringify(first.error)}`;
+    if (count(first.result) !== 20 || first.result.more !== true) return `default page ${count(first.result)}, more ${first.result.more}`;
+    const most = await admin.call("history", { room_id: roomID, limit: 1000 });
+    if (most.error) return `limit 1000 ${JSON.stringify(most.error)}`;
+    const n = count(most.result);
+    return (n > 20 && (n === 50 || most.result.more === false) && n <= 50) || `limit 1000 page ${n}, more ${most.result.more}`;
   });
   await check("C3: /kick removes the account with a private notice", async () => {
     const r = await admin.call("command", { room_id: roomID, body: { text: `/kick ${acctID}` } });

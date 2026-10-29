@@ -151,9 +151,11 @@ in with the old one.
 
 ## Smoke check
 
-`tools/smoke/run.sh` runs both sessions below against both servers and
-compares them, as AGENTS.md's gate 3 describes. The rest of this section
-records the runs made by hand before it existed.
+`tools/smoke/run.sh` once ran both sessions below against both servers and
+compared them. With apron-server-cloudflare the reference (Track E), it runs
+them against this server alone and checks each transcript with `check.mjs`,
+as AGENTS.md's gate 3 describes; `compare.mjs` is gone. The rest of this
+section records the Go comparisons, which no longer run.
 
 `tools/smoke/session.mjs` runs one guest session with Node 22's WebSocket
 (guest auth, a message with an ext, a timed mute, a room mute set and

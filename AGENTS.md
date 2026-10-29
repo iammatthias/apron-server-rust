@@ -141,15 +141,17 @@ which gate each phase must pass.
    room's creation record, and null only for a history of no rooms. The Go
    repository runs it in the web client's tests only
    (`testdata/apron/DEVELOPMENT.md`), and no test here loads it.
-3. **Differential.** `tools/smoke/run.sh` builds the Go `aprond` from the
-   clone and the Rust one in release, and starts a fresh pair on free ports,
-   each with its own SQLite `--store` and `--upload.dir`, for each of two
-   scripted WebSocket sessions: `session.mjs` (a guest session) and
-   `email.mjs` (an email sign-in, a token resume, and a guest adding an
-   address). `compare.mjs` diffs the two transcripts after numbering
-   log_ids by first appearance and masking addresses, write tokens and file
-   secrets. The script exits non-zero on any difference and removes its
-   servers and temp files. It needs `go`, Node 22 and `curl`.
+3. **Smoke.** `tools/smoke/run.sh` builds the Rust `aprond` in release and
+   starts a fresh one on a free port, with its own SQLite `--store` and
+   `--upload.dir`, for each of two scripted WebSocket sessions:
+   `session.mjs` (a guest session) and `email.mjs` (an email sign-in, a
+   token resume, and a guest adding an address). `check.mjs` checks each
+   transcript: every request got exactly one reply, none an
+   `internal_error`, and the `server` frame lists the extensions
+   apron-server-cloudflare's does. The script exits non-zero on a failed
+   check and removes its servers and temp files. It needs Node 22 and
+   `curl`. It no longer compares against the Go `aprond`, which is no
+   longer the reference.
    `tools/differential` holds the Go programs that record the ACME,
    WebAuthn and Web Push vectors `cargo test` and
    `tools/differential/webpush/run.sh` check.
@@ -158,7 +160,11 @@ which gate each phase must pass.
    client. It puts a `go` shim first on `PATH` that answers
    `go run ./cmd/aprond ...` with the Rust `aprond`. Projects: `desktop`
    (`chat`, `reference`, `webauthn`), `mobile` (`responsive`), and `push`
-   (`push`, `seen`).
+   (`push`, `seen`). The shim adds the flags that restore the Go server's open
+   defaults where they are configurable: guest posting, any push host, no
+   limits, and status changes sent at once. The tests that still fail by
+   design, where this server follows apron-server-cloudflare, are listed in
+   `tools/interop/expected-failures.md`; any other failure is a regression.
 
 Some `cargo test` gates run tools outside Cargo. When a tool is missing, the
 test fails, so a green run proves the gate ran. To skip a gate on purpose,
