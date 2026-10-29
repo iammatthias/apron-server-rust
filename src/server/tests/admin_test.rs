@@ -63,6 +63,34 @@ pub fn user_id_of(result: &Object) -> String {
     you_of(result)["user_id"].as_str().unwrap().to_owned()
 }
 
+/// Runs a command and returns the text of the one ~private notice before
+/// its empty result; other notifications it causes are skipped.
+pub fn private_reply(c: &mut TestClient, text: &str) -> String {
+    let id = c.next_id("command");
+    let (before, result) = c.request("command", &id, obj! {"body" => obj! {"text" => text}});
+    let private = obj! {"user_id" => "~private", "name" => "System message to you"};
+    let notices: Vec<Object> = before
+        .iter()
+        .filter(|frame| frame.get("method") == Some(&Json::from("message")))
+        .map(|frame| notification_params(frame, "message"))
+        .filter(|notice| notice.get("from") == Some(&Json::from(private.clone())))
+        .collect();
+    assert!(
+        result.is_empty() && notices.len() == 1,
+        "{text} result {result:?} after {before:?}"
+    );
+    notices[0]["body"].as_object().unwrap()["text"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
+/// How the admin commands' notices name a user: `**name** (`user_id`)`.
+pub fn who(server: &TestServer, user_id: &str) -> String {
+    let name = server.app.lock().users[user_id].name.clone();
+    format!("**{name}** (`{user_id}`)")
+}
+
 /// Runs a command that fails and returns its error.
 pub fn command_error(c: &mut TestClient, text: &str) -> (i64, String) {
     let id = c.next_id("command");
@@ -176,4 +204,268 @@ fn test_admin_user_persists() {
     assert_eq!(you_of(&result)["roles"], strings(&["admin"]));
     // Already in general: no join follows.
     c.expect_quiet();
+}
+
+/// The `user` notification that follows a profile change, from c's next
+/// frames: `you` for the user's own connection, `new` for others.
+fn user_update(c: &TestClient, key: &str) -> Object {
+    let frame = c.read();
+    notification_params(&frame, "user")[key]
+        .as_object()
+        .cloned()
+        .unwrap_or_else(|| panic!("want user {key}: {frame:?}"))
+}
+
+/// The admin commands are listed and run for admins only (Cloudflare's
+/// "lists and runs the admin commands for admins only").
+#[test]
+fn test_admin_commands_for_admins_only() {
+    let server = admin_test_server();
+    let mut admin = admin(&server);
+    let mut alice = account(&server);
+    let help = private_reply(&mut admin, "/help");
+    for usage in [
+        "/admin [remove] <user_id>",
+        "/role <user_id> [<role>]",
+        "/invite-bot",
+    ] {
+        assert!(help.contains(usage), "admin help lacks {usage}: {help}");
+    }
+    let plain = private_reply(&mut alice, "/help");
+    assert!(
+        plain.contains("/invite-bot") && !plain.contains("/admin") && !plain.contains("/role"),
+        "account help: {plain}"
+    );
+    for (text, name) in [
+        ("/admin admin".to_owned(), "admin"),
+        (format!("/admin {}", alice.user_id), "admin"),
+        ("/role admin".to_owned(), "role"),
+    ] {
+        assert_eq!(
+            command_error(&mut alice, &text),
+            (CODE_DENIED, format!("Only an admin can use /{name}")),
+            "{text}"
+        );
+    }
+    let mut guest = dial_test_client(&server);
+    assert_eq!(
+        command_error(&mut guest, "/role admin"),
+        (CODE_DENIED, "Only an admin can use /role".into()),
+    );
+}
+
+/// /admin makes an account an admin, but not a guest, bot, or unknown user;
+/// the new admin runs the admin commands, and /admin remove takes the role
+/// away, announced with `roles: []` (§3.3), though never from the user
+/// admin.
+#[test]
+fn test_admin_grants_and_removes() {
+    let server = admin_test_server();
+    let mut admin = admin(&server);
+    let mut carol = account(&server);
+    let mut mate = account(&server);
+    let guest = dial_test_client(&server);
+    let carol_id = carol.user_id.clone();
+    let who = who(&server, &carol_id);
+    let name_of = |c: &TestClient| c.user_id.clone();
+    let mut bot_owner = account(&server);
+    let bot_token = private_reply(&mut bot_owner, "/invite-bot");
+    assert!(bot_token.contains("apron_bot_"), "{bot_token}");
+    admin.drain();
+    carol.drain();
+    mate.drain();
+
+    assert_eq!(
+        command_error(&mut carol, "/role admin"),
+        (CODE_DENIED, "Only an admin can use /role".into()),
+    );
+    assert_eq!(
+        private_reply(&mut admin, &format!("/admin {carol_id}")),
+        format!("{who} is now an admin.")
+    );
+    let you = user_update(&carol, "you");
+    assert_eq!(you["roles"], strings(&["admin"]), "carol's you: {you:?}");
+    let new = user_update(&mate, "new");
+    assert_eq!(new["roles"], strings(&["admin"]), "mate's new: {new:?}");
+    assert_eq!(
+        private_reply(&mut admin, &format!("/admin @{carol_id}")),
+        format!("{who} is already an admin.")
+    );
+    admin.drain();
+    // The new admin runs the admin commands.
+    assert_eq!(
+        private_reply(&mut carol, "/role admin"),
+        "**Admin** (`admin`) has the roles `admin`."
+    );
+    for target in [name_of(&guest), "bot_nobody".into(), "nobody_123".into()] {
+        let (code, message) = command_error(&mut admin, &format!("/admin {target}"));
+        assert_eq!(code, CODE_INVALID_PARAMS, "/admin {target}: {message}");
+    }
+    assert_eq!(
+        command_error(&mut admin, &format!("/admin bot_{}", bot_owner.user_id)),
+        (CODE_DENIED, "A bot can't be an admin".into()),
+    );
+    for usage in ["/admin", "/admin remove", "/admin a b"] {
+        assert_eq!(
+            command_error(&mut admin, usage),
+            (
+                CODE_INVALID_PARAMS,
+                "Usage: /admin [remove] <user_id>".into()
+            ),
+        );
+    }
+
+    mate.drain();
+    carol.drain();
+    assert_eq!(
+        private_reply(&mut admin, &format!("/admin remove @{carol_id}")),
+        format!("{who} is no longer an admin.")
+    );
+    assert_eq!(user_update(&carol, "you")["roles"], strings(&[]));
+    assert_eq!(user_update(&mate, "new")["roles"], strings(&[]));
+    assert_eq!(
+        command_error(&mut carol, "/role admin"),
+        (CODE_DENIED, "Only an admin can use /role".into()),
+    );
+    let listed = list_rooms(&mut mate, obj! {"room_id" => "general", "members" => true});
+    let roles_of = |id: &str| {
+        listed["users"]
+            .as_list()
+            .iter()
+            .filter_map(Json::as_object)
+            .find(|u| u["user_id"] == Json::from(id))
+            .map(|u| u["roles"].clone())
+    };
+    assert_eq!(roles_of(&carol_id), Some(strings(&[])), "listed carol");
+    assert_eq!(roles_of("admin"), Some(strings(&["admin"])), "listed admin");
+    assert_eq!(
+        private_reply(&mut admin, &format!("/admin remove {carol_id}")),
+        format!("{who} was not an admin.")
+    );
+    assert_eq!(
+        command_error(&mut admin, "/admin remove admin"),
+        (CODE_DENIED, "The admin user is always an admin".into()),
+    );
+}
+
+/// /role shows a user's roles and toggles one; any name is a label, and
+/// `admin` also runs the admin commands.
+#[test]
+fn test_role_shows_and_toggles() {
+    let server = admin_test_server();
+    let mut admin = admin(&server);
+    let mut labeled = account(&server);
+    let mut mate = account(&server);
+    let user_id = labeled.user_id.clone();
+    let who = who(&server, &user_id);
+    labeled.drain();
+    mate.drain();
+    assert_eq!(
+        private_reply(&mut admin, &format!("/role {user_id}")),
+        format!("{who} has no roles.")
+    );
+    assert_eq!(
+        private_reply(&mut admin, &format!("/role @{user_id} Friend")),
+        format!("{who} now has the role `friend`.")
+    );
+    assert_eq!(user_update(&labeled, "you")["roles"], strings(&["friend"]));
+    assert_eq!(user_update(&mate, "new")["roles"], strings(&["friend"]));
+    assert_eq!(
+        command_error(&mut labeled, "/role admin"),
+        (CODE_DENIED, "Only an admin can use /role".into()),
+        "a label grants nothing"
+    );
+    private_reply(&mut admin, &format!("/role {user_id} admin"));
+    labeled.drain();
+    private_reply(&mut labeled, "/role admin");
+    assert_eq!(
+        private_reply(&mut admin, &format!("/role {user_id}")),
+        format!("{who} has the roles `friend`, `admin`.")
+    );
+    assert_eq!(
+        private_reply(&mut admin, &format!("/role {user_id} friend")),
+        format!("{who} no longer has the role `friend`.")
+    );
+    private_reply(&mut admin, &format!("/role {user_id} admin"));
+    labeled.drain();
+    assert_eq!(
+        command_error(&mut labeled, "/role admin"),
+        (CODE_DENIED, "Only an admin can use /role".into()),
+    );
+    for text in [
+        format!("/role {user_id} no!pe"),
+        "/role guest_1 friend".into(),
+        "/role nobody_123 friend".into(),
+        "/role nobody_123".into(),
+    ] {
+        assert_eq!(
+            command_error(&mut admin, &text).0,
+            CODE_INVALID_PARAMS,
+            "{text}"
+        );
+    }
+    for text in ["/role admin admin", "/role admin bot"] {
+        assert_eq!(command_error(&mut admin, text).0, CODE_DENIED, "{text}");
+    }
+    assert_eq!(
+        command_error(&mut admin, "/role"),
+        (
+            CODE_INVALID_PARAMS,
+            "Usage: /role <user_id> [<role>]".into()
+        ),
+    );
+    // A passkey holder is never a bot, and nobody holds a ninth role.
+    assert_eq!(
+        command_error(&mut admin, &format!("/role {user_id} bot")),
+        (
+            CODE_DENIED,
+            "A bot signs in with a token and holds no passkey; this user has one".into()
+        ),
+    );
+    for n in 0..8 {
+        private_reply(&mut admin, &format!("/role {user_id} r{n}"));
+    }
+    assert_eq!(
+        command_error(&mut admin, &format!("/role {user_id} r8")),
+        (CODE_DENIED, "A user has at most 8 roles".into()),
+    );
+}
+
+/// A role an admin took away stays away across restarts, though the --role
+/// grant that seeded it is still configured; a role given at runtime is
+/// kept.
+#[test]
+fn test_roles_persist_and_seed_once() {
+    let kept: Arc<dyn Store> = Arc::new(store::Memory::new());
+    let dir = TempDir::new("apron-seed-");
+    let mut server = start_with(kept.clone(), &format!("{dir}/a"), |config| {
+        config.admin_token = admin_config().admin_token;
+    });
+    let ada = account(&server);
+    let ada_id = ada.user_id.clone();
+    drop(ada);
+    server.stop();
+
+    let configure = |config: &mut Config| {
+        config.admin_token = admin_config().admin_token;
+        config.roles = std::collections::BTreeMap::from([("mod".into(), vec![ada_id.clone()])]);
+    };
+    let mut server = start_with(kept.clone(), &format!("{dir}/b"), configure);
+    let mut boss = admin(&server);
+    let who = who(&server, &ada_id);
+    assert_eq!(
+        private_reply(&mut boss, &format!("/role {ada_id}")),
+        format!("{who} has the roles `mod`.")
+    );
+    private_reply(&mut boss, &format!("/role {ada_id} mod"));
+    private_reply(&mut boss, &format!("/role {ada_id} friend"));
+    drop(boss);
+    server.stop();
+
+    let server = start_with(kept, &format!("{dir}/c"), configure);
+    let mut boss = admin(&server);
+    assert_eq!(
+        private_reply(&mut boss, &format!("/role {ada_id}")),
+        format!("{who} has the roles `friend`.")
+    );
 }

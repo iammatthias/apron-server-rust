@@ -777,7 +777,11 @@ impl State {
         if has_name && u.bot() && normalize_name(&name) != u.name {
             return Err(RpcError::new(
                 CODE_DENIED,
-                "A bot is named after its owner, who can rename it with /invite-bot",
+                if u.owner.is_some() {
+                    "A bot is named after its owner, who can rename it with /invite-bot"
+                } else {
+                    "A bot can't change its name"
+                },
             ));
         }
         if has_avatar && !avatar.is_empty() && avatar != u.avatar && !valid_avatar(&avatar) {

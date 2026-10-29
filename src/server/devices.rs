@@ -108,12 +108,6 @@ impl State {
         args: &str,
     ) -> Result<Object, RpcError> {
         let user_id = self.client_user(c).unwrap_or_default();
-        if !self.users[&user_id].account() {
-            return Err(RpcError::new(
-                CODE_DENIED,
-                "Sign in with a passkey or email to use /invite-device",
-            ));
-        }
         if user_id == super::admin::ADMIN_USER_ID {
             return Err(RpcError::new(
                 CODE_DENIED,

@@ -301,14 +301,20 @@ fn test_invite_bot_denied_to_guests_and_bots() {
     let (mut ada, ada_id) = account(&server, "Ada");
     let (token, _) = invite_bot(&mut ada, &format!("bot_{ada_id}"), "Bot of Ada", NO_URL);
     let (mut b, _) = bot(&server, "", &token);
+    let bot_denied = |command: &str| {
+        Json::from(obj! {
+            "code" => CODE_DENIED,
+            "message" => format!("A bot can't use {command}"),
+        })
+    };
     assert_eq!(
         command_error(&mut b, "/invite-bot"),
-        denied("/invite-bot"),
+        bot_denied("/invite-bot"),
         "bot"
     );
     assert_eq!(
         command_error(&mut b, "/invite-device phone"),
-        denied("/invite-device"),
+        bot_denied("/invite-device"),
         "bot"
     );
     assert_eq!(
@@ -695,7 +701,7 @@ fn test_invite_bot_tokens_survive_restart() {
         command_error(&mut b, "/invite-bot"),
         Json::from(obj! {
             "code" => CODE_DENIED,
-            "message" => "Sign in with a passkey or email to use /invite-bot",
+            "message" => "A bot can't use /invite-bot",
         }),
         "bot after restart"
     );
