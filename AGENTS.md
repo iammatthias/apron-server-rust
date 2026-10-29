@@ -4,49 +4,109 @@ Instructions for AI coding agents and contributors working in this repository.
 
 ## What this is
 
-`apron-server-rust` is a Rust port of
-[apron-chat/apron-server-go](https://github.com/apron-chat/apron-server-go),
-the reference server for the [Apron](https://github.com/shazow/apron) chat
-protocol, version 9. It builds one binary, `aprond`, that should behave the
-way the Go `aprond` does: same flags, same TOML config, same wire frames,
-same storage format.
+`apron-server-rust` is a Rust server for the
+[Apron](https://github.com/shazow/apron) chat protocol, version 9. It builds
+one binary, `aprond`.
 
-Where `PROTOCOL.md` leaves room for choice, the reference is now
+The reference is
 [apron-chat/apron-server-cloudflare](https://github.com/apron-chat/apron-server-cloudflare):
-its `SPEC.md` and its behavior, with its defaults. Go is a fallback where
-Cloudflare says nothing, and there is no Go upstream work. Port a
-Cloudflare behavior with its integration tests where they exist, and record
-what still differs in `docs/DEVIATIONS.md`. Some tests and tools still read
-a local Go clone at `$APRON_GO_DIR`, which defaults to
-`~/Developer/forks/apron-server-go`, for the shared fixtures and the
-browser suites. Keep the clone unmodified.
+its `SPEC.md` and its behavior, with its defaults. Port a Cloudflare
+behavior with its integration tests where they exist, and record what still
+differs in `docs/DEVIATIONS.md`.
 
-The port also dogfoods [rust-stdlib](https://github.com/iammatthias/rust-stdlib),
-Go 1.27's standard library for Rust. Wherever the Go server imports a Go
-standard package, this port uses the matching rust-stdlib module.
+The server began as a port of
+[apron-chat/apron-server-go](https://github.com/apron-chat/apron-server-go).
+Go is now a fallback only where Cloudflare says nothing, and there is no Go
+upstream work. Two Go-era shapes remain:
+
+- The command line is go-flags' layout: namespaced groups (`--upload.dir`),
+  the same `--help` format and error texts, and a TOML config file whose
+  tables are those groups (`src/aprond/options.rs`). Flags Go has keep
+  their names, and the groups this server added follow the same layout.
+- The store holds Go's entry kinds (`meta`, `used_id`, `record`, `room`, `message`,
+  `user`, `session`, `embed`, `push`) with kinds of this server's own added
+  (`device`, `bot`, `invite`, `dedup`), as `src/server/persist.rs` lists.
+  The format is this server's own. A Go `aprond` opening it is not
+  supported or tested.
+
+Some tests and tools still read a local Go clone at `$APRON_GO_DIR`, which
+defaults to `~/Developer/forks/apron-server-go`, for the shared fixtures
+and the browser suites. Keep the clone unmodified.
+
+The server also dogfoods [rust-stdlib](https://github.com/iammatthias/rust-stdlib),
+Go 1.27's standard library for Rust. Where it needs a Go standard package,
+it uses the matching rust-stdlib module.
 
 ## Layout
 
-The Go files map one to one onto Rust modules:
-
-| Go | Rust |
+| Path | Holds |
 |---|---|
-| `internal/server/*.go` | `src/server/*.rs` |
-| `internal/store/*.go` | `src/store/*.rs` |
-| `cmd/aprond/main.go`: `main` and `run` | `src/bin/aprond/main.rs` |
-| `cmd/aprond/*.go`: options, config, email, ACME, listener and debug helpers | `src/aprond/*.rs` (library, so tests and the binary share it) |
-| `github.com/coder/websocket` | `src/ws.rs` (RFC 6455 over a hijacked rust-stdlib connection) |
-| `golang.org/x/time/rate` | `src/rate.rs` |
-| `golang.org/x/image/webp` | `src/webp.rs` (the `DecodeConfig` path only, registered with rust-stdlib's `image`) |
+| `src/bin/aprond/main.rs` | `main` and `run`: settings to `server::Config`, the listeners, signals and shutdown |
+| `src/aprond/` | The binary's helpers as a library, so tests share them: flags (`options.rs`), the TOML config (`config.rs`), settings checks (`settings.rs`), the SMTP sender (`email.rs`), ACME (`acme/`), the listener cap (`listener.rs`) and the debug server (`debug.rs`) |
+| `src/server/` | The protocol server, grouped below |
+| `src/store/` | The `Store` trait with memory and SQLite backends |
+| `src/webauthn/` | The subset of go-webauthn the server calls, with `src/cbor.rs` (tests in `src/cbor/tests.rs`) |
+| `src/ws.rs` | RFC 6455 over a hijacked rust-stdlib connection |
+| `src/rate.rs` | A token bucket, ported from `golang.org/x/time/rate` |
+| `src/webp.rs` | WebP dimensions for `image::decode_config`, from `golang.org/x/image/webp` |
+| `src/test_gate.rs` | The gates that need `go` or Pebble (Verification, below) |
 
-`docs/PORT.md` holds the plan, the phase status, and the decision log.
-`docs/DEVIATIONS.md` lists every known difference from the Go server.
+`src/server/` modules by concern. Each module's `//!` header says more.
+
+- **Core.** `server.rs` holds `Server`, `State` behind one mutex, the
+  connection lifecycle and the HTTP handler. `config.rs` holds `Config`
+  and its defaults. `client.rs` is one connection's queue, writer and
+  pinger. `dispatch.rs` is the method table and `process_frame`.
+  `protocol.rs` is the request envelope and the dynamic JSON value.
+  `dedup.rs` replays retried requests (§1.2). `server_frame.rs` builds the
+  `server` frame and the welcome notice. `metadata.rs` holds the server's
+  title, description and avatar.
+- **Persistence.** `persist.rs` writes marked state to the store when the
+  lock is released. `restore.rs` rebuilds `State` from the store at start.
+  `retention.rs` expires history for `--history.retention`.
+- **Users and sign-in.** `users.rs` (users, guests, roles, attach and
+  detach), `user_ids.rs` (display names and new user_ids), `webauthn.rs`
+  (passkeys and sessions), `passkeys.rs` (`/passkeys`), `email.rs` (email
+  sign-in), `admin.rs` (the admin token), `tokens.rs` (the table behind
+  sessions and device, invite and bot tokens), `devices.rs`
+  (`/invite-device`), `invites.rs` (`/invite-token` and `/invite`) and
+  `bots.rs` (`/invite-bot` and the idle bot sweep).
+- **Rooms and messages.** `rooms.rs` (rooms, memberships and delivery),
+  `room_set.rs`, `room_list.rs`, `history.rs`, `messages.rs` (saves,
+  edits, moves and reactions), `emoji.rs` with `emoji_qualified.txt`
+  (reaction entries), `activity.rs` (typing and read cursors), `status.rs`
+  and `unread.rs`.
+- **Commands.** `commands.rs` holds the command table and the small
+  commands. `toggles.rs`, `custom_emoji.rs`, `purge.rs` and `rename.rs`
+  hold the larger ones. `remap.rs` is the one walk over every place
+  `State` keeps a user_id, which `/purge` and `/rename` share.
+- **Embeds and media.** `embeds.rs` (hosted embeds and their write URLs),
+  `uploads.rs` (`/write/` and `/files/`), `streams.rs` (`/streams/`),
+  `media_types.rs` (type sniffing) and `unfurl/` (link previews:
+  `text.rs`, `page.rs`, `fetch.rs`, `cache.rs`, `mod.rs`).
+- **Push.** `push.rs` (registrations, wake scopes and the payload),
+  `push_delivery.rs` (the delivery queues and lanes), `wake.rs` (whom a
+  message wakes, and when), `webpush.rs` (encryption and VAPID) and
+  `outbound.rs` (the HTTP clients for push and unfurls, with the dial
+  check).
+- **Limits.** `limits.rs` holds the rate and count limits and every
+  `charge_*_locked` function. Five per-user limiters (push registrations,
+  status, typing, read relays and unfurls) use `crate::rate::Limiter` on
+  `UserState` instead.
+- **Tests.** `tests/` holds the server's integration tests, one file per
+  area, with shared helpers and fixtures in `tests/helpers/` (server,
+  client, frames, rooms, uploads and accounts).
+
+`docs/PORT.md` holds the port's history: the phase plan, gate results and
+the decision log. `docs/DEVIATIONS.md` lists every known difference from
+apron-server-cloudflare a client can see, and the extensions and choices
+where Cloudflare is silent.
 
 ## Rules
 
 - **No async runtime.** rust-stdlib serves HTTP with one thread per
-  connection. Where Go starts a goroutine, start a thread or reuse a worker.
-  Where Go uses `time.AfterFunc`, use rust-stdlib's `time` package.
+  connection. For background work, start a thread or reuse a worker. For a
+  timer, use rust-stdlib's `time` package (`time::after_func`).
 - **Use rust-stdlib for Go standard packages.** If rust-stdlib is missing
   something or gets it wrong, fix it upstream. Do not work around it here.
   The fix follows that repository's `AGENTS.md` and lands on its `main` as a
@@ -61,15 +121,21 @@ The Go files map one to one onto Rust modules:
 - **Third-party crates need an entry in the allowlist below,** with the Go
   dependency they replace and why rust-stdlib cannot do it. Pin exact
   versions.
-- **Port behavior, not just structure.** When you port a Go function, port
-  its tests too: tables, edge cases, and error text. Do not mark a feature
-  done until its gate in `docs/PORT.md` passes.
-- **Record every difference.** If the Rust server behaves differently from
-  the Go server in a way a client could see, add it to `docs/DEVIATIONS.md`.
-  Prose elsewhere does not count.
-- Comments explain a non-obvious *why*. Keep the Go doc comments that carry
-  protocol references such as `(§4.2.1)`. Drop the ones that only restate the
-  code.
+- **Port behavior, not just structure.** When you port a Cloudflare
+  behavior, port its tests too: edge cases, codes and error text. Do not
+  call a feature done until its tests pass.
+- **Record every difference.** If this server behaves differently from
+  apron-server-cloudflare in a way a client could see, or adds something
+  Cloudflare lacks, add a section to `docs/DEVIATIONS.md`. Delete the
+  section when the behavior matches Cloudflare. Prose elsewhere does not
+  count.
+- **Handle every new `State` field in `remap.rs`.** `remap_fields_locked`
+  destructures `State` exhaustively, so a new field does not compile until
+  the walk handles it or marks it as holding no user_id. The purge and
+  rename tests check the result through `State::user_id_places`.
+- Comments explain a non-obvious *why*. Keep the doc comments that carry
+  protocol references such as `(§4.2.1)`. Drop the ones that only restate
+  the code.
 - No `todo!()` or `unimplemented!()` in code that ships. No `unsafe`.
 - Never report a test as passing unless it ran and passed.
 - **Clean up build output as you go.** A Rust `target/` reaches several
@@ -117,22 +183,20 @@ from the web client's origin.
 
 ## Verification
 
-The gates are listed from cheapest to most thorough. `docs/PORT.md` names
-which gate each phase must pass.
+The gates are listed from cheapest to most thorough.
 
-1. **Unit tests.** `cargo test`. These are ported from the Go `*_test.go`
-   files.
+1. **Unit and integration tests.** `cargo test`. They include the tests
+   ported from apron-server-go's `*_test.go` files and from
+   apron-server-cloudflare's integration tests, and the tests of this
+   server's own extensions.
 2. **Shared fixtures.** `cargo test` loads two of the JSON vector files in
    the Go clone's `testdata/apron/tests/fixtures`, from
    `$APRON_GO_DIR/testdata/apron`: `push.json`
    (`src/server/tests/push_fixture_test.rs`) and `webauthn.json`
-   (`tests/webauthn_fixture.rs`). The third file, `history.json`, has
-   no server-side cases. Its checkpoint and floor cases are the web client's
-   recovery arithmetic, and its room cases model a server that discards old
-   history, which the Go server never does: its `history_log_id` is the
-   room's creation record, and null only for a history of no rooms. The Go
-   repository runs it in the web client's tests only
-   (`testdata/apron/DEVELOPMENT.md`), and no test here loads it.
+   (`tests/webauthn_fixture.rs`). No test loads the third file,
+   `history.json`. Its cases are the web client's recovery arithmetic, and
+   the protocol repository runs it in the web client's tests only
+   (`testdata/apron/DEVELOPMENT.md`).
 3. **Smoke.** `tools/smoke/run.sh` builds the Rust `aprond` in release and
    starts a fresh one on a free port, with its own SQLite `--store` and
    `--upload.dir`, for each of two scripted WebSocket sessions:
@@ -142,8 +206,7 @@ which gate each phase must pass.
    `internal_error`, and the `server` frame lists the extensions
    apron-server-cloudflare's does. The script exits non-zero on a failed
    check and removes its servers and temp files. It needs Node 22 and
-   `curl`. It no longer compares against the Go `aprond`, which is no
-   longer the reference.
+   `curl`.
    `tools/differential` holds the Go programs that record the ACME,
    WebAuthn and Web Push vectors `cargo test` and
    `tools/differential/webpush/run.sh` check.
@@ -156,7 +219,7 @@ which gate each phase must pass.
    defaults where they are configurable: guest posting, any push host, no
    limits, and status changes sent at once. The tests that still fail by
    design, where this server follows apron-server-cloudflare, are listed in
-   `tools/interop/expected-failures.md`; any other failure is a regression.
+   `tools/interop/expected-failures.md`. Any other failure is a regression.
 
 Some `cargo test` gates run tools outside Cargo. When a tool is missing, the
 test fails, so a green run proves the gate ran. To skip a gate on purpose,
