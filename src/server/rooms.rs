@@ -30,6 +30,11 @@ pub const MAX_CREATED_ROOMS: usize = 16;
 pub const MAX_THREADS: usize = 100;
 /// Most live threads one account created (Cloudflare's threadsPerUser).
 pub const MAX_THREADS_PER_USER: usize = 25;
+/// The top-level private rooms one account may have started and still
+/// live, and the server may hold (Cloudflare's privateRoomsPerUser and
+/// privateRoomLimit).
+pub const MAX_PRIVATE_ROOMS_PER_USER: usize = 5;
+pub const MAX_PRIVATE_ROOMS: usize = 100;
 
 /// A room's current record, its log, and its members. Every room, including
 /// threads (rooms with parent_room_id), is visible to every authenticated

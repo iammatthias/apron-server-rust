@@ -8,8 +8,8 @@ use super::limits::Category;
 use super::protocol::*;
 use super::rooms::{
     room_update, RoomState, DEFAULT_ROOM_TITLE, DEFAULT_THREAD_TITLE, MAX_CREATED_ROOMS,
-    MAX_DESCRIPTION_BYTES, MAX_ROOM_EXT_BYTES, MAX_THREADS, MAX_THREADS_PER_USER,
-    MAX_THREAD_TITLE_RUNES, TOP_LEVEL_ROOM_TITLE,
+    MAX_DESCRIPTION_BYTES, MAX_PRIVATE_ROOMS, MAX_PRIVATE_ROOMS_PER_USER, MAX_ROOM_EXT_BYTES,
+    MAX_THREADS, MAX_THREADS_PER_USER, MAX_THREAD_TITLE_RUNES, TOP_LEVEL_ROOM_TITLE,
 };
 use super::server::{Server, State, DEFAULT_ROOM_ID};
 use super::users::{UserState, ADMIN_ROLE, ROOM_CREATOR_ROLES};
@@ -72,12 +72,20 @@ impl State {
     /// The threads user_id created whose history retention has not
     /// discarded entirely.
     fn live_threads_created_by(&self, user_id: &str) -> usize {
+        self.live_rooms_created_by(user_id, |r| r.parent.is_some())
+    }
+
+    /// The top-level private rooms user_id started that retention has not
+    /// discarded entirely.
+    fn live_private_rooms_created_by(&self, user_id: &str) -> usize {
+        self.live_rooms_created_by(user_id, |r| r.parent.is_none() && r.private)
+    }
+
+    fn live_rooms_created_by(&self, user_id: &str, kind: impl Fn(&RoomState) -> bool) -> usize {
         self.rooms
             .values()
             .filter(|r| {
-                r.parent.is_some()
-                    && r.creator == user_id
-                    && r.history_log_id(self.history_floor).is_some()
+                kind(r) && r.creator == user_id && r.history_log_id(self.history_floor).is_some()
             })
             .count()
     }
@@ -172,6 +180,24 @@ impl State {
                     "You are in {} private rooms, the most at once; leave one to start another",
                     self.config.max_private_rooms
                 ),
+            ));
+        } else if self.live_private_rooms_created_by(&user_id) >= MAX_PRIVATE_ROOMS_PER_USER {
+            // So one account cannot take every slot by starting rooms and
+            // leaving them to others.
+            return Err(RpcError::new(
+                CODE_DENIED,
+                format!("You can have started at most {MAX_PRIVATE_ROOMS_PER_USER} private rooms at once; one stops counting when everyone has left it or its history expires"),
+            ));
+        } else if self
+            .rooms
+            .values()
+            .filter(|r| r.parent.is_none() && r.private)
+            .count()
+            >= MAX_PRIVATE_ROOMS
+        {
+            return Err(RpcError::new(
+                CODE_DENIED,
+                "The server holds as many private rooms as it can; one frees up when everyone has left it or its history expires",
             ));
         }
         let counted = !(updating || private && parent.is_none());
