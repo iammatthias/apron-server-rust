@@ -4,6 +4,7 @@
 
 use std::sync::Arc;
 
+use rust_stdlib::regexp::Regexp;
 use rust_stdlib_crypto::sha256;
 
 use super::helpers::*;
@@ -29,10 +30,22 @@ pub fn admin_config() -> Config {
     }
 }
 
-/// Signs c in with `token` through the token scheme and returns the frame.
+/// Signs c in with `token` through the token scheme and returns the reply,
+/// skipping the notifications before it.
 pub fn token_auth(c: &mut TestClient, token: &str) -> Object {
     let id = c.next_id("token");
-    c.call("auth", &id, obj! {"scheme" => "token", "token" => token})
+    reply_to(c, "auth", &id, obj! {"scheme" => "token", "token" => token})
+}
+
+/// Sends a request and returns its reply, skipping notifications.
+fn reply_to(c: &mut TestClient, method: &str, id: &str, params: Object) -> Object {
+    c.write(&obj! {"method" => method, "id" => id, "params" => params});
+    loop {
+        let frame = c.read();
+        if frame.contains_key("id") {
+            return frame;
+        }
+    }
 }
 
 /// Connects with no origin and signs in as the admin user.
@@ -95,13 +108,7 @@ pub fn who(server: &TestServer, user_id: &str) -> String {
 /// notifications before it.
 pub fn command_error(c: &mut TestClient, text: &str) -> (i64, String) {
     let id = c.next_id("command");
-    c.write(&obj! {"method" => "command", "id" => id.as_str(), "params" => obj! {"body" => obj! {"text" => text}}});
-    let frame = loop {
-        let frame = c.read();
-        if frame.contains_key("id") {
-            break frame;
-        }
-    };
+    let frame = reply_to(c, "command", &id, obj! {"body" => obj! {"text" => text}});
     let error = frame
         .get("error")
         .and_then(Json::as_object)
@@ -711,5 +718,175 @@ fn test_invite_token_never_makes_admin() {
     assert_eq!(
         command_error(&mut ada, "/invite-token Admin"),
         (CODE_INVALID_PARAMS, "The user_id Admin is taken".into()),
+    );
+}
+
+fn joined_of(frames: &[Object], user_id: &str) -> bool {
+    frames.iter().any(|frame| {
+        frame.get("method") == Some(&Json::from("room_update"))
+            && format!("{frame:?}").contains(&format!("\"user_id\": String(\"{user_id}\")"))
+    })
+}
+
+/// /invite mints a sign-up token that makes an account per use, each with
+/// its own token (Appendix B), joining general after the auth result; a
+/// used-up invite is dropped when tried; a new invite replaces the last and
+/// /invite 0 revokes it; more than 50 uses is denied. (Cloudflare's test
+/// also exhausts its budget mid-sign-up, which this server has none of.)
+#[test]
+fn test_invite_signs_up_accounts() {
+    let server = new_test_server(Config {
+        public_url: "https://chat.example".into(),
+        ..admin_config()
+    });
+    let mut admin = admin(&server);
+    let text = private_reply(&mut admin, "/invite 2");
+    let invite = token_in(&text);
+    assert!(
+        invite.starts_with("apron_join_") && invite.len() == "apron_join_".len() + 43,
+        "{invite}"
+    );
+    let expires = server.app.lock().join_invite.clone().unwrap().expires_ms;
+    let until = rust_stdlib::time::unix_milli(expires)
+        .utc()
+        .format("2006-01-02 15:04");
+    assert_eq!(
+        text,
+        format!(
+            "This invite signs up 2 new users until {until} UTC, and replaces any earlier one. Each gets their own token to sign in again with, and can add a passkey after.\n\n```\n{invite}\n```\n\nOr send this link, which signs each of them up with any Apron app: <https://link.apron.chat/#server=wss://chat.example/ws&token={invite}>\n\nTo sign up, authenticate with the token scheme and a name: `{{\"method\": \"auth\", \"params\": {{\"scheme\": \"token\", \"token\": \"{invite}\", \"name\": \"Ada\"}}}}`"
+        )
+    );
+    let week = expires - rust_stdlib::time::now().unix_milli();
+    assert!(
+        (7 * 86_400_000 - 60_000..=7 * 86_400_000).contains(&week),
+        "expires in {week} ms"
+    );
+
+    // A guest signs up with it: a new account named as asked, with its own
+    // token, whose join of general follows the result.
+    let mut ada = dial_test_client(&server);
+    ada.drain();
+    let (before, result) = ada.request(
+        "auth",
+        "join",
+        obj! {"scheme" => "token", "token" => invite.as_str(), "name" => "Ada"},
+    );
+    let ada_id = user_id_of(&result);
+    assert!(
+        Regexp::new(r"^ada_\d{4}$").unwrap().match_string(&ada_id),
+        "{ada_id}"
+    );
+    assert_eq!(you_of(&result)["name"], Json::from("Ada"));
+    assert_eq!(you_of(&result)["roles"], strings(&[]));
+    let own = result["token"].as_str().unwrap().to_owned();
+    assert!(own.starts_with("apron_invite_"), "{own}");
+    assert!(
+        !joined_of(&before, &ada_id),
+        "join before the result: {before:?}"
+    );
+    assert!(joined_of(&ada.drain(), &ada_id), "no join after the result");
+    ada.user_id = ada_id.clone();
+    save(
+        &mut ada,
+        "post",
+        obj! {"body" => obj! {"text" => "hi from an invite"}},
+    );
+    let (mut again, _) = dial_raw(&server);
+    assert_eq!(
+        user_id_of(&passkey_result(&token_auth(&mut again, &own))),
+        ada_id
+    );
+
+    // Without a name, a sign-up is a Member.
+    let (mut second, _) = dial_raw(&server);
+    let member = passkey_result(&token_auth(&mut second, &invite));
+    assert_eq!(you_of(&member)["name"], Json::from("Member"));
+    assert!(user_id_of(&member).starts_with("member_"), "{member:?}");
+    assert!(joined_of(&second.drain(), &user_id_of(&member)));
+    // The third finds it used up, and it is dropped.
+    let (mut third, _) = dial_raw(&server);
+    let used_up = Json::from(obj! {
+        "code" => CODE_DENIED,
+        "message" => "This invite is used up or has expired; ask an admin for a new one",
+    });
+    assert_eq!(token_auth(&mut third, &invite).get("error"), Some(&used_up));
+    assert!(
+        server.app.lock().join_invite.is_none(),
+        "used-up invite kept"
+    );
+    // A signed-in account cannot sign up again.
+    let fresh = token_in(&private_reply(&mut admin, "/invite 1"));
+    assert_eq!(
+        token_auth(&mut ada, &fresh).get("error"),
+        Some(&Json::from(
+            obj! {"code" => CODE_DENIED, "message" => "Identity switching requires reconnect"}
+        )),
+    );
+    // An expired invite is denied and dropped.
+    server.app.lock().join_invite.as_mut().unwrap().expires_ms =
+        rust_stdlib::time::now().unix_milli();
+    assert_eq!(token_auth(&mut third, &fresh).get("error"), Some(&used_up));
+    assert!(
+        server.app.lock().join_invite.is_none(),
+        "expired invite kept"
+    );
+
+    // A new invite replaces the last; /invite 0 revokes it.
+    let replaced = token_in(&private_reply(&mut admin, "/invite 1"));
+    let latest = token_in(&private_reply(&mut admin, "/invite 1"));
+    assert_eq!(
+        token_auth(&mut third, &replaced).get("error"),
+        Some(&used_up)
+    );
+    assert_eq!(
+        private_reply(&mut admin, "/invite 0"),
+        "The sign-up invite is revoked."
+    );
+    assert_eq!(token_auth(&mut third, &latest).get("error"), Some(&used_up));
+    assert_eq!(
+        command_error(&mut admin, "/invite 51"),
+        (CODE_DENIED, "An invite signs up at most 50 users".into()),
+    );
+    for bad in [
+        "/invite",
+        "/invite -1",
+        "/invite 1000",
+        "/invite x",
+        "/invite 1 2",
+    ] {
+        assert_eq!(
+            command_error(&mut admin, bad),
+            (CODE_INVALID_PARAMS, "Usage: /invite <uses>, 0 to 50".into()),
+            "{bad}"
+        );
+    }
+    assert_eq!(
+        command_error(&mut ada, "/invite 1"),
+        (CODE_DENIED, "Only an admin can use /invite".into()),
+    );
+}
+
+/// The live invite and its remaining uses survive a restart.
+#[test]
+fn test_invite_persists() {
+    let kept: Arc<dyn Store> = Arc::new(store::Memory::new());
+    let dir = TempDir::new("apron-join-");
+    let configure = |config: &mut Config| {
+        config.admin_token = admin_config().admin_token;
+    };
+    let mut server = start_with(kept.clone(), &format!("{dir}/a"), configure);
+    let mut boss = admin(&server);
+    let invite = token_in(&private_reply(&mut boss, "/invite 2"));
+    let (mut first, _) = dial_raw(&server);
+    passkey_result(&token_auth(&mut first, &invite));
+    drop((boss, first));
+    server.stop();
+    let server = start_with(kept, &format!("{dir}/b"), configure);
+    let (mut second, _) = dial_raw(&server);
+    passkey_result(&token_auth(&mut second, &invite));
+    let (mut third, _) = dial_raw(&server);
+    assert!(
+        token_auth(&mut third, &invite).contains_key("error"),
+        "a third use"
     );
 }

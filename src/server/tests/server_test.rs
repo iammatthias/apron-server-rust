@@ -92,7 +92,7 @@ fn test_server_frame() {
     // accepted (§4.5).
     assert_eq!(params["status"], strings(&["dnd", "invisible"]), "status");
     assert!(
-        params["auth"] == strings(&["token", "guest"]) && params["signup"] == strings(&[]),
+        params["auth"] == strings(&["token", "guest"]) && params["signup"] == strings(&["token"]),
         "auth: {:?}, signup: {:?}",
         params["auth"],
         params.get("signup")
@@ -148,7 +148,7 @@ fn test_server_frame() {
     let params = frame["params"].as_object().unwrap();
     assert!(
         params["auth"] == strings(&["webauthn", "token", "guest"])
-            && params["signup"] == strings(&["webauthn"]),
+            && params["signup"] == strings(&["webauthn", "token"]),
         "passkey schemes: {params:?}"
     );
 

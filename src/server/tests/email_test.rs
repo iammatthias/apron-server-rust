@@ -160,7 +160,7 @@ fn test_email_sign_in() {
     let params = frame["params"].as_object().unwrap();
     assert!(
         params.get("auth") == Some(&strings(&["email", "token", "guest"]))
-            && params.get("signup") == Some(&strings(&["email"])),
+            && params.get("signup") == Some(&strings(&["email", "token"])),
         "auth schemes: {:?}, signup {:?}",
         params.get("auth"),
         params.get("signup")

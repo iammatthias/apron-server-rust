@@ -42,7 +42,7 @@ use rust_stdlib_derive::{MarshalTo, UnmarshalFrom};
 use super::bots::BotToken;
 use super::devices::DeviceToken;
 use super::embeds::{EmbedState, StreamBuffer};
-use super::invites::InviteToken;
+use super::invites::{InviteToken, JoinInvite};
 use super::messages::{MessageState, ReactionSet};
 use super::protocol::*;
 use super::push::{parse_wake_names, PushRegistration};
@@ -108,6 +108,15 @@ pub struct StoredMeta {
     /// `State.role_grants`, sorted.
     #[json("role_grants,omitzero")]
     pub role_grants: Vec<String>,
+    /// `State.join_invite`: the hex SHA-256 of its token, the sign-ups it
+    /// has left, and when it expires, in Unix milliseconds; absent without
+    /// one.
+    #[json("join_invite,omitzero")]
+    pub join_invite: String,
+    #[json("join_remaining,omitzero")]
+    pub join_remaining: i64,
+    #[json("join_expires,omitzero")]
+    pub join_expires: i64,
 }
 
 #[derive(Clone, Debug, Default, MarshalTo, UnmarshalFrom)]
@@ -360,6 +369,18 @@ impl State {
             history_floor: self.history_floor,
             rooms_removed_at: self.rooms_removed_at,
             role_grants: self.role_grants.iter().cloned().collect(),
+            join_invite: self
+                .join_invite
+                .as_ref()
+                .map_or_else(String::new, |invite| session_id(&invite.key)),
+            join_remaining: self
+                .join_invite
+                .as_ref()
+                .map_or(0, |invite| invite.remaining),
+            join_expires: self
+                .join_invite
+                .as_ref()
+                .map_or(0, |invite| invite.expires_ms),
         }
     }
 
@@ -689,6 +710,14 @@ impl Server {
             st.history_floor = st.stored_meta.history_floor;
             st.rooms_removed_at = st.stored_meta.rooms_removed_at;
             st.role_grants = st.stored_meta.role_grants.iter().cloned().collect();
+            st.join_invite = hex::decode(&st.stored_meta.join_invite)
+                .ok()
+                .and_then(|key| <[u8; 32]>::try_from(key).ok())
+                .map(|key| JoinInvite {
+                    key,
+                    remaining: st.stored_meta.join_remaining,
+                    expires_ms: st.stored_meta.join_expires,
+                });
         }
         Server::restore_vapid_locked(st, of(ENTRY_META).get("vapid"))?;
         for id in of(ENTRY_USED_ID).keys() {
