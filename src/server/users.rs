@@ -16,9 +16,6 @@ use crate::obj;
 use crate::rate::Limiter;
 
 pub const MAX_NAME_RUNES: usize = 64;
-/// Bounds an avatar given inline as a data: URL; larger images go through a
-/// /avatar upload (§4.8.6).
-pub const MAX_AVATAR_DATA_URL_BYTES: usize = 64 << 10;
 pub const MAX_DEDUP_ENTRIES: usize = 1024;
 /// Bounds a profile's ext, which is sent to everyone who shares a room with
 /// the user.
@@ -379,21 +376,6 @@ pub fn normalize_name(name: &str) -> String {
             .to_owned();
     }
     out
-}
-
-fn avatar_data_url() -> Regexp {
-    Regexp::new(r"^data:image/(png|jpeg|gif|webp);base64,[A-Za-z0-9+/]+={0,2}$")
-        .expect("constant pattern")
-}
-
-/// Accepts https: URLs and small image data: URLs (§4.8.6).
-pub fn valid_avatar(value: &str) -> bool {
-    if value.starts_with("data:") {
-        return value.len() <= MAX_AVATAR_DATA_URL_BYTES && avatar_data_url().match_string(value);
-    }
-    value.starts_with("https://")
-        && value.len() <= 2048
-        && !value.contains([' ', '\t', '\r', '\n', '"', '\'', '<', '>'])
 }
 
 /// The shape of a user_id a new email account may request: the suggested convention for
@@ -844,7 +826,9 @@ impl State {
         ext_write.remove(PERMISSIONS_KEY);
         let mut status = parse_string(&req.params, "status", false)?;
         let has_name = req.params.contains_key("name");
-        let has_avatar = req.params.contains_key("avatar");
+        // An avatar comes only from /avatar (§4.8.6), so `me` takes only ""
+        // to remove it and ignores any other value, as Cloudflare does.
+        let has_avatar = req.params.contains_key("avatar") && avatar.is_empty();
         let has_status = req.params.contains_key("status");
 
         let Some(user_id) = self.client_user(c) else {
@@ -872,17 +856,6 @@ impl State {
                     "A bot can't change its name"
                 },
             ));
-        }
-        if has_avatar && !avatar.is_empty() && avatar != u.avatar && !valid_avatar(&avatar) {
-            if avatar.starts_with("data:") && avatar.len() > MAX_AVATAR_DATA_URL_BYTES {
-                return Err(RpcError::new(
-                    CODE_TOO_LARGE,
-                    format!("An avatar data: URL is at most {MAX_AVATAR_DATA_URL_BYTES} bytes; upload larger images with /avatar"),
-                ));
-            }
-            return Err(invalid_params(format!(
-                "avatar must be an https: URL or a data:image URL of at most {MAX_AVATAR_DATA_URL_BYTES} bytes; upload larger images with /avatar"
-            )));
         }
         if has_status && !settable_status(&status) {
             status = STATUS_NONE.into();

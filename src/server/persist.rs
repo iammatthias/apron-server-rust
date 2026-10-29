@@ -997,10 +997,15 @@ impl Server {
             st.embeds.insert(id.clone(), e);
         }
         for (id, stored) in &stored_users {
+            let Some(u) = st.users.get_mut(id) else {
+                continue;
+            };
+            // An avatar comes only from /avatar, so one set by URL before
+            // that rule, or whose upload is gone, is dropped.
             if st.embeds.contains_key(&stored.avatar_embed) {
-                if let Some(u) = st.users.get_mut(id) {
-                    u.avatar_embed = Some(stored.avatar_embed.clone());
-                }
+                u.avatar_embed = Some(stored.avatar_embed.clone());
+            } else {
+                u.avatar.clear();
             }
         }
         let now = time::now();

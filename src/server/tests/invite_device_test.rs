@@ -451,7 +451,7 @@ fn test_help_lists_invite_device_for_accounts() {
     );
     assert_eq!(
         private_reply(&mut guest, "/help"),
-        "- `/help`: list the commands you can use here\n- `/avatar`: with one image attached: set your avatar",
+        "- `/help`: list the commands you can use here",
         "guest's help"
     );
 }
