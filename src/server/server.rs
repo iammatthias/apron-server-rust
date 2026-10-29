@@ -25,7 +25,7 @@ use super::push::{PushDeliverer, PushRegistration};
 use super::rooms::RoomState;
 use super::status::optional_statuses;
 use super::unfurl::{self, Fetcher, Unfurler};
-use super::users::{DedupEntry, UserState};
+use super::users::{guest_write, DedupEntry, UserState, GUEST_READ_ONLY};
 use super::webauthn::{PasskeyCeremony, Sessions, WebAuthn};
 use super::webpush::VapidKey;
 use crate::obj;
@@ -137,6 +137,12 @@ pub struct Config {
     /// How long an unfurl waits for its pages; FETCH_TIMEOUT unless a test
     /// shortens it.
     pub unfurl_timeout: Duration,
+    /// An extension Go lacks (docs/DEVIATIONS.md): false keeps guests
+    /// read-only, as apron-server-cloudflare's `GUEST_POSTING` does.
+    pub guest_posting: bool,
+    /// An extension Go lacks (docs/DEVIATIONS.md): how long history is
+    /// kept; `None` keeps it forever.
+    pub retention: Option<Duration>,
 }
 
 impl Default for Config {
@@ -190,6 +196,8 @@ pub fn default_config() -> Config {
         unfurl: false,
         unfurl_allow_internal: false,
         unfurl_timeout: unfurl::FETCH_TIMEOUT,
+        guest_posting: true,
+        retention: None,
     }
 }
 
@@ -578,6 +586,11 @@ pub struct State {
     pub config: Arc<Config>,
     /// The single log_id sequence shared by every record kind and room.
     pub last_id: i64,
+    /// Every record below it was discarded by retention (Config.retention);
+    /// 0 until retention first discards one. It never decreases.
+    pub history_floor: i64,
+    /// The last log_id when retention last removed a thread; 0 if never.
+    pub rooms_removed_at: i64,
     pub rooms: BTreeMap<String, RoomState>,
     pub messages: BTreeMap<String, MessageState>,
     pub records: BTreeMap<i64, LogRecord>,
@@ -775,6 +788,8 @@ pub fn open(config: Config) -> Result<Arc<Server>, store::StoreError> {
                 server: weak.clone(),
                 config: config.clone(),
                 last_id: 0,
+                history_floor: 0,
+                rooms_removed_at: 0,
                 rooms: BTreeMap::new(),
                 messages: BTreeMap::new(),
                 records: BTreeMap::new(),
@@ -838,6 +853,9 @@ pub fn open(config: Config) -> Result<Arc<Server>, store::StoreError> {
         if let Some(vapid) = &st.vapid {
             let _ = server.push.vapid.set(vapid.clone());
         }
+        // A restart after a long stop discards what expired meanwhile before
+        // anyone reads it.
+        st.expire_history_locked(&time::now());
         if !st.rooms.contains_key(DEFAULT_ROOM_ID) {
             // The seeded default room has a logged creation record like any
             // other room, so its history_log_id is never null.
@@ -845,7 +863,7 @@ pub fn open(config: Config) -> Result<Arc<Server>, store::StoreError> {
         }
         st.remove_stale_uploads(&files);
     }
-    server.sweep_pushes();
+    server.sweep();
     Ok(server)
 }
 
@@ -1306,6 +1324,11 @@ impl Server {
                 }
                 return;
             };
+            if guest_write(&req.method) && st.read_only_guest(&user_id) {
+                drop(st);
+                c.send_error(&req, RpcError::new(CODE_DENIED, GUEST_READ_ONLY));
+                return;
+            }
             // Requests deduplicate per user (§1.2): a duplicate waits for the
             // original, even one running on another connection, and replies
             // with its outcome, brought up to date with the current state.
@@ -1511,15 +1534,19 @@ impl State {
         if !self.config.welcome.is_empty() {
             params.insert("welcome".into(), self.config.welcome.as_str().into());
         }
+        // ext:settings, the extension apron-web defines (its EXT.md §3):
+        // private_rooms is a number, where its other keys are booleans that
+        // an absent key makes true, so only false ones are sent.
+        let mut settings = Object::new();
+        if !self.config.guest_posting {
+            settings.insert("guest_posting".into(), false.into());
+        }
         if self.config.max_private_rooms > 0 {
-            // ext:settings, the extension apron-web defines (its EXT.md §3):
-            // private_rooms is a number, where its other keys are booleans
-            // that an absent key makes true, as they are here.
+            settings.insert("private_rooms".into(), self.config.max_private_rooms.into());
+        }
+        if !settings.is_empty() {
             capabilities.push("ext:settings".into());
-            params.insert(
-                "ext".into(),
-                obj! {"settings" => obj! {"private_rooms" => self.config.max_private_rooms}}.into(),
-            );
+            params.insert("ext".into(), obj! {"settings" => settings}.into());
         }
         params.insert("capabilities".into(), capabilities.into());
         if signup != auth_schemes {

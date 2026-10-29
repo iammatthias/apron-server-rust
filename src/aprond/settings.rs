@@ -4,6 +4,7 @@
 
 use super::email::SmtpSender;
 use super::options::Options;
+use rust_stdlib::time::Duration;
 use std::collections::BTreeMap;
 
 /// How email sign-in codes are delivered.
@@ -54,6 +55,10 @@ pub struct Settings {
     pub apple_app_ids: Vec<String>,
     /// `--unfurl.enable`, an extension Go lacks.
     pub unfurl: bool,
+    /// The negation of `--guest.read-only`, an extension Go lacks.
+    pub guest_posting: bool,
+    /// `--history.retention`, an extension Go lacks; `None` keeps history.
+    pub retention: Option<Duration>,
 }
 
 /// main.go's `serverConfig`: turns options into the server's settings, or
@@ -155,7 +160,28 @@ pub fn server_settings(options: &Options) -> Result<Settings, String> {
     }
     config.apple_app_ids = options.apple.app_ids.clone();
     config.unfurl = options.unfurl.enable;
+    config.guest_posting = !options.guest.read_only;
+    config.retention = parse_retention(&options.history.retention)?;
     Ok(config)
+}
+
+/// Reads `--history.retention`: empty or zero keeps history forever.
+fn parse_retention(value: &str) -> Result<Option<Duration>, String> {
+    if value.is_empty() {
+        return Ok(None);
+    }
+    let invalid = || {
+        format!(
+            "invalid --history.retention {}: use a positive duration, such as 168h",
+            rust_stdlib::strconv::quote(value)
+        )
+    };
+    let retention: Duration = value.parse().map_err(|_| invalid())?;
+    match retention.as_nanos() {
+        0 => Ok(None),
+        n if n < 0 => Err(invalid()),
+        _ => Ok(Some(retention)),
+    }
 }
 
 /// Apple's application identifier: a ten-character team ID, a dot, and a

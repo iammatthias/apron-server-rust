@@ -14,6 +14,8 @@ use crate::rate::{every, Limiter};
 pub struct ReactionSet {
     pub from: Object,
     pub emojis: Vec<String>,
+    /// The record that logged the set; retention discards the set with it.
+    pub log_id: i64,
 }
 
 /// The current state of one message. Only non-empty reaction sets are kept;
@@ -204,6 +206,15 @@ fn same_emoji_set(a: &[String], b: &[String]) -> bool {
     a.len() == b.len() && a.iter().all(|emoji| b.contains(emoji))
 }
 
+/// The message_id a snapshot's reply_to names.
+fn reply_to_of(snapshot: &Object) -> Option<&str> {
+    snapshot
+        .get("reply_to")
+        .and_then(Json::as_object)
+        .and_then(|r| r.get("message_id"))
+        .and_then(Json::as_str)
+}
+
 pub fn tombstone(snapshot: &mut Object) {
     snapshot.remove("body");
     snapshot.remove("ext");
@@ -221,13 +232,7 @@ impl State {
         let info = MessageInfo {
             deleted: snapshot.get("deleted").is_some_and(Json::is_true),
             mentions: mentions(body),
-            reply_to: snapshot
-                .get("reply_to")
-                .and_then(Json::as_object)
-                .and_then(|r| r.get("message_id"))
-                .and_then(Json::as_str)
-                .unwrap_or("")
-                .to_owned(),
+            reply_to: reply_to_of(&snapshot).unwrap_or("").to_owned(),
         };
         if let Some(m) = self.messages.get_mut(message_id) {
             m.cached = Some(info.clone());
@@ -316,7 +321,15 @@ impl State {
             from = m.from.clone();
             current = Some(m.id.clone());
         }
-        if let Some(reply_id) = &reply_id {
+        // A save that keeps a reply_to whose target retention discarded
+        // keeps it, so old replies stay editable (apron-server-cloudflare).
+        let expired_reply = reply_id.as_ref().is_some_and(|id| {
+            !self.messages.contains_key(id)
+                && current.as_ref().is_some_and(|current| {
+                    reply_to_of(&self.snapshot(current)) == Some(id.as_str())
+                })
+        });
+        if let Some(reply_id) = reply_id.as_ref().filter(|_| !expired_reply) {
             let Some(target) = self.visible_message_locked(&user_id, reply_id) else {
                 return Err(invalid_params(
                     "reply_to must name another existing message",
@@ -425,7 +438,11 @@ impl State {
         }
         if moved && !self.messages[&message_id].reactions.is_empty() {
             let elements = self.messages[&message_id].reaction_elements();
-            self.commit_reactions_locked(&message_id, elements);
+            let log_id = self.commit_reactions_locked(&message_id, elements);
+            let m = self.messages.get_mut(&message_id).expect("message exists");
+            for set in m.reactions.values_mut() {
+                set.log_id = log_id;
+            }
         }
         let moved_from = if moved { Some(source) } else { None };
         self.message_unread_locked(&message_id, previous.as_ref(), moved_from.as_deref());
@@ -605,6 +622,10 @@ impl State {
         if !same_emoji_set(&current, &emojis) {
             self.touch_message(&message_id);
             let from = self.users[&user_id].from();
+            let log_id = self.commit_reactions_locked(
+                &message_id,
+                vec![obj! {"from" => from.clone(), "emojis" => emojis.clone()}.into()],
+            );
             let m = self.messages.get_mut(&message_id).expect("message exists");
             if emojis.is_empty() {
                 m.reactions.remove(&user_id);
@@ -612,24 +633,21 @@ impl State {
                 m.reactions.insert(
                     user_id.clone(),
                     ReactionSet {
-                        from: from.clone(),
-                        emojis: emojis.clone(),
+                        from,
+                        emojis,
+                        log_id,
                     },
                 );
             }
-            self.commit_reactions_locked(
-                &message_id,
-                vec![obj! {"from" => from, "emojis" => emojis}.into()],
-            );
         }
         let result = Object::new();
         c.send_result(req, result.clone().into());
         Ok((result.into(), true))
     }
 
-    /// Logs and delivers one reactions record in the message's current room.
-    /// Reaction sets carry no prev_log_id (§4.3.1).
-    pub fn commit_reactions_locked(&mut self, message_id: &str, elements: Vec<Json>) {
+    /// Logs and delivers one reactions record in the message's current room,
+    /// and returns its log_id. Reaction sets carry no prev_log_id (§4.3.1).
+    pub fn commit_reactions_locked(&mut self, message_id: &str, elements: Vec<Json>) -> i64 {
         let log_id = self.next_id_locked();
         let room_id = self.messages[message_id].room_id.clone();
         let record = LogRecord::new(
@@ -645,6 +663,7 @@ impl State {
         let frame = Frame::from(raw_notification("reactions", &record.raw));
         self.append_locked(record, std::slice::from_ref(&room_id));
         self.deliver_locked(&frame, &[room_id]);
+        log_id
     }
 }
 
