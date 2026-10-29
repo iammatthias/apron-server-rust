@@ -11,7 +11,7 @@ use super::protocol::*;
 use super::rooms::RoomState;
 use super::server::{Client, Server, State, DEFAULT_ROOM_ID};
 use super::toggles::{Feature, UPLOADS_OFF};
-use super::users::{UserState, ADMIN_ROLE, GUEST_READ_ONLY};
+use super::users::{UserState, ADMIN_ROLE, EMOJI_ROLES, GUEST_READ_ONLY};
 use crate::obj;
 
 /// Scoped system identities (Appendix A.1). user_ids starting with `~` are
@@ -32,6 +32,8 @@ enum Audience {
     Accounts,
     /// Accounts with the admin role.
     Admins,
+    /// Accounts holding one of these roles.
+    Roles(&'static [&'static str]),
 }
 
 impl Audience {
@@ -49,6 +51,12 @@ impl Audience {
             Audience::Accounts => format!("Sign in with a passkey to use /{name}"),
             Audience::Admins if u.account() && u.has_role(ADMIN_ROLE) => return None,
             Audience::Admins => format!("Only an admin can use /{name}"),
+            Audience::Roles(roles) if u.has_any_role(roles) => return None,
+            Audience::Roles(_) if u.bot() => format!("A bot can't use /{name}"),
+            Audience::Roles(roles) if u.account() => {
+                format!("/{name} needs one of the roles {}", roles.join(", "))
+            }
+            Audience::Roles(_) => format!("Sign in with a passkey to use /{name}"),
         };
         Some(RpcError::new(CODE_DENIED, message))
     }
@@ -62,6 +70,9 @@ struct ServerCommand {
     audience: Audience,
     /// Whether it changes anything, which a read-only guest may not do.
     writes: bool,
+    /// Whether its `invalid_params` (a usage or user_id error) are errors to
+    /// show, not policy violations, since people mistype.
+    forgives_params: bool,
     /// Executes the command, sending the frames it causes, and returns its
     /// result, which the caller sends after them (§1).
     run: CommandFn,
@@ -74,6 +85,7 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         usage: "/help",
         help: "list the commands you can use here",
         audience: Audience::Everyone,
+        forgives_params: false,
         writes: false,
         run: State::help_command,
     },
@@ -82,6 +94,7 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         usage: "/avatar",
         help: "with one image attached: set your avatar",
         audience: Audience::Accounts,
+        forgives_params: false,
         writes: true,
         run: State::avatar_command,
     },
@@ -90,6 +103,7 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         usage: "/invite-device <name>",
         help: "get a token that signs in as you on another device, named <name>; at most 3 names, and a name again replaces its token",
         audience: Audience::Accounts,
+        forgives_params: true,
         writes: true,
         run: State::invite_device_command,
     },
@@ -98,6 +112,7 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         usage: "/invite-bot",
         help: "get a token that signs in as your bot, named after you; again, it replaces the token and renames the bot",
         audience: Audience::Accounts,
+        forgives_params: false,
         writes: true,
         run: State::invite_bot_command,
     },
@@ -106,6 +121,7 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         usage: "/passkeys [remove <n>]",
         help: "list your account's passkeys, or remove one of them",
         audience: Audience::Accounts,
+        forgives_params: true,
         writes: true,
         run: State::passkeys_command,
     },
@@ -114,6 +130,7 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         usage: "/kick <user_id>",
         help: "remove a user from this room",
         audience: Audience::Admins,
+        forgives_params: true,
         writes: true,
         run: State::kick_command,
     },
@@ -122,14 +139,16 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         usage: "/admin [remove] <user_id>",
         help: "make a registered user an admin, or no longer one",
         audience: Audience::Admins,
+        forgives_params: true,
         writes: true,
         run: State::admin_command,
     },
     ServerCommand {
         name: "role",
         usage: "/role <user_id> [<role>]",
-        help: "show a user's roles, or give or take away one (admin, mod and bot act as such; any other is a label)",
+        help: "show a user's roles, or give or take away one (admin, mod and bot act as such; friend lets them use /emoji; any other is a label)",
         audience: Audience::Admins,
+        forgives_params: true,
         writes: true,
         run: State::role_command,
     },
@@ -138,6 +157,7 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         usage: "/rename <old_user_id> <new_user_id>",
         help: "change a registered user's user_id",
         audience: Audience::Admins,
+        forgives_params: true,
         writes: true,
         run: State::rename_command,
     },
@@ -146,6 +166,7 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         usage: "/invite-token <user_id>",
         help: "create a user who signs in with a token instead of a passkey, and get the token",
         audience: Audience::Admins,
+        forgives_params: true,
         writes: true,
         run: State::invite_token_command,
     },
@@ -154,6 +175,7 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         usage: "/invite <uses>",
         help: "get a token that signs up to <uses> new users (at most 50) for a week, replacing the last one; /invite 0 revokes it",
         audience: Audience::Admins,
+        forgives_params: true,
         writes: true,
         run: State::invite_command,
     },
@@ -161,7 +183,8 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         name: "emoji",
         usage: "/emoji add|remove :name:",
         help: "add a custom emoji, or replace its image: send /emoji add :name: with one image attached; /emoji remove :name: removes it",
-        audience: Audience::Admins,
+        audience: Audience::Roles(EMOJI_ROLES),
+        forgives_params: true,
         writes: true,
         run: State::emoji_command,
     },
@@ -170,6 +193,7 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         usage: "/server [title|description [<text>] | avatar]",
         help: "show this server's title, description and avatar; set one, the avatar with one image attached; or clear one, back to the deployment's",
         audience: Audience::Admins,
+        forgives_params: true,
         writes: true,
         run: State::server_command,
     },
@@ -178,6 +202,7 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         usage: "/toggle <activity|uploads|presence|addmember>",
         help: "turn typing activity, uploads, user status (presence), or users adding others to rooms (addmember) off or on for everyone",
         audience: Audience::Admins,
+        forgives_params: true,
         writes: true,
         run: State::toggle_command,
     },
@@ -186,6 +211,7 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         usage: "/purge <user_id>",
         help: "disconnect a user and delete their account, bot, and everything they posted or uploaded",
         audience: Audience::Admins,
+        forgives_params: true,
         writes: true,
         run: State::purge_command,
     },
@@ -231,12 +257,6 @@ impl State {
         parse_ext(&req.params, "ext")?;
         let text = body.get("text").and_then(Json::as_str).unwrap_or("");
         let line = text.trim();
-        let Some(rest) = line.strip_prefix('/') else {
-            return Err(invalid_params("A command starts with /; try /help"));
-        };
-        let (word, args) = rest.split_once(' ').unwrap_or((rest, ""));
-        let name = word.to_lowercase();
-
         let Some(user_id) = self.client_user(c) else {
             return Err(RpcError::new(
                 CODE_DENIED,
@@ -251,6 +271,11 @@ impl State {
                 return Err(invalid_params("reply_to must name an existing message"));
             }
         }
+        let Some(rest) = line.strip_prefix('/') else {
+            return Err(invalid_params("A command starts with /; try /help").forgiven());
+        };
+        let (word, args) = rest.split_once(' ').unwrap_or((rest, ""));
+        let name = word.to_lowercase();
         for command in SERVER_COMMANDS {
             if command.name == name {
                 if command.writes && self.read_only_guest(&user_id) {
@@ -259,14 +284,19 @@ impl State {
                 if let Some(refusal) = command.audience.refusal(&self.users[&user_id], &name) {
                     return Err(refusal);
                 }
-                let result = (command.run)(self, c, &room_id, &body, args.trim())?;
+                let result =
+                    (command.run)(self, c, &room_id, &body, args.trim()).map_err(|err| {
+                        if command.forgives_params && err.code == CODE_INVALID_PARAMS {
+                            err.forgiven()
+                        } else {
+                            err
+                        }
+                    })?;
                 c.send_result(req, result.clone().into());
                 return Ok((result.into(), true));
             }
         }
-        Err(invalid_params(format!(
-            "Unknown command /{word}; try /help"
-        )))
+        Err(invalid_params(format!("Unknown command /{word}; try /help")).forgiven())
     }
 
     /// Logs and delivers a message from ~room to the room's members

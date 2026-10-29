@@ -129,3 +129,61 @@ fn test_three_violations_in_a_minute_close_with_1008() {
     c.write_raw(r#"{"method":"history","id":"h2","params":{"limit":"x"}}"#);
     assert_eq!(close_code(&c), ws::STATUS_POLICY_VIOLATION);
 }
+
+/// A command's `invalid_params` are errors to show, not policy violations
+/// (apron-server-cloudflare's handleCommand): an unknown command and a
+/// command's usage or user_id error. Errors before the command runs count.
+#[test]
+fn test_mistyped_commands_are_not_violations() {
+    let server = new_test_server(Config {
+        limits: Limits {
+            policy_violations: 3,
+            ..Limits::unlimited()
+        },
+        ..super::admin_test::admin_config()
+    });
+    let mut admin = super::admin_test::account(&server);
+    grant_role(&server, &admin.user_id.clone(), "admin");
+    for (i, text) in [
+        "/nope",
+        "hello",
+        "/rename x",
+        "/purge",
+        "/kick",
+        "/role",
+        "/toggle nothing",
+        "/passkeys remove x",
+        "/invite-device",
+        "/server avatar x",
+        "/emoji",
+        "/invite lots",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let frame = reply_to(
+            &mut admin,
+            "command",
+            &format!("c{i}"),
+            obj! {"body" => obj! {"text" => text}},
+        );
+        assert_eq!(
+            frame["error"].as_object().unwrap()["code"],
+            Json::from(CODE_INVALID_PARAMS),
+            "{text}: {frame:?}"
+        );
+    }
+    // Counted: a command with no body, an unknown room, and /avatar's usage.
+    for (i, params) in [
+        obj! {"room_id" => "general"},
+        obj! {"room_id" => "nowhere", "body" => obj! {"text" => "/help"}},
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let frame = reply_to(&mut admin, "command", &format!("v{i}"), params);
+        assert!(frame.contains_key("error"), "{frame:?}");
+    }
+    admin.write_raw(r#"{"method":"command","id":"v2","params":{"body":{"text":"/avatar"}}}"#);
+    assert_eq!(close_code(&admin), ws::STATUS_POLICY_VIOLATION);
+}

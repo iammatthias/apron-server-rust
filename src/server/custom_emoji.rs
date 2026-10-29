@@ -144,9 +144,9 @@ impl State {
     }
 
     /// `/emoji add :name:` with one `upload` embed, and `/emoji remove
-    /// :name:`, for admins. An add's result carries the embed's write URL,
-    /// and the image becomes the key's when the write finishes. A removal
-    /// answers with a `~private` notice.
+    /// :name:`, for the holders of `EMOJI_ROLES`. An add's result carries the
+    /// embed's write URL, and the image becomes the key's when the write
+    /// finishes. A removal answers with a `~private` notice.
     pub(super) fn emoji_command(
         &mut self,
         c: &Arc<Client>,
