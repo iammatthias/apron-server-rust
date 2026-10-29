@@ -57,6 +57,8 @@ mod status_mute_test;
 mod status_seen_test;
 mod status_test;
 mod toggle_test;
+mod unfurl_embeds_test;
+mod unfurl_fetcher_test;
 mod unfurl_test;
 mod wake_test;
 mod webauthn_test;
