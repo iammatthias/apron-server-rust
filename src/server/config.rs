@@ -22,6 +22,8 @@ pub const DEFAULT_HISTORY_PAGE_SIZE: usize = 20;
 pub const MAX_HISTORY_PAGE_SIZE: usize = 50;
 pub const DEFAULT_PING_INTERVAL: Duration = Duration::from_secs(30);
 pub const DEFAULT_PING_TIMEOUT: Duration = Duration::from_secs(10);
+/// apron-server-cloudflare's unpingedTimeoutSeconds.
+pub const DEFAULT_UNPINGED_TIMEOUT: Duration = Duration::from_secs(900);
 pub const DEFAULT_WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 /// apron-server-cloudflare's maxFileBytes and maxAvatarBytes.
 pub const DEFAULT_MAX_UPLOAD_BYTES: i64 = 5 << 20;
@@ -67,6 +69,9 @@ pub struct Config {
     pub history_page_size: usize,
     pub ping_interval: Duration,
     pub ping_timeout: Duration,
+    /// How long a connection that never sent the liveness ping (§1) may go
+    /// without a frame before it is told why and closed.
+    pub unpinged_timeout: Duration,
     pub write_timeout: Duration,
     /// The external base URL (scheme and host) of write, file, and stream
     /// URLs. Empty derives it from each WebSocket request's Host header.
@@ -185,6 +190,7 @@ pub fn default_config() -> Config {
         history_page_size: DEFAULT_HISTORY_PAGE_SIZE,
         ping_interval: DEFAULT_PING_INTERVAL,
         ping_timeout: DEFAULT_PING_TIMEOUT,
+        unpinged_timeout: DEFAULT_UNPINGED_TIMEOUT,
         write_timeout: DEFAULT_WRITE_TIMEOUT,
         public_url: String::new(),
         max_upload_bytes: DEFAULT_MAX_UPLOAD_BYTES,
@@ -245,6 +251,9 @@ impl Config {
         }
         if self.ping_timeout.as_nanos() <= 0 {
             self.ping_timeout = defaults.ping_timeout;
+        }
+        if self.unpinged_timeout.as_nanos() <= 0 {
+            self.unpinged_timeout = defaults.unpinged_timeout;
         }
         if self.write_timeout.as_nanos() <= 0 {
             self.write_timeout = defaults.write_timeout;

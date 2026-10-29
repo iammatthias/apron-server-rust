@@ -660,6 +660,7 @@ impl Server {
             write_timeout: self.config.write_timeout,
             ping_interval: self.config.ping_interval,
             ping_timeout: self.config.ping_timeout,
+            unpinged_timeout: self.config.unpinged_timeout,
             closing: AtomicBool::new(false),
             pinged: AtomicBool::new(false),
             last_frame: AtomicI64::new(time::now().unix_nano()),
