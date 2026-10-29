@@ -40,6 +40,11 @@ fn per_minute(n: i64) -> Limiter {
     Limiter::new(every(Duration::from_nanos(time::MINUTE.as_nanos() / n)), n)
 }
 
+/// The whole URLs a limiter allows at `now`.
+fn whole_tokens(limiter: &Limiter, now: &Time) -> usize {
+    limiter.tokens_at(now).max(0.0) as usize
+}
+
 /// One message's unfurl: its URLs, and where its images are hosted.
 struct Job {
     message_id: String,
@@ -121,12 +126,6 @@ impl Unfurler {
                 .wait(running)
                 .unwrap_or_else(|e| e.into_inner());
         }
-    }
-
-    /// How many URLs the server may unfurl now, at most `wanted`.
-    fn allowance(&self, now: &Time, wanted: usize) -> usize {
-        let tokens = self.limiter().tokens_at(now).max(0.0) as usize;
-        tokens.min(wanted)
     }
 
     fn limiter(&self) -> MutexGuard<'_, Limiter> {
@@ -257,8 +256,9 @@ fn linked_urls(body: Option<&Object>) -> Vec<String> {
 impl State {
     /// Starts unfurling the URLs a save added to a message's text: the first
     /// MAX_URLS_PER_MESSAGE of its text that the previous snapshot's text
-    /// did not have and no embed already links, within the user's
-    /// UNFURLS_PER_MINUTE.
+    /// did not have and no embed already links, as many as the user's and
+    /// the server's limiters allow. The limiters are charged only when a
+    /// job slot is free.
     pub fn unfurl_locked(
         &mut self,
         user_id: &str,
@@ -291,9 +291,10 @@ impl State {
             .unfurls
             .get_or_insert_with(|| per_minute(UNFURLS_PER_MINUTE));
         let now = time::now();
-        let admitted = unfurler
-            .allowance(&now, urls.len())
-            .min(limiter.tokens_at(&now).max(0.0) as usize);
+        let admitted = urls
+            .len()
+            .min(whole_tokens(limiter, &now))
+            .min(whole_tokens(&unfurler.limiter(), &now));
         if admitted == 0 {
             return;
         }
