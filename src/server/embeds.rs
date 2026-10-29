@@ -574,11 +574,11 @@ fn active_type(media_type: &str) -> bool {
         .any(|marker| media_type.contains(marker))
 }
 
+/// The image types `/avatar` keeps, which `ext.media.avatar` lists.
+pub const AVATAR_TYPES: [&str; 4] = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+
 pub fn avatar_type(content_type: &str) -> bool {
-    matches!(
-        content_type,
-        "image/png" | "image/jpeg" | "image/gif" | "image/webp"
-    )
+    AVATAR_TYPES.contains(&content_type)
 }
 
 /// `image.DecodeConfig`, with WebP registered: an image's format and
