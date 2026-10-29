@@ -159,7 +159,7 @@ with `-- --nocapture`), and the run does not count as that gate passing.
 
 | Gate | Needs | Skip with |
 |---|---|---|
-| Go comparisons: `tests/aprond.rs` (`--help`, `--print-config`, startup errors) and the `aprond::acme` differential tests | `go` on `PATH`, and the Go clone at `$APRON_GO_DIR` | `APRON_SKIP_GO=1` |
+| ACME differential: the `aprond::acme` tests that run `tools/differential/acme` against x/crypto | `go` on `PATH` | `APRON_SKIP_GO=1` |
 | ACME against Pebble: `aprond::acme::pebble_test` | `pebble` and `pebble-challtestsrv`, and Pebble's module in the Go module cache (or `$PEBBLE_DIR`) | `APRON_SKIP_PEBBLE=1` |
 
 The Pebble test looks for its binaries in `$PEBBLE_BIN_DIR`, then on `PATH`,
@@ -174,6 +174,10 @@ go install github.com/letsencrypt/pebble/v2/cmd/pebble@v2.10.1 \
 `go install` also puts Pebble's module in the module cache. To keep the
 binaries elsewhere, set `GOBIN` for the install and `PEBBLE_BIN_DIR` for the
 tests. The Pebble test binds ports 5001, 8053, 8055, 14000 and 15000.
+
+`tests/aprond.rs` checks `--help`, `--print-config` and the startup errors
+against the golden files in `tests/golden`. When a flag change is intended,
+rerun it with `APRON_UPDATE_GOLDEN=1` and review the diff of those files.
 
 Before any commit:
 

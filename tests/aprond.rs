@@ -1,18 +1,11 @@
-//! The `aprond` binary: its command line compared byte for byte with the Go
-//! `aprond`, and `run` end to end over real listeners.
+//! The `aprond` binary: its command line against the golden files in
+//! `tests/golden`, and `run` end to end over real listeners.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::mpsc::{self, Receiver};
-use std::sync::OnceLock;
 use std::time::{Duration, Instant};
-
-#[path = "../src/test_gate.rs"]
-#[allow(dead_code, reason = "PEBBLE gates the library's ACME tests")]
-mod test_gate;
-
-use test_gate::GO;
 
 const APROND: &str = env!("CARGO_BIN_EXE_aprond");
 
@@ -44,33 +37,6 @@ impl Drop for TempDir {
     }
 }
 
-/// The Go `aprond`, built once from the clone at `$APRON_GO_DIR`, or `None`
-/// when `go` cannot be started there.
-fn go_aprond() -> Option<&'static str> {
-    static BUILT: OnceLock<Option<String>> = OnceLock::new();
-    BUILT
-        .get_or_init(|| {
-            let go_dir = std::env::var("APRON_GO_DIR").unwrap_or_else(|_| {
-                format!(
-                    "{}/Developer/forks/apron-server-go",
-                    std::env::var("HOME").unwrap_or_default()
-                )
-            });
-            let binary = format!("{}/go/aprond", env!("CARGO_TARGET_TMPDIR"));
-            let status = Command::new("go")
-                .args(["build", "-o", &binary, "./cmd/aprond"])
-                .current_dir(&go_dir)
-                .status()
-                .ok()?;
-            assert!(
-                status.success(),
-                "go build ./cmd/aprond in {go_dir}: {status}"
-            );
-            Some(binary)
-        })
-        .as_deref()
-}
-
 fn output(program: &str, args: &[&str]) -> (i32, Vec<u8>, Vec<u8>) {
     let out = Command::new(program)
         .args(args)
@@ -92,43 +58,44 @@ fn without_times(log: &[u8]) -> String {
         .join("\n")
 }
 
-/// Drops the groups of extensions Go lacks, from `--apple.app-id` on, which
-/// come last in `--help` and `--print-config`.
-fn without_extensions(out: &[u8]) -> String {
-    let out = String::from_utf8_lossy(out).into_owned();
-    if let (Some(start), Some(end)) = (out.find("\nApple:\n"), out.find("\nHelp Options:\n")) {
-        return format!("{}{}", &out[..start], &out[end..]);
+/// Runs `aprond` with each case and compares its exit status, standard
+/// output and standard error (without log times) with `tests/golden/<name>`.
+/// Each `(from, to)` in `masks` replaces a per-run value such as a temp path.
+/// `APRON_UPDATE_GOLDEN=1` rewrites the file instead.
+fn check_golden(name: &str, cases: &[Vec<&str>], masks: &[(String, &str)]) {
+    let mut got = String::new();
+    for args in cases {
+        let (code, out, err) = output(APROND, args);
+        got.push_str(&format!(
+            "$ aprond {}\nexit {code}\n--- stdout\n{}--- stderr\n{}\n\n",
+            args.join(" "),
+            String::from_utf8_lossy(&out),
+            without_times(&err),
+        ));
     }
-    match out.find("\n[apple]\n") {
-        Some(start) => out[..start].to_string(),
-        None => out,
+    for (from, to) in masks {
+        got = got.replace(from.as_str(), to);
     }
-}
-
-/// Runs both programs with `args` and compares exit status, standard output
-/// (without the extension groups) and standard error (without log times).
-fn compare_with_go(args: &[&str]) {
-    let Some(go) = go_aprond() else {
-        return GO.unavailable("go toolchain or apron-server-go clone not found");
-    };
-    let (go_code, go_out, go_err) = output(go, args);
-    let (code, out, err) = output(APROND, args);
-    let go_view = (
-        go_code,
-        String::from_utf8_lossy(&go_out).into_owned(),
-        without_times(&go_err),
-    );
-    let view = (code, without_extensions(&out), without_times(&err));
-    assert!(
-        go_view == view,
-        "{args:?}\n--- go (exit {})\n{}{}\n--- rust (exit {})\n{}{}",
-        go_view.0,
-        go_view.1,
-        go_view.2,
-        view.0,
-        view.1,
-        view.2,
-    );
+    let path = format!("{}/tests/golden/{name}", env!("CARGO_MANIFEST_DIR"));
+    if std::env::var("APRON_UPDATE_GOLDEN").as_deref() == Ok("1") {
+        std::fs::write(&path, &got).unwrap();
+        return;
+    }
+    let want = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("{path}: {e}; run with APRON_UPDATE_GOLDEN=1"));
+    if want != got {
+        let line = want
+            .lines()
+            .zip(got.lines())
+            .position(|(w, g)| w != g)
+            .unwrap_or(want.lines().count().min(got.lines().count()));
+        panic!(
+            "{path} differs at line {}:\n--- want\n{}\n--- got\n{}\n(rerun with APRON_UPDATE_GOLDEN=1 if the change is intended)",
+            line + 1,
+            want.lines().nth(line).unwrap_or("<end>"),
+            got.lines().nth(line).unwrap_or("<end>"),
+        );
+    }
 }
 
 fn write_config(text: &str) -> (TempDir, String) {
@@ -138,11 +105,11 @@ fn write_config(text: &str) -> (TempDir, String) {
 }
 
 #[test]
-fn test_print_config_matches_go() {
-    let (_dir, path) = write_config(
+fn test_print_config_matches_golden() {
+    let (dir, path) = write_config(
         "public-url = \"https://chat.example\"\nrole = [\"admin=ada\"]\n[upload]\nmax-mb = 5\n[tls]\ndomain = []\n",
     );
-    for args in [
+    let cases = [
         &["--print-config"][..],
         &[
             "--print-config",
@@ -172,16 +139,20 @@ fn test_print_config_matches_go() {
             "--email.enable",
         ][..],
         &["--print-config", "--config", &path, "--upload.max-mb", "9"][..],
-    ] {
-        compare_with_go(args);
-    }
+    ]
+    .map(<[&str]>::to_vec);
+    check_golden(
+        "print-config.txt",
+        &cases,
+        &[(format!("{}/", dir.0), "$TMP/")],
+    );
 }
 
 #[test]
-fn test_help_and_errors_match_go() {
-    let (_dir, unknown) = write_config("[upload]\nmax = 1\n");
-    let (_dir2, bad_int) = write_config("max-connections = \"many\"\n");
-    for args in [
+fn test_help_and_errors_match_golden() {
+    let (dir, unknown) = write_config("[upload]\nmax = 1\n");
+    let (dir2, bad_int) = write_config("max-connections = \"many\"\n");
+    let cases = [
         &["--help"][..],
         &["-h"][..],
         &["--addr", ":1", "-h"][..],
@@ -196,15 +167,22 @@ fn test_help_and_errors_match_go() {
         &["--config", "/nonexistent/aprond.toml"][..],
         &["--config", &unknown][..],
         &["--config", &bad_int][..],
-    ] {
-        compare_with_go(args);
-    }
+    ]
+    .map(<[&str]>::to_vec);
+    check_golden(
+        "help-and-errors.txt",
+        &cases,
+        &[
+            (format!("{}/", dir.0), "$TMP/"),
+            (format!("{}/", dir2.0), "$TMP2/"),
+        ],
+    );
 }
 
-/// The errors `run` stops with before it serves, which Go logs as
-/// "server stopped" and exits 1 after.
+/// The errors `run` stops with before it serves, logged as "server stopped"
+/// with exit status 1, as the Go `aprond` does.
 #[test]
-fn test_startup_errors_match_go() {
+fn test_startup_errors_match_golden() {
     let dir = TempDir::new();
     let busy = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let busy = busy.local_addr().unwrap().to_string();
@@ -231,10 +209,15 @@ fn test_startup_errors_match_go() {
         ],
         vec!["--store", &not_a_database],
     ];
-    for case in cases {
-        let args: Vec<&str> = base.iter().copied().chain(case).collect();
-        compare_with_go(&args);
-    }
+    let cases: Vec<Vec<&str>> = cases
+        .into_iter()
+        .map(|case| base.iter().copied().chain(case).collect())
+        .collect();
+    check_golden(
+        "startup-errors.txt",
+        &cases,
+        &[(format!("{}/", dir.0), "$TMP/"), (busy.clone(), "$BUSY")],
+    );
 }
 
 /// A running `aprond` whose standard error is read line by line.
