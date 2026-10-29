@@ -37,17 +37,6 @@ pub fn token_auth(c: &mut TestClient, token: &str) -> Object {
     reply_to(c, "auth", &id, obj! {"scheme" => "token", "token" => token})
 }
 
-/// Sends a request and returns its reply, skipping notifications.
-fn reply_to(c: &mut TestClient, method: &str, id: &str, params: Object) -> Object {
-    c.write(&obj! {"method" => method, "id" => id, "params" => params});
-    loop {
-        let frame = c.read();
-        if frame.contains_key("id") {
-            return frame;
-        }
-    }
-}
-
 /// Connects with no origin and signs in as the admin user.
 pub fn admin(server: &TestServer) -> TestClient {
     admin_on(server, "")

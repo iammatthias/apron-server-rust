@@ -27,6 +27,64 @@ pub struct Limits {
     pub connections_per_user: usize,
     /// New connections one IP may open, a minute.
     pub admissions_per_ip_minute: u32,
+    /// Posts (every logged change, and joins and leaves) of the guests of
+    /// one IP together; of an account; of an account holding any role, in
+    /// place of `posts`; of one IP's users together, raised to
+    /// `trusted_posts` for a trusted user's; and of everyone.
+    pub guest_posts: Posts,
+    pub posts: Posts,
+    pub trusted_posts: Posts,
+    pub ip_posts: Posts,
+    pub server_posts: Posts,
+}
+
+/// Posts a minute and a day; zero is no limit.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Posts {
+    pub minute: u32,
+    pub day: u32,
+}
+
+impl Posts {
+    pub fn allowance(self) -> Allowance {
+        Allowance {
+            day: self.day,
+            ..Allowance::minute(self.minute)
+        }
+    }
+
+    fn max(self, other: Posts) -> Posts {
+        Posts {
+            minute: self.minute.max(other.minute),
+            day: self.day.max(other.day),
+        }
+    }
+}
+
+/// Who a post is charged to beside its IP and the server.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Poster {
+    Guest,
+    Account,
+    /// An account holding any role, and no bot: only an admin gives roles.
+    Trusted,
+}
+
+impl Limits {
+    /// The allowances a post of `poster` is charged against: its own, its
+    /// IP's and the server's.
+    pub fn post_allowances(&self, poster: Poster) -> [Allowance; 3] {
+        let (own, ip) = match poster {
+            Poster::Guest => (self.guest_posts, self.ip_posts),
+            Poster::Account => (self.posts, self.ip_posts),
+            Poster::Trusted => (self.trusted_posts, self.ip_posts.max(self.trusted_posts)),
+        };
+        [
+            own.allowance(),
+            ip.allowance(),
+            self.server_posts.allowance(),
+        ]
+    }
 }
 
 impl Default for Limits {
@@ -37,6 +95,26 @@ impl Default for Limits {
             guest_connections_per_ip: 6,
             connections_per_user: 3,
             admissions_per_ip_minute: 12,
+            guest_posts: Posts {
+                minute: 5,
+                day: 200,
+            },
+            posts: Posts {
+                minute: 20,
+                day: 1_000,
+            },
+            trusted_posts: Posts {
+                minute: 50,
+                day: 4_000,
+            },
+            ip_posts: Posts {
+                minute: 30,
+                day: 2_000,
+            },
+            server_posts: Posts {
+                minute: 120,
+                day: 10_000,
+            },
         }
     }
 }
@@ -50,6 +128,11 @@ impl Limits {
             guest_connections_per_ip: 0,
             connections_per_user: 0,
             admissions_per_ip_minute: 0,
+            guest_posts: Posts::default(),
+            posts: Posts::default(),
+            trusted_posts: Posts::default(),
+            ip_posts: Posts::default(),
+            server_posts: Posts::default(),
         }
     }
 }
@@ -110,12 +193,15 @@ impl Bucket {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Scope {
     Admission,
+    Post,
 }
 
 /// Whose use a row counts.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Principal {
     Ip(IpKey),
+    /// The guests of an IP, together.
+    Guests(IpKey),
     User(String),
     Server,
 }

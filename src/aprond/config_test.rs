@@ -46,7 +46,6 @@ fn test_config_file_sets_options_the_command_line_does_not() {
         r#"
 addr = "0.0.0.0:9000"
 public-url = "https://chat.example"
-messages-per-minute = 30
 
 [webauthn]
 rp-id = "chat.example"
@@ -54,6 +53,9 @@ origin = ["https://chat.example"]
 
 [upload]
 max-mb = 5
+
+[limit]
+posts-per-minute = 30
 "#,
     );
     let mut parser = parse(&["--addr", "127.0.0.1:9999", "--upload.max-mb", "7"]);
@@ -67,7 +69,7 @@ max-mb = 5
     );
     assert!(
         options.public_url == "https://chat.example"
-            && options.messages_per_minute == 30
+            && options.limit.posts_per_minute == 30
             && options.webauthn.rp_id == "chat.example",
         "file settings not applied: {options:?}"
     );

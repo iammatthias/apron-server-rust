@@ -1116,3 +1116,27 @@ pub fn wait_for(mut done: impl FnMut() -> bool) {
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
 }
+
+/// Sends a request and returns its reply, skipping notifications.
+pub fn reply_to(c: &mut TestClient, method: &str, id: &str, params: Object) -> Object {
+    c.write(&obj! {"method" => method, "id" => id, "params" => params});
+    loop {
+        let frame = c.read();
+        if frame.contains_key("id") {
+            return frame;
+        }
+    }
+}
+
+/// A retry_after reply's message and data, failing on any other reply.
+pub fn retry_after_of(frame: &Object) -> (String, Object) {
+    let error = frame
+        .get("error")
+        .and_then(Json::as_object)
+        .unwrap_or_else(|| panic!("want retry_after: {frame:?}"));
+    assert_eq!(error["code"], Json::from(CODE_RETRY_AFTER), "{frame:?}");
+    (
+        error["message"].as_str().unwrap().to_owned(),
+        error["data"].as_object().unwrap().clone(),
+    )
+}

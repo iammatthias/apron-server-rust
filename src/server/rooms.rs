@@ -876,7 +876,7 @@ impl State {
                 format!("The room's ext would be over {MAX_ROOM_EXT_BYTES} bytes"),
             ));
         }
-        self.admit_post_locked(&user_id)?;
+        self.charge_post_locked(c, &user_id)?;
         let mut fields = Object::new();
         if title.is_empty() && parent.is_some() {
             // Servers title threads so clients unaware of parent_room_id
@@ -1177,6 +1177,9 @@ impl State {
             }
             target = target_id;
         }
+        if !r.members.contains(&target) {
+            self.charge_post_locked(c, &user_id)?;
+        }
         if !self.join_locked(&target, &room_id) && target == user_id {
             let frame = self.joined_update_locked(&room_id, None);
             c.enqueue_frame(frame);
@@ -1212,6 +1215,9 @@ impl State {
                 )));
             }
             target = target_id;
+        }
+        if r.members.contains(&target) {
+            self.charge_post_locked(c, &user_id)?;
         }
         self.leave_locked(&target, &room_id);
         let result = Object::new();

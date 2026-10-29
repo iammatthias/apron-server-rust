@@ -33,7 +33,6 @@ pub struct Settings {
     pub allow_any_origin: bool,
     pub public_url: String,
     pub max_connections: i64,
-    pub messages_per_minute: i64,
     pub max_listed_members: i64,
     pub max_private_rooms: i64,
     pub read_receipts: bool,
@@ -90,6 +89,13 @@ fn rate(flag: &str, value: i64) -> Result<u32, String> {
         .map_err(|_| format!("invalid --{flag} {value}: use a smaller number"))
 }
 
+fn posts(flag: &str, minute: i64, day: i64) -> Result<crate::server::limits::Posts, String> {
+    Ok(crate::server::limits::Posts {
+        minute: rate(&format!("limit.{flag}-per-minute"), minute)?,
+        day: rate(&format!("limit.{flag}-per-day"), day)?,
+    })
+}
+
 fn positive(flag: &str, value: i64) -> Result<usize, String> {
     usize::try_from(value)
         .ok()
@@ -112,7 +118,6 @@ pub fn server_settings(options: &Options) -> Result<Settings, String> {
         }
     }
     config.max_connections = options.max_connections;
-    config.messages_per_minute = options.messages_per_minute;
     config.max_listed_members = options.max_listed_members;
     config.max_private_rooms = options.max_private_rooms;
     config.read_receipts = options.read_receipts;
@@ -253,6 +258,23 @@ pub fn server_settings(options: &Options) -> Result<Settings, String> {
         admissions_per_ip_minute: rate(
             "limit.admissions-per-ip-minute",
             l.admissions_per_ip_minute,
+        )?,
+        guest_posts: posts(
+            "guest-posts",
+            l.guest_posts_per_minute,
+            l.guest_posts_per_day,
+        )?,
+        posts: posts("posts", l.posts_per_minute, l.posts_per_day)?,
+        trusted_posts: posts(
+            "trusted-posts",
+            l.trusted_posts_per_minute,
+            l.trusted_posts_per_day,
+        )?,
+        ip_posts: posts("ip-posts", l.ip_posts_per_minute, l.ip_posts_per_day)?,
+        server_posts: posts(
+            "server-posts",
+            l.server_posts_per_minute,
+            l.server_posts_per_day,
         )?,
     };
     Ok(config)

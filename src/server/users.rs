@@ -92,9 +92,6 @@ pub struct UserState {
     /// or reacted, in Unix milliseconds, for the idle bot sweep; 0 once the
     /// sweep signed it out (bots.rs).
     pub active: i64,
-    /// Limits the user's new messages, room_set requests, and /avatar
-    /// commands to messages_per_minute; `None` when unlimited.
-    pub posts: Option<Limiter>,
     /// Bounds the URLs of the user's messages that are unfurled.
     pub unfurls: Option<Limiter>,
     /// Bound the user's typing relays and read cursor relays, each
@@ -155,7 +152,6 @@ impl UserState {
             owner: None,
             invited: false,
             active: 0,
-            posts: None,
             unfurls: None,
             chosen: STATUS_ONLINE.into(),
             mute: MuteState::default(),
@@ -896,6 +892,13 @@ impl State {
         // as a `status` request does (§4.5).
         if has_status && status != u.chosen {
             admit_status_locked(self.users.get_mut(&user_id).expect("user exists"))?;
+        }
+        let u = &self.users[&user_id];
+        if (has_name && normalize_name(&name) != u.name)
+            || (has_avatar && avatar != u.avatar)
+            || (has_ext && ext != u.ext)
+        {
+            self.charge_post_locked(c, &user_id)?;
         }
         let u = &self.users[&user_id];
         let (before, before_you) = (u.profile(), self.you_locked(u));

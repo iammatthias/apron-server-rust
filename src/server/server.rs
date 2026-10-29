@@ -131,8 +131,6 @@ pub struct Config {
     /// The per-client limits (limits.rs), apron-server-cloudflare's by
     /// default.
     pub limits: Limits,
-    /// Bounds each user's new messages; 0 is unlimited.
-    pub messages_per_minute: i64,
     /// Bounds a room's members in room_list and room_update joined; a larger
     /// room lists its most recently active members and member_count
     /// (§4.2.1). 0 is unlimited.
@@ -232,7 +230,6 @@ pub fn default_config() -> Config {
         vapid_subject: String::new(),
         max_connections: DEFAULT_MAX_CONNECTIONS,
         limits: Limits::default(),
-        messages_per_minute: 0,
         max_listed_members: DEFAULT_MAX_LISTED_MEMBERS,
         max_private_rooms: 20,
         welcome: String::new(),
