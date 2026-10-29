@@ -282,6 +282,10 @@ pub fn server_settings(options: &Options) -> Result<Settings, String> {
             "limit.admissions-per-ip-minute",
             l.admissions_per_ip_minute,
         )?,
+        auth_attempts_per_ip_minute: rate(
+            "limit.auth-attempts-per-ip-minute",
+            l.auth_attempts_per_ip_minute,
+        )?,
         guest_posts: posts(
             "guest-posts",
             l.guest_posts_per_minute,

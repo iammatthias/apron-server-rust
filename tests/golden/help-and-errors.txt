@@ -262,6 +262,10 @@ Limits:
       --limit.admissions-per-ip-minute=     New WebSockets one client address
                                             may open a minute; 0 is unlimited
                                             (default: 12)
+      --limit.auth-attempts-per-ip-minute=  auth requests one client address
+                                            may send a minute, failed ones
+                                            included; 0 is unlimited (default:
+                                            10)
       --limit.guest-posts-per-minute=       Posts of one client address's
                                             guests together a minute, as a
                                             burst refilled over the minute. A
@@ -659,6 +663,10 @@ Limits:
       --limit.admissions-per-ip-minute=     New WebSockets one client address
                                             may open a minute; 0 is unlimited
                                             (default: 12)
+      --limit.auth-attempts-per-ip-minute=  auth requests one client address
+                                            may send a minute, failed ones
+                                            included; 0 is unlimited (default:
+                                            10)
       --limit.guest-posts-per-minute=       Posts of one client address's
                                             guests together a minute, as a
                                             burst refilled over the minute. A
@@ -1056,6 +1064,10 @@ Limits:
       --limit.admissions-per-ip-minute=     New WebSockets one client address
                                             may open a minute; 0 is unlimited
                                             (default: 12)
+      --limit.auth-attempts-per-ip-minute=  auth requests one client address
+                                            may send a minute, failed ones
+                                            included; 0 is unlimited (default:
+                                            10)
       --limit.guest-posts-per-minute=       Posts of one client address's
                                             guests together a minute, as a
                                             burst refilled over the minute. A

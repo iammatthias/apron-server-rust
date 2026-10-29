@@ -19,6 +19,7 @@ if [[ "${1:-}" == run && "${2:-}" == ./cmd/aprond ]]; then
 		--limit.guest-connections-per-ip=0
 		--limit.connections-per-user=0
 		--limit.admissions-per-ip-minute=0
+		--limit.auth-attempts-per-ip-minute=0
 		--limit.guest-posts-per-minute=0
 		--limit.guest-posts-per-day=0
 		--limit.posts-per-minute=0
