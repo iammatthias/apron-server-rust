@@ -1,3 +1,0 @@
-# The apron-server-go commit this port matches. tools/upstream/check.sh compares
-# it with upstream main; move it only after porting every commit in between.
-apron-server-go f137c64c3f2fe1b3fbc6464619e9d9e5c4a76127
