@@ -520,7 +520,7 @@ fn test_apple_app_site_association() {
         &["--print-config", "--apple.app-id", "ABCDE12345.chat.apron"],
     );
     assert_eq!(code, 0);
-    assert!(String::from_utf8(out).unwrap().contains("\n[apple]\n\n# iOS app allowed to use this server's passkeys, as <team ID>.<bundle ID>, listed in /.well-known/apple-app-site-association; repeat for more (not in the Go aprond)\napp-id = [\"ABCDE12345.chat.apron\"]\n\n[unfurl]\n"));
+    assert!(String::from_utf8(out).unwrap().contains("\n[apple]\n\n# iOS app allowed to use this server's passkeys, as <team ID>.<bundle ID>, listed in /.well-known/apple-app-site-association; repeat for more\napp-id = [\"ABCDE12345.chat.apron\"]\n\n[unfurl]\n"));
 
     let (code, _, err) = output(
         APROND,
@@ -540,7 +540,7 @@ fn test_unfurl_flag() {
     let (code, out, _) = output(APROND, &["--print-config"]);
     assert_eq!(code, 0);
     let out = String::from_utf8(out).unwrap();
-    assert!(out.contains("\n[unfurl]\n\n# Fetch the pages that messages link to and attach their OpenGraph previews, with images hosted here; the server then requests any public http(s) URL a user posts (off by default; not in the Go aprond)\nenable = false\n\n[guest]\n"), "{out}");
+    assert!(out.contains("\n[unfurl]\n\n# Fetch the pages that messages link to and attach their OpenGraph previews, with images hosted here; the server then requests any public http(s) URL a user posts (off by default)\nenable = false\n\n[guest]\n"), "{out}");
     let (code, out, _) = output(APROND, &["--print-config", "--unfurl.enable"]);
     assert_eq!(code, 0);
     assert!(String::from_utf8(out)
@@ -637,7 +637,7 @@ fn test_guest_and_history_flags() {
     assert_eq!(code, 0);
     assert!(String::from_utf8(out)
         .unwrap()
-        .contains("\nposting = true\n\n[history]\n\n# Delete messages, reactions, and their uploads older than this, such as 168h, checking hourly; emptied threads and private rooms go, other rooms stay (default: keep forever; not in the Go aprond)\nretention = \"168h\"\n\n[frame]\n"));
+        .contains("\nposting = true\n\n[history]\n\n# Delete messages, reactions, and their uploads older than this, such as 168h, checking hourly; emptied threads and private rooms go, other rooms stay (default: keep forever)\nretention = \"168h\"\n\n[frame]\n"));
     for bad in ["7d", "-1h"] {
         let flag = format!("--history.retention={bad}");
         let (code, _, err) = output(APROND, &["--store", "memory", &flag]);
