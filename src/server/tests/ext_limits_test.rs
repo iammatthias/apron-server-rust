@@ -41,7 +41,7 @@ fn test_server_frame_lists_ext_limits() {
 }
 
 /// Every posting refusal of a request the write row lists names `write`,
-/// reactions and memberships included; a `me` refusal names none.
+/// reactions and memberships included.
 #[test]
 fn test_write_names_posting_refusals_of_its_row_only() {
     let server = server(Limits {

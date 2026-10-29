@@ -435,7 +435,8 @@ impl LimitTable {
                 .insert((charge.scope, charge.principal.clone()), row);
         }
         if self.rows.len() > self.prune_at {
-            // Yesterday's rows have at most a minute left to count.
+            // Yesterday's rows have only their last few minutes left to
+            // count; forgetting them at a new day costs at most one burst.
             self.rows.retain(|_, row| row.day == today);
             self.prune_at = (self.rows.len() * 2).max(4096);
         }
