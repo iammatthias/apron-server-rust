@@ -92,11 +92,6 @@ fn allow_all() -> DialCheck {
     Arc::new(|_: &str| true)
 }
 
-/// Admits only the given port, standing in for a public address.
-fn allow_port(port: String) -> DialCheck {
-    Arc::new(move |address: &str| split_host_port(address).is_ok_and(|(_, p)| p == port))
-}
-
 fn fetcher(check: DialCheck) -> Fetcher {
     Fetcher::new(check, FETCH_TIMEOUT)
 }
@@ -255,13 +250,71 @@ fn test_fetcher_refuses_internal_addresses() {
 }
 
 #[test]
+fn test_dial_check_ports() {
+    for (address, want) in [
+        ("93.184.215.14:80", true),
+        ("93.184.215.14:443", true),
+        ("[2606:4700::1111]:443", true),
+        ("93.184.215.14:8080", false),
+        ("93.184.215.14:8443", false),
+        ("93.184.215.14:22", false),
+        ("10.0.0.1:443", false),
+        ("127.0.0.1:80", false),
+    ] {
+        assert_eq!(dial_check()(address), want, "{address}");
+    }
+}
+
+/// The redirect target's address is checked when dialed: here its port is
+/// not one the check admits.
+#[test]
 fn test_fetcher_rechecks_redirects() {
-    let private = fixture(vec![("/post", html(ARTICLE))]);
-    let public = fixture(vec![("/go", redirect(private.url("/post")))]);
-    let check = allow_port(public.port());
-    assert_eq!(fetcher(check).preview(&public.url("/go")), None);
-    assert_eq!(public.hits("/go"), 1);
-    assert_eq!(private.hits("/post"), 0, "the redirect target was dialed");
+    let other = fixture(vec![("/post", html(ARTICLE))]);
+    let first = fixture(vec![("/go", redirect(other.url("/post")))]);
+    let check = on_ports(allow_all(), vec![first.port()]);
+    assert_eq!(fetcher(check).preview(&first.url("/go")), None);
+    assert_eq!(first.hits("/go"), 1);
+    assert_eq!(other.hits("/post"), 0, "the redirect target was dialed");
+}
+
+/// A PNG of `width` by `height` pixels as far as its header says.
+fn png_claiming(width: u32, height: u32) -> Vec<u8> {
+    let mut png = test_png();
+    png[16..20].copy_from_slice(&width.to_be_bytes());
+    png[20..24].copy_from_slice(&height.to_be_bytes());
+    let crc = rust_stdlib::hash::crc32::checksum_ieee(&png[12..29]);
+    png[29..33].copy_from_slice(&crc.to_be_bytes());
+    png
+}
+
+#[test]
+fn test_fetcher_image_dimensions() {
+    let page_with = |image: &str| -> Route {
+        html(&format!(
+            r#"<meta property="og:title" content="T"><meta property="og:image" content="{image}">"#
+        ))
+    };
+    let page = fixture(vec![
+        ("/wide", page_with("/wide.png")),
+        ("/wide.png", respond("image/png", png_claiming(8193, 1))),
+        ("/tall", page_with("/tall.png")),
+        ("/tall.png", respond("image/png", png_claiming(1, 8193))),
+        ("/many", page_with("/many.png")),
+        ("/many.png", respond("image/png", png_claiming(7000, 7000))),
+        ("/fits", page_with("/fits.png")),
+        ("/fits.png", respond("image/png", png_claiming(8192, 4800))),
+    ]);
+    let f = fetcher(allow_all());
+    let dimensions = |path: &str| {
+        f.preview(&page.url(path))
+            .unwrap()
+            .image
+            .map(|i| (i.width, i.height))
+    };
+    assert_eq!(dimensions("/wide"), None);
+    assert_eq!(dimensions("/tall"), None);
+    assert_eq!(dimensions("/many"), None);
+    assert_eq!(dimensions("/fits"), Some((8192, 4800)));
 }
 
 #[test]
