@@ -1241,7 +1241,7 @@ fn test_push_unread_and_badge() {
         b.notification("message");
         message_id
     };
-    let read = |b: &mut TestClient, _others: &[&TestClient], room_id: &str, message_id: &str| {
+    let read = |b: &mut TestClient, room_id: &str, message_id: &str| {
         b.write(&obj! {"method" => "activity", "params" => obj! {"room_id" => room_id, "read_message_id" => message_id}});
         // A reply on the same connection follows the cursor's handling.
         let id = b.next_id("after-read");
@@ -1278,7 +1278,7 @@ fn test_push_unread_and_badge() {
     );
     // Reading on another connection sends badge pushes to relay
     // registrations whose count changed; webpush ignores badge.
-    read(&mut b, &[&a], "general", &first);
+    read(&mut b, "general", &first);
     expect(
         &mut a,
         vec![
@@ -1286,7 +1286,7 @@ fn test_push_unread_and_badge() {
             d("/phone", 1, "low", false),
         ],
     );
-    read(&mut b, &[&a], "general", &second);
+    read(&mut b, "general", &second);
     expect(
         &mut a,
         vec![
@@ -1351,7 +1351,7 @@ fn test_push_unread_and_badge() {
             d("/phone", 1, "low", false),
         ],
     );
-    read(&mut b, &[], &ops, &elsewhere);
+    read(&mut b, &ops, &elsewhere);
     expect(
         &mut a,
         vec![
@@ -1380,7 +1380,7 @@ fn test_push_unread_and_badge() {
             d("/phone", 1, "low", false),
         ],
     );
-    read(&mut b, &[&a], "general", &moved);
+    read(&mut b, "general", &moved);
     expect(
         &mut a,
         vec![
