@@ -55,7 +55,7 @@ pub struct Settings {
     pub apple_app_ids: Vec<String>,
     /// `--unfurl.enable`, an extension Go lacks.
     pub unfurl: bool,
-    /// Not `--guest.read-only`, an extension Go lacks.
+    /// The negation of `--guest.read-only`, an extension Go lacks.
     pub guest_posting: bool,
     /// `--history.retention`, an extension Go lacks; `None` keeps history.
     pub retention: Option<Duration>,
