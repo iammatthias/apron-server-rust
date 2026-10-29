@@ -685,7 +685,10 @@ of 0 to 60 seconds (`--limit.status-coalesce-seconds`,
 user in any 60 seconds. It refuses a `wake` of more than 16 names with
 `denied` and a name over 64 characters with `too_large`. It refuses a `url`
 that carries credentials or a port, an IP address, a single-label host, or
-a host under an internal suffix such as `.local` or `.internal`.
+a host under an internal suffix such as `.local` or `.internal`. Its texts
+include `Unknown push kind; this server offers webpush`, `url is at most
+512 bytes`, `push_id must be 1 to 64 letters, digits, _ or -`, `url must be
+an https URL` and `url must name a public push service`.
 
 **This server.** Has the same numbers: 5 registrations a user, expiry after
 7 days, URLs of at most 512 bytes, and 10 requests a minute. These differ:
@@ -707,7 +710,8 @@ a host under an internal suffix such as `.local` or `.internal`.
   be an uncompressed P-256 point in base64url` or `keys.p256dh is not a
   point on P-256`.
 
-**Why.** The checks and texts predate the reference. The host list, not the
+**Why.** The checks and texts are apron-server-go's, kept from the port.
+The host list, not the
 address checks, keeps pushes to the browsers' push services.
 
 ### Push wakes (§4.9)
