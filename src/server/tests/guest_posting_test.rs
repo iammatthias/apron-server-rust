@@ -140,15 +140,14 @@ fn test_read_only_guest_reads() {
     );
 }
 
-/// Guests only read by default, and ext:settings always says whether they
-/// may post.
+/// ext:settings keeps only read_cursors and private_rooms; whether a guest
+/// may post is in its `you` (EXTENSIONS.md).
 #[test]
 fn test_server_frame_advertises_guest_posting() {
-    let settings = |guest_posting: bool| {
-        Some(Json::from(obj! {
-            "guest_posting" => guest_posting, "read_cursors" => true, "add_members" => true,
-            "private_rooms" => 20i64,
-        }))
+    let settings = |_guest_posting: bool| {
+        Some(Json::from(
+            obj! {"read_cursors" => true, "private_rooms" => 20i64},
+        ))
     };
     type Case = (&'static str, Config, Option<Json>);
     let cases: Vec<Case> = vec![

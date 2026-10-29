@@ -484,54 +484,48 @@ fn random_digits<const N: usize>() -> String {
 }
 
 impl State {
-    /// What u may do beyond their own messages (`ext:permissions`):
-    /// `move_any` with a moderator role, `add_members` for an admin or while
-    /// addmember is on, and `push_joined` while push is on, since this
-    /// server wakes everyone for `joined`; none for a bot.
-    pub fn permissions_locked(&self, u: &UserState) -> Vec<&'static str> {
+    /// What u may do beyond PROTOCOL.md's defaults (`ext:permissions`,
+    /// EXTENSIONS.md), as the keys that differ from their defaults:
+    /// `write: false` for a guest while guests only read; `add_members` for
+    /// an admin, or any account while addmember is on; `move_any` with a
+    /// moderator role. A bot has neither.
+    pub fn permissions_locked(&self, u: &UserState) -> Vec<(&'static str, bool)> {
         let mut permissions = Vec::new();
-        if u.bot() {
+        if !u.persists() {
+            if !self.config.guest_posting {
+                permissions.push(("write", false));
+            }
             return permissions;
         }
+        if u.account()
+            && (u.has_role(ADMIN_ROLE) || self.feature_on(super::toggles::Feature::AddMember))
+        {
+            permissions.push(("add_members", true));
+        }
         if u.has_any_role(MODERATOR_ROLES) {
-            permissions.push("move_any");
-        }
-        if u.has_role(ADMIN_ROLE) || self.feature_on(super::toggles::Feature::AddMember) {
-            permissions.push("add_members");
-        }
-        if !self.config.disable_push {
-            permissions.push("push_joined");
+            permissions.push(("move_any", true));
         }
         permissions
     }
 
-    /// The `ext` of u's `you` holding only their permissions; `None` for a
-    /// guest, who has none.
-    pub fn permissions_ext_locked(&self, u: &UserState) -> Option<ExtObject> {
-        if !u.persists() {
-            return None;
-        }
-        let list: Vec<String> = self
+    /// The `ext` of u's `you` holding only their permissions.
+    pub fn permissions_ext_locked(&self, u: &UserState) -> ExtObject {
+        let fields: Vec<String> = self
             .permissions_locked(u)
             .iter()
-            .map(|p| format!("\"{p}\""))
+            .map(|(key, value)| format!("\"{key}\":{value}"))
             .collect();
-        let raw = format!("[{}]", list.join(","));
-        Some(ExtObject::from([(
-            PERMISSIONS_KEY.to_owned(),
-            Value::from(raw.into_bytes()),
-        )]))
+        let raw = format!("{{{}}}", fields.join(","));
+        ExtObject::from([(PERMISSIONS_KEY.to_owned(), Value::from(raw.into_bytes()))])
     }
 
     /// The user's own current object, `you` (§3.3), with their permissions
     /// in its ext.
     pub fn you_locked(&self, u: &UserState) -> Object {
         let mut you = u.you();
-        if let Some(permissions) = self.permissions_ext_locked(u) {
-            let mut ext = ext_of(you.get("ext"));
-            ext.extend(permissions);
-            you.insert("ext".into(), Json::Ext(ext));
-        }
+        let mut ext = ext_of(you.get("ext"));
+        ext.extend(self.permissions_ext_locked(u));
+        you.insert("ext".into(), Json::Ext(ext));
         you
     }
 }

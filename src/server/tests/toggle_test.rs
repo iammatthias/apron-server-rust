@@ -211,8 +211,6 @@ fn test_toggle_addmember() {
         private_reply(&mut admin, "/toggle addmember"),
         "Adding members is now **off**: only admins can add others to a room, and owners their bots."
     );
-    let (_, frame) = dial_raw(&server);
-    assert_eq!(settings(&frame)["add_members"], Json::Bool(false));
     ada.drain();
     grant_role(&server, &ada.user_id, "mod");
     let (room, _) = save_room(&mut ada, "room", obj! {"title" => "Ada's"});
