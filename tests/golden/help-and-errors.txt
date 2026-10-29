@@ -53,7 +53,9 @@ Application Options:
                                      client's address in, such as
                                      X-Forwarded-For (its last entry) or
                                      X-Real-IP, for per-client limits; set only
-                                     behind a proxy that sets it
+                                     behind a proxy that sets it, since a
+                                     connection without it is refused. IPv6
+                                     clients are limited by their /56
       --welcome=                     Markdown clients show on their sign-in
                                      screen (server.welcome), such as how this
                                      server's sign-in methods fit together
@@ -309,7 +311,9 @@ Application Options:
                                      client's address in, such as
                                      X-Forwarded-For (its last entry) or
                                      X-Real-IP, for per-client limits; set only
-                                     behind a proxy that sets it
+                                     behind a proxy that sets it, since a
+                                     connection without it is refused. IPv6
+                                     clients are limited by their /56
       --welcome=                     Markdown clients show on their sign-in
                                      screen (server.welcome), such as how this
                                      server's sign-in methods fit together
@@ -565,7 +569,9 @@ Application Options:
                                      client's address in, such as
                                      X-Forwarded-For (its last entry) or
                                      X-Real-IP, for per-client limits; set only
-                                     behind a proxy that sets it
+                                     behind a proxy that sets it, since a
+                                     connection without it is refused. IPv6
+                                     clients are limited by their /56
       --welcome=                     Markdown clients show on their sign-in
                                      screen (server.welcome), such as how this
                                      server's sign-in methods fit together

@@ -40,7 +40,7 @@ debug-addr = ""
 # Where state is kept: sqlite:<path> for a SQLite database, or memory to keep nothing across restarts
 store = "sqlite:/home/aprond/Library/Application Support/aprond/aprond.db"
 
-# Request header a reverse proxy puts the client's address in, such as X-Forwarded-For (its last entry) or X-Real-IP, for per-client limits; set only behind a proxy that sets it
+# Request header a reverse proxy puts the client's address in, such as X-Forwarded-For (its last entry) or X-Real-IP, for per-client limits; set only behind a proxy that sets it, since a connection without it is refused. IPv6 clients are limited by their /56
 client-ip-header = ""
 
 # Markdown clients show on their sign-in screen (server.welcome), such as how this server's sign-in methods fit together (default: general's description, else a summary of how guests and sign-in work here)
@@ -241,7 +241,7 @@ debug-addr = ""
 # Where state is kept: sqlite:<path> for a SQLite database, or memory to keep nothing across restarts
 store = "sqlite:/home/aprond/Library/Application Support/aprond/aprond.db"
 
-# Request header a reverse proxy puts the client's address in, such as X-Forwarded-For (its last entry) or X-Real-IP, for per-client limits; set only behind a proxy that sets it
+# Request header a reverse proxy puts the client's address in, such as X-Forwarded-For (its last entry) or X-Real-IP, for per-client limits; set only behind a proxy that sets it, since a connection without it is refused. IPv6 clients are limited by their /56
 client-ip-header = ""
 
 # Markdown clients show on their sign-in screen (server.welcome), such as how this server's sign-in methods fit together (default: general's description, else a summary of how guests and sign-in work here)
@@ -443,7 +443,7 @@ debug-addr = ""
 # Where state is kept: sqlite:<path> for a SQLite database, or memory to keep nothing across restarts
 store = "sqlite:/home/aprond/Library/Application Support/aprond/aprond.db"
 
-# Request header a reverse proxy puts the client's address in, such as X-Forwarded-For (its last entry) or X-Real-IP, for per-client limits; set only behind a proxy that sets it
+# Request header a reverse proxy puts the client's address in, such as X-Forwarded-For (its last entry) or X-Real-IP, for per-client limits; set only behind a proxy that sets it, since a connection without it is refused. IPv6 clients are limited by their /56
 client-ip-header = ""
 
 # Markdown clients show on their sign-in screen (server.welcome), such as how this server's sign-in methods fit together (default: general's description, else a summary of how guests and sign-in work here)
@@ -644,7 +644,7 @@ debug-addr = ""
 # Where state is kept: sqlite:<path> for a SQLite database, or memory to keep nothing across restarts
 store = "sqlite:/home/aprond/Library/Application Support/aprond/aprond.db"
 
-# Request header a reverse proxy puts the client's address in, such as X-Forwarded-For (its last entry) or X-Real-IP, for per-client limits; set only behind a proxy that sets it
+# Request header a reverse proxy puts the client's address in, such as X-Forwarded-For (its last entry) or X-Real-IP, for per-client limits; set only behind a proxy that sets it, since a connection without it is refused. IPv6 clients are limited by their /56
 client-ip-header = ""
 
 # Markdown clients show on their sign-in screen (server.welcome), such as how this server's sign-in methods fit together (default: general's description, else a summary of how guests and sign-in work here)

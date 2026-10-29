@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use rust_stdlib::context::Context;
 use rust_stdlib::log::slog;
-use rust_stdlib::net::{self, mail, url};
+use rust_stdlib::net::{mail, url};
 use rust_stdlib::time::{self, Duration, Time};
 use rust_stdlib_crypto::bigint::Int;
 use rust_stdlib_crypto::{rand, subtle};
@@ -356,21 +356,6 @@ fn wait(limiter: &mut Limiter, now: &Time) -> Duration {
     delay
 }
 
-/// Identifies a connection's client for rate limits: its IP, or the /64 of
-/// an IPv6 address, which one household or host usually has.
-pub fn client_key(ip: &str) -> String {
-    let Some(parsed) = net::parse_ip(ip) else {
-        return ip.to_owned();
-    };
-    if let Some(v4) = parsed.to4() {
-        return v4.to_string();
-    }
-    match net::cidr_mask(64, 128).and_then(|mask| parsed.mask(&mask)) {
-        Some(prefix) => format!("{prefix}/64"),
-        None => ip.to_owned(),
-    }
-}
-
 /// A bare address, lowercased, or "" if `value` is not one. The domain must
 /// be a DNS name with a dot: address literals such as a@[10.0.0.5] and
 /// single labels such as a@localhost are refused, so codes go only to
@@ -578,7 +563,7 @@ impl State {
                 ));
             }
         }
-        let Some(budget) = self.email.client(&c.client_key, &now) else {
+        let Some(budget) = self.email.client(c.ip_key.as_str(), &now) else {
             return Err(busy());
         };
         let delay = wait(&mut budget.sends, &now);
@@ -648,7 +633,7 @@ impl State {
                 "Unable to create a code",
             ));
         };
-        if let Some(budget) = self.email.clients.get_mut(&c.client_key) {
+        if let Some(budget) = self.email.clients.get_mut(c.ip_key.as_str()) {
             budget.sends.allow_n(&now, 1);
         }
         if let Some(address) = self.email.addresses.get_mut(&email) {
