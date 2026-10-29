@@ -33,12 +33,17 @@ pub const ADMIN_ROLE: &str = "admin";
 pub const MOD_ROLE: &str = "mod";
 /// The role that lets a user move others' messages, and nothing else.
 pub const THREADER_ROLE: &str = "threader";
+/// The role for a user the admin trusts: trusted posting limits and `/emoji`.
+pub const FRIEND_ROLE: &str = "friend";
 /// The roles whose accounts create and edit top-level rooms besides
 /// `general` (apron-server-cloudflare's ROOM_CREATOR_ROLES).
 pub const ROOM_CREATOR_ROLES: &[&str] = &[ADMIN_ROLE, MOD_ROLE];
 /// The roles whose accounts move others' messages between rooms
 /// (apron-server-cloudflare's MODERATOR_ROLES).
 pub const MODERATOR_ROLES: &[&str] = &[ADMIN_ROLE, MOD_ROLE, THREADER_ROLE];
+/// The roles whose accounts may run `/emoji` (apron-server-cloudflare's
+/// EMOJI_ROLES).
+pub const EMOJI_ROLES: &[&str] = &[ADMIN_ROLE, MOD_ROLE, FRIEND_ROLE];
 /// The key of `you`'s ext that lists what the user may do to others'
 /// messages and memberships (EXTENSIONS.md, `ext:permissions`).
 pub const PERMISSIONS_KEY: &str = "permissions";

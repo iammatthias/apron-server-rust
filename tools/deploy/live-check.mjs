@@ -15,7 +15,8 @@
 //
 // It posts nothing in general or any public room. The admin checks make
 // accounts named livecheck_<random>: one from /invite-token and one from a
-// /invite sign-up, and one that is renamed and purged. At the end the admin
+// /invite sign-up, one that is renamed and purged, and one given the role mod
+// to run /emoji. At the end the admin
 // purges every livecheck_ account in general, this run's and any an earlier
 // run left. The Track C checks post only in a
 // private room named livecheck_<random> that the admin makes, and its
@@ -363,6 +364,7 @@ if (!tokenFile) {
 
   await pushChecks(run, linkToken);
   await renameAndPurge(adminToken, linkToken);
+  await modEmoji(adminToken, linkToken);
 
   await trackC(admin);
   admin.close();
@@ -452,6 +454,55 @@ async function renameAndPurge(adminToken, linkToken) {
       if (closing.error?.message !== "Removed by an admin") return `closed with ${JSON.stringify(closing)}`;
       const again = await signIn();
       return again.error?.message === "This invite token is not valid; ask an admin for a new one" || `reply ${JSON.stringify(again.error ?? again.result)}`;
+    });
+  } finally {
+    c.close();
+    admin.close();
+  }
+}
+
+// /emoji for a mod: a livecheck_ account without a role is denied, with the
+// role `mod` it adds a livecheck_ emoji and removes it again. cleanUp purges
+// the account.
+async function modEmoji(adminToken, linkToken) {
+  const admin = await connect();
+  const c = await connect();
+  try {
+    await admin.server();
+    const own = await admin.call("auth", { scheme: "token", token: adminToken });
+    if (own.error) return report("mod emoji: the admin signs in", false, JSON.stringify(own.error));
+    const id = `livecheck_mod_${suffix}`;
+    const made = await admin.call("command", { room_id: "general", body: { text: `/invite-token ${id}` } });
+    const token = !made.error && linkToken(noticeText(made.frames));
+    if (!token) return report("mod emoji: a livecheck_ account", false, `error ${JSON.stringify(made.error)}`);
+    await c.server();
+    const signIn = await c.call("auth", { scheme: "token", token });
+    if (signIn.error) return report("mod emoji: the account signs in", false, JSON.stringify(signIn.error));
+    const key = `:livecheck_mod_${suffix}:`;
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
+    const add = () => c.call("command", { room_id: "general", body: { text: `/emoji add ${key}`, embeds: [{ kind: "upload" }] } });
+    await check("mod emoji: an account with no role is denied /emoji", async () => {
+      const r = await add();
+      return same(r.error?.message, "/emoji needs one of the roles admin, mod, friend");
+    });
+    await check("mod emoji: /role gives mod", async () => {
+      const r = await admin.call("command", { room_id: "general", body: { text: `/role ${id} mod` } });
+      return !r.error || `error ${JSON.stringify(r.error)}`;
+    });
+    let added = false;
+    await check("mod emoji: a mod adds an emoji", async () => {
+      const started = await add();
+      const url = started.result?.embeds?.[0]?.write_url;
+      if (!url) return `no write_url ${JSON.stringify(started.error ?? started.result)}`;
+      const put = await fetch(url, { method: "PUT", headers: { "Content-Type": "image/png" }, body: png });
+      added = put.status === 201;
+      return same(put.status, 201);
+    });
+    if (!added) return;
+    await check("mod emoji: a mod removes it", async () => {
+      const r = await c.call("command", { room_id: "general", body: { text: `/emoji remove ${key}` } });
+      if (r.error) return `error ${JSON.stringify(r.error)}`;
+      return same(noticeText(r.frames), `Removed the custom emoji \`${key}\`.`);
     });
   } finally {
     c.close();

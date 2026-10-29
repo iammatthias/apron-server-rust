@@ -238,6 +238,10 @@ pub struct RpcError {
     pub message: String,
     #[json("data,omitzero")]
     pub data: Option<Json>,
+    /// Set on an error that is shown to the client but is not a policy
+    /// violation, such as a mistyped command.
+    #[json(skip)]
+    pub forgiven: bool,
 }
 
 impl RpcError {
@@ -246,7 +250,14 @@ impl RpcError {
             code,
             message: message.into(),
             data: None,
+            forgiven: false,
         }
+    }
+
+    /// Marks the error as not counting toward `Limits.policy_violations`.
+    pub fn forgiven(mut self) -> RpcError {
+        self.forgiven = true;
+        self
     }
 
     pub fn with_data(code: i64, message: impl Into<String>, data: Object) -> RpcError {
@@ -254,6 +265,7 @@ impl RpcError {
             code,
             message: message.into(),
             data: Some(Json::Object(data)),
+            forgiven: false,
         }
     }
 }

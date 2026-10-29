@@ -652,9 +652,11 @@ impl Client {
     }
 
     pub fn send_error(&self, req: &Request, err: RpcError) {
-        let code = err.code;
+        let (code, forgiven) = (err.code, err.forgiven);
         self.enqueue(&error_response(Some(&req.id), err));
-        self.note_violation(code);
+        if !forgiven {
+            self.note_violation(code);
+        }
     }
 
     /// Counts an error of `code` against the connection when it is a

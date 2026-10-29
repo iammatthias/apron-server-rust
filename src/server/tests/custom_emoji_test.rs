@@ -236,6 +236,54 @@ fn test_emoji_command_publishes_catalogs() {
     assert!(!capabilities(&next_server(&watcher)).contains(&Json::from("ext:emoji")));
 }
 
+/// Mods and friends run `/emoji` as admins do, and no other role does
+/// (apron-server-cloudflare's EMOJI_ROLES; its uploads integration test).
+#[test]
+fn test_mods_and_friends_use_emoji() {
+    let server = admin_test_server();
+    let mut user = account(&server);
+    let id = user.user_id.clone();
+    let denied = |c: &mut TestClient, text: &str| {
+        let request_id = c.next_id("denied");
+        let frame = reply_to(
+            c,
+            "command",
+            &request_id,
+            obj! {"body" => obj! {"text" => text}},
+        );
+        let error = frame["error"]
+            .as_object()
+            .unwrap_or_else(|| panic!("{frame:?}"));
+        assert_eq!(error["code"], Json::from(CODE_DENIED), "{frame:?}");
+        error["message"].as_str().unwrap().to_owned()
+    };
+
+    grant_role(&server, &id, "helper");
+    assert!(!private_reply(&mut user, "/help").contains("/emoji"));
+    assert_eq!(
+        denied(&mut user, "/emoji remove :mine:"),
+        "/emoji needs one of the roles admin, mod, friend"
+    );
+
+    grant_role(&server, &id, "friend");
+    assert!(private_reply(&mut user, "/help").contains("`/emoji add|remove :name:`"));
+    assert_eq!(add(&mut user, ":mine:", &png(8, 8), "image/png"), 201);
+    assert_eq!(
+        private_reply(&mut user, "/emoji remove :mine:"),
+        "Removed the custom emoji `:mine:`."
+    );
+
+    revoke_role(&server, &id, "friend");
+    grant_role(&server, &id, "mod");
+    assert_eq!(add(&mut user, ":ours:", &png(8, 8), "image/png"), 201);
+    private_reply(&mut user, "/emoji remove :ours:");
+    // Neither role runs an admin command.
+    assert_eq!(
+        denied(&mut user, "/server"),
+        "Only an admin can use /server"
+    );
+}
+
 /// At the cap a new key is denied and a known one may still be replaced; a
 /// name of 32 characters is the longest; uploads off refuse an add.
 #[test]
