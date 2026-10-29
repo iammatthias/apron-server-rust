@@ -2194,9 +2194,8 @@ fn test_private_rooms_and_membership_by_user_id() {
         "new thread for a member of its private room: {update:?}"
     );
 
-    // A message may not move where fewer people can see it, which would
-    // show them the private room; within the same audience, or to a wider
-    // one, it may.
+    // A message may not move into or out of a private room, nor between
+    // it and its threads, as on Cloudflare.
     let (public, _) = save(
         &mut a,
         "public",
@@ -2204,26 +2203,25 @@ fn test_private_rooms_and_membership_by_user_id() {
     );
     b.notification("message");
     c.notification("message");
-    a.expect_error(
-        "message",
-        "into-private",
-        obj! {"message_id" => public.as_str(), "room_id" => room.as_str(), "body" => obj! {"text" => "in general"}},
-        CODE_DENIED,
-    );
-    let (moved, _) = save(
-        &mut a,
-        "into-thread",
-        obj! {"message_id" => secret.as_str(), "room_id" => thread.as_str(), "body" => obj! {"text" => "just us"}},
-    );
-    b.notification("message");
-    assert_eq!(moved, secret, "moved message");
-    a.expect_error(
-        "message",
-        "into-aside",
-        obj! {"message_id" => secret.as_str(), "room_id" => aside.as_str(), "body" => obj! {"text" => "just us"}},
-        CODE_DENIED,
-    );
-    c.expect_quiet();
+    for (id, message_id, room_id) in [
+        ("into-private", &public, &room),
+        ("into-thread", &secret, &thread),
+        ("into-aside", &secret, &aside),
+    ] {
+        let frame = a.call(
+            "message",
+            id,
+            obj! {"message_id" => message_id.as_str(), "room_id" => room_id.as_str(), "body" => obj! {"text" => "moved"}},
+        );
+        assert_eq!(
+            frame.get("error"),
+            Some(&Json::from(obj! {
+                "code" => CODE_DENIED,
+                "message" => "Messages cannot be moved into or out of a private room",
+            })),
+            "{id}: {frame:?}"
+        );
+    }
     // private is fixed at creation.
     let (_, edited) = save_room(
         &mut b,
@@ -2440,9 +2438,8 @@ fn test_leaving_a_private_room_hides_only_what_was_visible() {
     assert_eq!(left, want, "left (not {aside})");
 }
 
-/// A message moved out of a private room to where more people can see it
-/// does not name the private room, and a reply cannot quote a message that
-/// some who see the reply cannot see.
+/// A message cannot move out of a private room, even its author's own, and
+/// a reply cannot quote a message that some who see the reply cannot see.
 #[test]
 fn test_moves_and_replies_out_of_private_rooms() {
     let server = new_test_server(default_config());
@@ -2450,12 +2447,12 @@ fn test_moves_and_replies_out_of_private_rooms() {
     for c in &clients {
         make_account(&server, &c.user_id);
     }
-    let (mut a, b) = (clients.remove(0), clients.remove(0));
+    let (mut a, mut b) = (clients.remove(0), clients.remove(0));
     let (room, _) = save_room(&mut a, "room", obj! {"title" => "P", "private" => true});
     let (id, _) = save(
         &mut a,
         "secret",
-        obj! {"room_id" => room.as_str(), "body" => obj! {"text" => "now public"}},
+        obj! {"room_id" => room.as_str(), "body" => obj! {"text" => "still private"}},
     );
     a.expect_error(
         "message",
@@ -2463,15 +2460,40 @@ fn test_moves_and_replies_out_of_private_rooms() {
         obj! {"body" => obj! {"text" => "re"}, "reply_to" => obj! {"message_id" => id.as_str()}},
         CODE_DENIED,
     );
-    let (_, moved) = save(
-        &mut a,
+    let frame = a.call(
+        "message",
         "move",
-        obj! {"message_id" => id.as_str(), "room_id" => "general", "body" => obj! {"text" => "now public"}},
+        obj! {"message_id" => id.as_str(), "room_id" => "general", "body" => obj! {"text" => "still private"}},
     );
-    let seen = b.notification("message");
-    assert!(
-        !seen.contains_key("prev_room_id") && seen == moved,
-        "move out of a private room: {seen:?}"
+    assert_eq!(
+        frame.get("error"),
+        Some(&Json::from(obj! {
+            "code" => CODE_DENIED,
+            "message" => "Messages cannot be moved into or out of a private room",
+        })),
+        "move out of a private room: {frame:?}"
+    );
+    b.expect_quiet();
+    // Nor may a moderator in the room move it out.
+    grant_role(&server, &b.user_id, "mod");
+    a.request(
+        "room_join",
+        "add",
+        obj! {"room_id" => room.as_str(), "user_id" => b.user_id.as_str()},
+    );
+    b.drain();
+    let frame = b.call(
+        "message",
+        "moderate",
+        obj! {"message_id" => id.as_str(), "room_id" => "general", "body" => obj! {"text" => "still private"}},
+    );
+    assert_eq!(
+        frame.get("error"),
+        Some(&Json::from(obj! {
+            "code" => CODE_DENIED,
+            "message" => "Messages cannot be moved into or out of a private room",
+        })),
+        "moderator's move out of a private room: {frame:?}"
     );
     // Within the same audience a reply may quote it.
     save(

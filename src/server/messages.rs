@@ -344,13 +344,13 @@ impl State {
                 ));
             }
             moving = m.owner != user_id;
-            // A move snapshot is logged in both rooms and names both, so a
-            // message may not move to a room that some who see its room
-            // cannot see, such as a private room.
-            if m.room_id != room_id && self.reveals_to(&m.room_id, &room_id) {
+            // A private room's messages stay in it, and no other room's come
+            // in (apron-server-cloudflare). A thread of a private room, or a
+            // private thread, is private too.
+            if m.room_id != room_id && (self.is_private(&m.room_id) || self.is_private(&room_id)) {
                 return Err(RpcError::new(
                     CODE_DENIED,
-                    "A message cannot move to a room that fewer people can see",
+                    "Messages cannot be moved into or out of a private room",
                 ));
             }
             from = m.from.clone();
