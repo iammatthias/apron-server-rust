@@ -2,3 +2,4 @@
 tools/interop/test-results/
 .DS_Store
 tools/deploy/local.env
+tools/reference/.demo-room/
