@@ -160,3 +160,33 @@ fn test_typing_reaches_the_typists_other_connections() {
     );
     assert_eq!(activities(&other.drain()), want, "another member");
 }
+
+/// A fractional typing value is floored, as Cloudflare's Math.floor does,
+/// and relayed rather than refused.
+#[test]
+fn test_fractional_typing_is_floored() {
+    let server = new_test_server(default_config());
+    let mut a = dial_test_client(&server);
+    let mut b = dial_test_client(&server);
+    a.drain();
+    b.drain();
+    for typing in ["4.9", "0.5", "45.7", "1e0"] {
+        a.write_raw(&format!(
+            r#"{{"method":"activity","params":{{"room_id":"general","typing":{typing}}}}}"#
+        ));
+    }
+    a.drain();
+    let typed: Vec<Json> = activities(&b.drain())
+        .into_iter()
+        .map(|p| p["typing"].clone())
+        .collect();
+    assert_eq!(
+        typed,
+        vec![
+            Json::from(4i64),
+            Json::from(0i64),
+            Json::from(30i64),
+            Json::from(1i64)
+        ]
+    );
+}
