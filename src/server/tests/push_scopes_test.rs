@@ -283,6 +283,44 @@ fn test_mentions_wake_in_private_rooms() {
     );
 }
 
+/// A bot never wakes for joined, even holding mod (Cloudflare's isBotId
+/// check): its registration drops joined and its server frame never lists
+/// it.
+#[test]
+fn test_joined_never_for_a_bot_mod() {
+    let relay = new_test_relay();
+    let mut config = default_config();
+    config.allow_insecure_push = true;
+    config.push_hosts = PushHosts::Any;
+    config.admin_token = super::helpers::admin_config().admin_token;
+    let server = new_test_server(config);
+    let mut admin = super::helpers::admin_on(&server, "http://localhost:5173");
+    let token = token_in(&private_reply(&mut admin, "/invite-token announcer"));
+    let (mut bot, _) = dial_raw(&server);
+    token_auth(&mut bot, &token);
+    bot.drain();
+    private_reply(&mut admin, "/role announcer bot");
+    bot.notification("user");
+    assert_eq!(
+        private_reply(&mut admin, "/role announcer mod"),
+        "**announcer** (`announcer`) now has the role `mod`."
+    );
+    bot.notification("user");
+    bot.expect_quiet();
+    bot.result(
+        "push_register",
+        "joined",
+        obj! {"kind" => "relay", "url" => format!("{}/announcer", relay.url), "wake" => list(&["joined", "mentions"])},
+    );
+    assert_eq!(
+        server.app.lock().pushes[&push_key("announcer", &format!("{}/announcer", relay.url))].wake,
+        WakeScope::MENTIONS
+    );
+    let (mut again, _) = dial_raw(&server);
+    token_auth(&mut again, &token);
+    again.expect_quiet();
+}
+
 /// joined is for admins and mods (apron-server-cloudflare's
 /// JOINED_WAKE_ROLES): a registration keeps it only for them, a wake checks
 /// the role as it is now, and a connection's server frame lists it only
