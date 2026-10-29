@@ -1,7 +1,7 @@
-//! `/invite-device <name>`, an extension Go lacks (docs/DEVIATIONS.md): an
-//! account mints a bearer token that signs it in on another device through
-//! the `token` scheme (§3.2), from any origin, until the same name mints a
-//! new one. It follows apron-server-cloudflare's `/invite-device`.
+//! `/invite-device <name>`: an account mints a bearer token that signs it in
+//! on another device through the `token` scheme (§3.2), from any origin,
+//! until the same name mints a new one. It follows apron-server-cloudflare's
+//! `/invite-device`.
 
 use std::sync::Arc;
 

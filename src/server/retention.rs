@@ -1,5 +1,5 @@
-//! History retention (`Config.retention`), an extension Go lacks that
-//! follows apron-server-cloudflare's rolling history (docs/DEVIATIONS.md).
+//! History retention (`Config.retention`), which follows
+//! apron-server-cloudflare's rolling history (docs/DEVIATIONS.md).
 //! Records older than the window are discarded as a prefix of the one
 //! server-wide log, and `State.history_floor` moves past them: every room
 //! then reports `history_log_id` as at least the floor (§4.3.3).

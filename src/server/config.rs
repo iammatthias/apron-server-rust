@@ -136,11 +136,11 @@ pub struct Config {
     /// in, such as X-Forwarded-For (its last entry is used) or X-Real-IP.
     pub client_ip_header: String,
     pub email_link_url: String,
-    /// An extension Go lacks (docs/DEVIATIONS.md): the iOS apps, as
+    /// The iOS apps, as
     /// `<team ID>.<bundle ID>`, that /.well-known/apple-app-site-association
     /// lists for passkeys (`webcredentials`). Empty serves no such route.
     pub apple_app_ids: Vec<String>,
-    /// An extension Go lacks (docs/DEVIATIONS.md): unfurls the links of
+    /// Unfurls the links of
     /// messages into `link` embeds with og (§4.8.1).
     pub unfurl: bool,
     /// Lets unfurls reach internal addresses on any port, for tests.
@@ -151,14 +151,14 @@ pub struct Config {
     /// How long a connection may stay without signing in before it is
     /// closed with 1008.
     pub auth_timeout: Duration,
-    /// An extension Go lacks (docs/DEVIATIONS.md): false keeps guests
+    /// False keeps guests
     /// read-only, as apron-server-cloudflare's `GUEST_POSTING` does.
     pub guest_posting: bool,
     /// Relays read cursors to the room's members, an extension: without
     /// it, as on apron-server-cloudflare, they go only to the user's own
     /// connections.
     pub read_receipts: bool,
-    /// An extension Go lacks (docs/DEVIATIONS.md): how long history is
+    /// How long history is
     /// kept; `None` keeps it forever.
     pub retention: Option<Duration>,
 }

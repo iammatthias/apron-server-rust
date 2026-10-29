@@ -18,16 +18,15 @@
 //! room     room_id
 //! message  message_id
 //! user     user_id      guests too, retired at the next start, and
-//!                       /invite-bot bots, which Go takes for guests
+//!                       /invite-bot bots
 //! session  hex SHA-256 of the bearer token
-//! device   hex SHA-256 of the /invite-device token (an extension; Go
-//!          ignores the kind)
-//! bot      hex SHA-256 of the /invite-bot token (an extension; Go ignores
-//!          the kind)
-//! invite   hex SHA-256 of an account's /invite-token token (an extension;
-//!          Go ignores the kind)
+//! device   hex SHA-256 of the /invite-device token
+//! bot      hex SHA-256 of the /invite-bot token
+//! invite   hex SHA-256 of an account's /invite-token token
 //! embed    embed_id
 //! push     user_id, a space, and url
+//! dedup    user_id, a space, and request id: an account's accepted
+//!          request and its result (§1.2)
 //! ```
 
 use std::collections::{BTreeMap, BTreeSet};

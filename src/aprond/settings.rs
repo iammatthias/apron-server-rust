@@ -14,7 +14,7 @@ pub enum EmailSender {
     /// `server.LogEmailSender`: codes go to the server log.
     Log,
     Smtp(SmtpSender),
-    /// An extension Go lacks: a JSON POST to a mail API.
+    /// A JSON POST to a mail API.
     Http(HttpSender),
 }
 
@@ -45,9 +45,9 @@ pub struct Settings {
     pub admin_token: Option<[u8; 32]>,
     pub disable_push: bool,
     pub allow_insecure_push: bool,
-    /// `--push.hosts`, an extension Go lacks.
+    /// `--push.hosts`.
     pub push_hosts: crate::server::push::PushHosts,
-    /// `--push.delay`, an extension Go lacks.
+    /// `--push.delay`.
     pub push_delay: Duration,
     pub vapid_private_key: String,
     pub vapid_subject: String,
@@ -63,17 +63,17 @@ pub struct Settings {
     pub email_link_url: String,
     /// `None` disables passkeys (an empty `--webauthn.rp-id`).
     pub webauthn: Option<WebAuthnSettings>,
-    /// `--apple.app-id`, an extension Go lacks.
+    /// `--apple.app-id`.
     pub apple_app_ids: Vec<String>,
-    /// `--unfurl.enable`, an extension Go lacks.
+    /// `--unfurl.enable`.
     pub unfurl: bool,
-    /// `--guest.posting`, an extension Go lacks.
+    /// `--guest.posting`.
     pub guest_posting: bool,
-    /// `--server.*`, an extension Go lacks.
+    /// `--server.*`.
     pub server: crate::server::metadata::ServerMetadata,
-    /// `--history.retention`, an extension Go lacks; `None` keeps history.
+    /// `--history.retention`; `None` keeps history.
     pub retention: Option<Duration>,
-    /// The `--frame.*` bounds, an extension Go lacks.
+    /// The `--frame.*` bounds.
     pub frame: FrameLimits,
     /// The `--limit.*` limits, apron-server-cloudflare's.
     pub limits: crate::server::limits::Limits,

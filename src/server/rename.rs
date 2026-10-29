@@ -1,5 +1,4 @@
-//! `/rename <old_user_id> <new_user_id>`, an extension Go lacks
-//! (docs/DEVIATIONS.md), following apron-server-cloudflare's `/rename` (its
+//! `/rename <old_user_id> <new_user_id>`, following apron-server-cloudflare's `/rename` (its
 //! SPEC.md, section 5, Admins, and store.ts `renameIdentity`).
 
 use std::collections::BTreeSet;

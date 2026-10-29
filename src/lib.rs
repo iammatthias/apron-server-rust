@@ -1,4 +1,5 @@
-//! A Rust port of apron-server-go, the reference Apron chat server.
+//! An Apron chat server that follows apron-server-cloudflare. It began as a
+//! port of apron-server-go.
 
 pub mod aprond;
 pub mod cbor;
