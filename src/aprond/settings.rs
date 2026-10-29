@@ -66,6 +66,8 @@ pub struct Settings {
     pub unfurl: bool,
     /// `--guest.posting`, an extension Go lacks.
     pub guest_posting: bool,
+    /// `--server.*`, an extension Go lacks.
+    pub server: crate::server::metadata::ServerMetadata,
     /// `--history.retention`, an extension Go lacks; `None` keeps history.
     pub retention: Option<Duration>,
     /// The `--frame.*` bounds, an extension Go lacks.
@@ -212,6 +214,7 @@ pub fn server_settings(options: &Options) -> Result<Settings, String> {
     config.apple_app_ids = options.apple.app_ids.clone();
     config.unfurl = options.unfurl.enable;
     config.guest_posting = options.guest.posting;
+    config.server = server_metadata(options)?;
     config.retention = parse_retention(&options.history.retention)?;
     let f = &options.frame;
     config.frame = FrameLimits {
@@ -222,6 +225,34 @@ pub fn server_settings(options: &Options) -> Result<Settings, String> {
         max_id_bytes: positive("frame.max-id-bytes", f.max_id_bytes)?,
     };
     Ok(config)
+}
+
+/// Reads `--server.title`, `--server.description` and `--server.avatar`,
+/// each trimmed; empty leaves the field out.
+fn server_metadata(options: &Options) -> Result<crate::server::metadata::ServerMetadata, String> {
+    use crate::server::metadata::*;
+    let o = &options.server;
+    let (title, description, avatar) = (o.title.trim(), o.description.trim(), o.avatar.trim());
+    if !valid_server_title(title) {
+        return Err(format!(
+            "invalid --server.title {}: use one line of at most {} characters",
+            rust_stdlib::strconv::quote(title),
+            crate::server::users::MAX_NAME_RUNES
+        ));
+    }
+    if !valid_server_description(description) {
+        return Err(format!(
+            "invalid --server.description: use at most {MAX_SERVER_DESCRIPTION_BYTES} bytes of text"
+        ));
+    }
+    if !avatar.is_empty() && !valid_server_avatar(avatar) {
+        return Err("invalid --server.avatar: use an https: URL or a small data:image/{png,jpeg,gif,webp};base64, URL".to_string());
+    }
+    Ok(ServerMetadata {
+        title: title.to_owned(),
+        description: description.to_owned(),
+        avatar: avatar.to_owned(),
+    })
 }
 
 /// Reads `--history.retention`: empty or zero keeps history forever.

@@ -36,6 +36,8 @@ services:
       - --history.retention=168h
       - --welcome=Guests can read along. Create a passkey to post, react and start threads. Messages are kept for 7 days.
       - --admin-token-file=/run/secrets/apron_admin_token
+      - --server.title=Apron Rust test server
+      - --server.description=A test deployment of apron-server-rust, for the Ladle iOS client.
   web:
     build:
       context: .

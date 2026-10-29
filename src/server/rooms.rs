@@ -888,7 +888,13 @@ impl State {
                 private = parent.private;
             }
         }
+        // The server's description follows general's while nothing else
+        // sets it (§3.1).
+        let described = self.server_description();
         let room_id = self.commit_room_locked(&room_id, parent.clone(), private, fields);
+        if room_id == DEFAULT_ROOM_ID && self.server_description() != described {
+            self.announce_server_locked();
+        }
         if !updating {
             self.rooms.get_mut(&room_id).expect("room exists").creator = user_id.clone();
         }

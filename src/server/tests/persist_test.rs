@@ -54,6 +54,7 @@ impl State {
         all.embeds = self.embeds.keys().cloned().collect();
         all.pushes = self.pushes.keys().cloned().collect();
         all.vapid = self.vapid_stored;
+        all.server = self.server_meta != Default::default();
         let mut entries = self.entries_for(&all);
         entries.push(Entry::put(
             ENTRY_META,

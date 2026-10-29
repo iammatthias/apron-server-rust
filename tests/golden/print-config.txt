@@ -179,6 +179,17 @@ max-nodes = 2048
 
 # Longest request id, in bytes (not in the Go aprond)
 max-id-bytes = 128
+
+[server]
+
+# Plain name clients show for this server, as server.title, unless an admin's /server title sets one (default: none, so clients show the server's address; not in the Go aprond)
+title = ""
+
+# CommonMark of at most 500 bytes saying what this server is about, as server.description, unless an admin's /server description sets one (default: general's description; not in the Go aprond)
+description = ""
+
+# Server icon, as server.avatar: an https: URL or a small data:image/{png,jpeg,gif,webp};base64, URL, unless an admin's /server avatar sets one (not in the Go aprond)
+avatar = ""
 --- stderr
 
 
@@ -363,6 +374,17 @@ max-nodes = 2048
 
 # Longest request id, in bytes (not in the Go aprond)
 max-id-bytes = 128
+
+[server]
+
+# Plain name clients show for this server, as server.title, unless an admin's /server title sets one (default: none, so clients show the server's address; not in the Go aprond)
+title = ""
+
+# CommonMark of at most 500 bytes saying what this server is about, as server.description, unless an admin's /server description sets one (default: general's description; not in the Go aprond)
+description = ""
+
+# Server icon, as server.avatar: an https: URL or a small data:image/{png,jpeg,gif,webp};base64, URL, unless an admin's /server avatar sets one (not in the Go aprond)
+avatar = ""
 --- stderr
 
 
@@ -548,6 +570,17 @@ max-nodes = 2048
 
 # Longest request id, in bytes (not in the Go aprond)
 max-id-bytes = 128
+
+[server]
+
+# Plain name clients show for this server, as server.title, unless an admin's /server title sets one (default: none, so clients show the server's address; not in the Go aprond)
+title = ""
+
+# CommonMark of at most 500 bytes saying what this server is about, as server.description, unless an admin's /server description sets one (default: general's description; not in the Go aprond)
+description = ""
+
+# Server icon, as server.avatar: an https: URL or a small data:image/{png,jpeg,gif,webp};base64, URL, unless an admin's /server avatar sets one (not in the Go aprond)
+avatar = ""
 --- stderr
 
 
@@ -732,6 +765,17 @@ max-nodes = 2048
 
 # Longest request id, in bytes (not in the Go aprond)
 max-id-bytes = 128
+
+[server]
+
+# Plain name clients show for this server, as server.title, unless an admin's /server title sets one (default: none, so clients show the server's address; not in the Go aprond)
+title = ""
+
+# CommonMark of at most 500 bytes saying what this server is about, as server.description, unless an admin's /server description sets one (default: general's description; not in the Go aprond)
+description = ""
+
+# Server icon, as server.avatar: an https: URL or a small data:image/{png,jpeg,gif,webp};base64, URL, unless an admin's /server avatar sets one (not in the Go aprond)
+avatar = ""
 --- stderr
 
 

@@ -11,9 +11,7 @@ use rust_stdlib::time::Duration;
 
 use super::helpers::*;
 use crate::obj;
-use crate::server::embeds::{
-    upload_content_type, valid_avatar_image, FILE_PATH, STREAM_PATH, WRITE_PATH,
-};
+use crate::server::embeds::{image_size, upload_content_type, FILE_PATH, STREAM_PATH, WRITE_PATH};
 use crate::server::protocol::*;
 use crate::server::rooms::{MAX_CREATED_ROOMS, MAX_THREADS, MAX_THREADS_PER_USER};
 use crate::server::users::{normalize_name, MAX_NAME_RUNES};
@@ -191,7 +189,7 @@ fn test_avatar_uploads_must_be_images() {
     let check = |content_type: &str, data: &[u8]| -> bool {
         let file = rust_stdlib::os::create_temp(&dir, "avatar").unwrap();
         std::io::Write::write_all(&mut &file, data).unwrap();
-        let valid = valid_avatar_image(content_type, Some(&file));
+        let valid = image_size(content_type, Some(&file)).is_some();
         file.close().unwrap();
         valid
     };

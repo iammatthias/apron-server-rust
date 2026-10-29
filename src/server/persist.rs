@@ -10,6 +10,8 @@
 //! meta     "counters"   log_id, guest, embed, and upload sequences, and
 //!                       the --role grants given
 //! meta     "vapid"      the webpush VAPID private key (§4.9)
+//! meta     "server"     the server's title, description and avatar as
+//!                       `/server` set them (an extension)
 //! used_id  lowercased user_id ever assigned
 //! record   log_id       a logged record and the rooms whose logs hold it
 //! room     room_id
@@ -41,9 +43,10 @@ use rust_stdlib_derive::{MarshalTo, UnmarshalFrom};
 
 use super::bots::{BotToken, BOT_ROLE};
 use super::devices::DeviceToken;
-use super::embeds::{EmbedState, StreamBuffer};
+use super::embeds::{EmbedPurpose, EmbedState, StreamBuffer};
 use super::invites::{InviteToken, JoinInvite};
 use super::messages::{MessageState, ReactionSet};
+use super::metadata::StoredServer;
 use super::protocol::*;
 use super::push::{parse_wake_names, PushRegistration};
 use super::rooms::{ReadCursor, RoomState};
@@ -85,6 +88,7 @@ pub struct DirtySet {
     pub pushes: BTreeSet<String>,
     pub used_ids: Vec<String>,
     pub vapid: bool,
+    pub server: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, MarshalTo, UnmarshalFrom)]
@@ -352,8 +356,12 @@ pub struct StoredEmbed {
     pub kind: String,
     #[json("message_id,omitzero")]
     pub message_id: String,
+    /// The user whose `/avatar` the upload is.
     #[json("avatar_for,omitzero")]
     pub avatar_for: String,
+    /// Set for the server's avatar (`/server avatar`).
+    #[json("server_avatar,omitzero")]
+    pub server_avatar: bool,
     #[json("base_url")]
     pub base_url: String,
     #[json("secret")]
@@ -559,6 +567,13 @@ impl State {
                 None => batch.push(Entry::delete(ENTRY_PUSH, key)),
             }
         }
+        if d.server {
+            if self.server_meta == StoredServer::default() {
+                batch.push(Entry::delete(ENTRY_META, "server"));
+            } else {
+                put(&mut batch, ENTRY_META, "server", &self.server_meta);
+            }
+        }
         if d.vapid && self.vapid_stored {
             if let Some(vapid) = &self.vapid {
                 put(&mut batch, ENTRY_META, "vapid", &vapid.encoded());
@@ -600,7 +615,11 @@ pub fn stored_embed_of(e: &EmbedState) -> StoredEmbed {
     StoredEmbed {
         kind: e.kind.clone(),
         message_id: e.message_id.clone(),
-        avatar_for: e.avatar_for.clone().unwrap_or_default(),
+        avatar_for: match &e.purpose {
+            EmbedPurpose::Avatar(user_id) => user_id.clone(),
+            _ => String::new(),
+        },
+        server_avatar: e.purpose == EmbedPurpose::ServerAvatar,
         base_url: e.base_url.clone(),
         secret: e.secret.clone(),
         title: e.title.clone(),
@@ -967,7 +986,13 @@ impl Server {
                 id: id.clone(),
                 kind: stored.kind,
                 message_id: stored.message_id,
-                avatar_for: Some(stored.avatar_for).filter(|u| st.users.contains_key(u)),
+                purpose: if stored.server_avatar {
+                    EmbedPurpose::ServerAvatar
+                } else if st.users.contains_key(&stored.avatar_for) {
+                    EmbedPurpose::Avatar(stored.avatar_for)
+                } else {
+                    EmbedPurpose::Message
+                },
                 base_url: stored.base_url,
                 secret: stored.secret,
                 title: stored.title,
@@ -995,6 +1020,12 @@ impl Server {
                 st.upload_bytes += e.size;
             }
             st.embeds.insert(id.clone(), e);
+        }
+        if let Some(raw) = of(ENTRY_META).get("server") {
+            st.server_meta = decode::<StoredServer>(ENTRY_META, "server", raw)?;
+            if !st.embeds.contains_key(&st.server_meta.avatar_embed) {
+                st.server_meta.avatar_embed.clear();
+            }
         }
         for (id, stored) in &stored_users {
             let Some(u) = st.users.get_mut(id) else {

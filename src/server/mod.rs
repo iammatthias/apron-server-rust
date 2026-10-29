@@ -9,6 +9,7 @@ pub mod email;
 pub mod embeds;
 pub mod invites;
 pub mod messages;
+pub mod metadata;
 pub mod outbound;
 pub mod passkeys;
 pub mod persist;
