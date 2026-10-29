@@ -495,23 +495,105 @@ fn test_liveness_ping() {
     guest_auth(&mut c);
     ping(&c, r#"{"method":"ping"}"#);
 
-    // A connection that pinged and then fell silent is closed.
+    // A connection that pinged and then fell silent is closed with 1001,
+    // and is not told why: a client that pings knows.
     let deadline = time::now().add(Duration::from_secs(2));
     loop {
-        if c.read_raw(Duration::from_secs(2)).is_err() {
-            assert!(
-                time::now().before(&deadline),
-                "a silent connection stayed open"
-            );
-            break;
+        match c.read_raw(Duration::from_secs(2)) {
+            Ok(payload) => assert_ne!(
+                decode_frame(&payload)["method"],
+                Json::from("message"),
+                "a pinging connection gets no notice"
+            ),
+            Err(ws::Error::Closed { code, reason }) => {
+                assert_eq!(
+                    (code, reason.as_str()),
+                    (1001, "Connection idle; reconnect to recover")
+                );
+                break;
+            }
+            Err(e) => panic!("a silent connection stayed open: {e}"),
         }
     }
+    assert!(time::now().before(&deadline), "closed late");
     // One that never pinged stays open while it answers WebSocket pings.
     let mut quiet = dial_test_client(&server);
     let deadline = time::now().add(Duration::from_millis(500));
     while time::now().before(&deadline) {
         quiet.expect_quiet();
     }
+}
+
+/// A connection that never pings is closed with 1001 once
+/// `unpinged_timeout` passes without a frame, after a `~private` notice
+/// with no room_id that says why (apron-server-cloudflare 1bda2bf).
+#[test]
+fn test_unpinged_connection_is_told_and_closed() {
+    let mut config = default_config();
+    config.ping_interval = Duration::from_millis(50);
+    config.ping_timeout = Duration::from_secs(1);
+    config.unpinged_timeout = Duration::from_secs(2);
+    let server = new_test_server(config);
+    let c = dial_test_client(&server);
+    let started = time::now();
+    let notice = c.read_raw(Duration::from_secs(4)).expect("the notice");
+    assert_eq!(
+        decode_frame(&notice),
+        obj! {"method" => "message", "params" => obj! {
+            "from" => obj! {"user_id" => "~private", "name" => "System message to you"},
+            "body" => obj! {
+                "text" => "Did not receive `{\"method\":\"ping\"}` in 2 seconds, closing stale connection.",
+                "format" => "markdown",
+            },
+        }}
+    );
+    let waited = time::since(&started);
+    assert!(
+        waited.as_nanos() >= Duration::from_millis(1500).as_nanos(),
+        "told after {waited:?}"
+    );
+    match c.read_raw(Duration::from_secs(2)) {
+        Err(ws::Error::Closed { code, reason }) => assert_eq!(
+            (code, reason.as_str()),
+            (1001, "Connection idle; reconnect to recover")
+        ),
+        other => panic!("closed after the notice: {other:?}"),
+    }
+}
+
+/// Any frame restarts the wait of a connection that never pings.
+#[test]
+fn test_unpinged_connection_kept_open_by_frames() {
+    let mut config = default_config();
+    config.ping_interval = Duration::from_millis(50);
+    config.ping_timeout = Duration::from_secs(1);
+    config.unpinged_timeout = Duration::from_secs(2);
+    let server = new_test_server(config);
+    let mut c = dial_test_client(&server);
+    for _ in 0..3 {
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        // A fence request and its reply, and nothing else.
+        c.expect_quiet();
+    }
+}
+
+#[test]
+fn test_spoken_seconds() {
+    use crate::server::client::spoken_seconds;
+    let said: Vec<String> = [900, 60, 150, 2, 1]
+        .into_iter()
+        .map(|s| spoken_seconds(Duration::from_secs(s)))
+        .collect();
+    assert_eq!(
+        said,
+        [
+            "15 minutes",
+            "1 minute",
+            "150 seconds",
+            "2 seconds",
+            "1 seconds"
+        ]
+    );
 }
 
 /// A write deadline covers one frame: a connection idle past write_timeout

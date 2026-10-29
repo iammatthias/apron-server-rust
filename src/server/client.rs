@@ -6,12 +6,14 @@ use std::sync::mpsc::{Receiver, SyncSender, TrySendError};
 use std::sync::{Arc, Condvar, Mutex};
 
 use rust_stdlib::encoding::json::v2::MarshalTo;
+use rust_stdlib::log::slog;
 use rust_stdlib::time::{self, Duration, Time};
 
 use super::email::ProposalId;
 use super::limits::{IpKey, Window};
 use super::protocol::*;
 use super::webauthn::PasskeyCeremony;
+use crate::obj;
 use crate::rate::Limiter;
 use crate::ws;
 
@@ -27,6 +29,30 @@ pub fn render<T: MarshalTo>(value: &T) -> Option<Frame> {
 pub const PING_FRAME: &[u8] = br#"{"method":"ping"}"#;
 pub fn pong_frame() -> Frame {
     Frame::from(br#"{"method":"pong"}"#.as_slice())
+}
+
+/// A `~private` notice to one connection about the connection itself, so
+/// with no `room_id` (Appendix A.1).
+fn unscoped_private_notice(text: &str) -> Object {
+    obj! {"method" => "message", "params" => obj! {
+        "from" => obj! {
+            "user_id" => super::commands::PRIVATE_NOTICE_ID,
+            "name" => super::commands::PRIVATE_NOTICE_NAME,
+        },
+        "body" => obj! {"text" => text, "format" => "markdown"},
+    }}
+}
+
+/// Seconds as a notice says them, as apron-server-cloudflare's
+/// `spokenSeconds` does: whole minutes as minutes, else seconds.
+pub(super) fn spoken_seconds(d: Duration) -> String {
+    let second = time::SECOND.as_nanos();
+    let seconds = (d.as_nanos().max(0) + second - 1) / second;
+    match seconds {
+        _ if seconds % 60 != 0 => format!("{seconds} seconds"),
+        60 => "1 minute".to_owned(),
+        _ => format!("{} minutes", seconds / 60),
+    }
 }
 
 /// Keeps a sequence of protocol frames together in the writer's queue while
@@ -104,6 +130,7 @@ pub struct Client {
     pub(super) write_timeout: Duration,
     pub(super) ping_interval: Duration,
     pub(super) ping_timeout: Duration,
+    pub(super) unpinged_timeout: Duration,
     /// Set once the final batch is queued; later frames are dropped.
     pub(super) closing: AtomicBool,
     /// Set by the first liveness ping (§1); `last_frame` is when the latest
@@ -176,10 +203,12 @@ impl Client {
     }
 
     /// Pings at the WebSocket level, which finds dead transports, and closes
-    /// a connection whose client sent liveness pings (§1) and then fell
-    /// silent for three intervals: its page is frozen or gone even if the
-    /// socket is not. Three intervals leave room for background timer
-    /// throttling.
+    /// a stale connection with 1001: one whose client sent liveness pings
+    /// (§1) and then fell silent for three intervals, so its page is frozen
+    /// or gone even if the socket is not (three intervals leave room for
+    /// background timer throttling), or one that never pinged and sent no
+    /// frame for `unpinged_timeout`. The latter is told why first, so a
+    /// client that has not implemented the ping learns it should.
     pub(super) fn ping_loop(self: Arc<Self>) {
         let silence = self
             .ping_interval
@@ -190,18 +219,56 @@ impl Client {
             if self.done.wait_timeout(self.ping_interval) {
                 return;
             }
-            if self.pinged.load(Ordering::Relaxed) {
-                let last = time::unix(0, self.last_frame.load(Ordering::Relaxed));
-                if time::since(&last).as_nanos() > silence.as_nanos() {
-                    self.stop_connection();
-                    return;
-                }
+            let pinged = self.pinged.load(Ordering::Relaxed);
+            let quiet = time::since(&time::unix(0, self.last_frame.load(Ordering::Relaxed)));
+            let timeout = if pinged {
+                silence
+            } else {
+                self.unpinged_timeout
+            };
+            if quiet.as_nanos() > timeout.as_nanos() {
+                self.close_stale(pinged);
+                return;
             }
             if self.ws.ping(self.ping_timeout).is_err() {
                 self.stop_connection();
                 return;
             }
         }
+    }
+
+    fn close_stale(&self, pinged: bool) {
+        if self.closing.swap(true, Ordering::SeqCst) {
+            self.stop_connection();
+            return;
+        }
+        slog::info(
+            "closing stale connection",
+            &[
+                "origin".into(),
+                slog::Value::from(self.origin.clone()).into(),
+                "pinged".into(),
+                slog::Value::from(pinged).into(),
+            ],
+        );
+        if !pinged {
+            let text = format!(
+                "Did not receive `{{\"method\":\"ping\"}}` in {}, closing stale connection.",
+                spoken_seconds(self.unpinged_timeout)
+            );
+            // Written here, not queued: the writer stops at once when the
+            // connection closes below, and could drop a queued notice.
+            if let Some(notice) = render(&unscoped_private_notice(&text)) {
+                let _ = self
+                    .ws
+                    .write(ws::MessageType::Text, &notice, self.write_timeout);
+            }
+        }
+        let _ = self.ws.close(
+            ws::STATUS_GOING_AWAY,
+            "Connection idle; reconnect to recover",
+        );
+        self.stop_connection();
     }
 
     /// Answers a liveness ping, before authentication too (§1).
