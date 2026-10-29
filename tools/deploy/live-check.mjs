@@ -51,6 +51,7 @@ const same = (got, want) => got === want || `got ${JSON.stringify(got)}, want ${
 // The server closes a connection past 60 frames a minute and every
 // connection of an address past 120, so the script keeps under both.
 const sent = [];
+let nextID = 1;
 async function pace(own) {
   for (;;) {
     const now = Date.now();
@@ -68,7 +69,6 @@ class Conn {
   closed = null;
   sent = [];
   #waiters = [];
-  #next = 1;
   constructor(url = wsURL) {
     this.ws = new WebSocket(url);
     this.ws.onmessage = (event) => {
@@ -107,9 +107,9 @@ class Conn {
   // Sends a request and returns its reply and the frames that arrived since
   // the send, which hold a command's ~private notice.
   async call(method, params) {
-    // The server keeps an account's request ids as idempotency keys, so a
-    // rerun as the same admin needs ids no earlier run used.
-    const id = `lc-${suffix}-${this.#next++}`;
+    // The server keeps an account's request ids as idempotency keys for a
+    // day, so ids are unique across the run's connections and its reruns.
+    const id = `lc-${suffix}-${nextID++}`;
     await pace(this.sent);
     const from = this.frames.length;
     this.ws.send(JSON.stringify({ method, id, params }));
@@ -363,6 +363,7 @@ if (!tokenFile) {
   await pushChecks(run, linkToken);
 
   await trackC(admin);
+  admin.close();
 
   for (const [command, usage] of [
     ["/role", /Usage: \/role/],
@@ -370,12 +371,20 @@ if (!tokenFile) {
     ["/toggle", /Usage: \/toggle/],
     ["/kick", /Usage: \/kick <user_id>/],
   ]) {
+    // A usage error is invalid_params, which the server counts against the
+    // connection (3 in a minute close it), so each runs on its own.
     await check(`admin: ${command} with no arguments gives its usage`, async () => {
-      const { error } = await run(command);
-      return (error && usage.test(error.message)) || `reply ${JSON.stringify(error)}`;
+      const own = await connect();
+      try {
+        const signIn = await own.call("auth", { scheme: "token", token: adminToken });
+        if (signIn.error) return `sign-in ${JSON.stringify(signIn.error)}`;
+        const { error } = await own.call("command", { room_id: commandRoom, body: { text: command } });
+        return (error && usage.test(error.message)) || `reply ${JSON.stringify(error)}`;
+      } finally {
+        own.close();
+      }
     });
   }
-  admin.close();
 }
 
 // Push (Track D) with a new livecheck_ account: a host outside --push.hosts
