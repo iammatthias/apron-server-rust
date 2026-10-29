@@ -143,8 +143,7 @@ pub struct Config {
     /// shortens it.
     pub unfurl_timeout: Duration,
     /// How long a connection may stay without signing in before it is
-    /// closed with 1008, as apron-server-cloudflare closes it after 30
-    /// seconds.
+    /// closed with 1008.
     pub auth_timeout: Duration,
     /// An extension Go lacks (docs/DEVIATIONS.md): false keeps guests
     /// read-only, as apron-server-cloudflare's `GUEST_POSTING` does.
