@@ -679,3 +679,29 @@ fn test_rename_during_an_avatar_upload() {
         "the avatar's upload is gone"
     );
 }
+
+/// A request that fails while its user is renamed is not kept for
+/// deduplication under the new user_id: a retry of its id runs again.
+#[test]
+fn test_rename_during_a_failing_request() {
+    let server = new_test_server(account_config());
+    let mut admin = admin(&server);
+    let (mut dave, _) = named_account(&server, "Dave");
+    let from = dave.user_id.clone();
+    dave.write(&obj! {"method" => "test_fail", "id" => "x", "params" => Object::new()});
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    admin.drain();
+    private_reply(&mut admin, &format!("/rename {from} david"));
+    let failed = loop {
+        let frame = dave.read();
+        if frame.contains_key("id") {
+            break frame;
+        }
+    };
+    assert!(failed.contains_key("error"), "{failed:?}");
+    let frame = reply(&mut dave, "history", "x", Object::new());
+    assert!(
+        frame.contains_key("result"),
+        "a retry of the failed request's id: {frame:?}"
+    );
+}

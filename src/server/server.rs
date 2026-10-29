@@ -846,6 +846,8 @@ fn operations(config: &Config) -> BTreeMap<&'static str, Operation> {
     ops.insert("me", Server::update_profile);
     #[cfg(test)]
     ops.insert("test_panic", Server::test_panic);
+    #[cfg(test)]
+    ops.insert("test_fail", Server::test_fail);
     ops.insert("message", Server::save_message);
     ops.insert("command", Server::command);
     ops.insert("history", Server::history);
@@ -1635,6 +1637,7 @@ impl Server {
 
         let _abandon = entry.as_ref().map(|entry| AbandonDedup {
             server: self,
+            client: c,
             user_id: &user_id,
             req_id: &req.id,
             entry,
@@ -1649,6 +1652,7 @@ impl Server {
         }
         if let Some(entry) = &entry {
             let mut st = self.lock();
+            let user_id = st.dedup_user(c, &user_id);
             let failed = outcome.is_err();
             if failed || read_only_op(&req.method) {
                 // Failed operations are not cached, and neither are reads,
@@ -1670,6 +1674,18 @@ impl Server {
     }
 }
 
+impl State {
+    /// The user whose deduplication holds a request that `user_id` sent on
+    /// `c`: a /rename while it ran moved them, with their requests, to the
+    /// connection's new user_id.
+    fn dedup_user(&self, c: &Arc<Client>, user_id: &str) -> String {
+        if self.users.contains_key(user_id) {
+            return user_id.to_owned();
+        }
+        self.client_user(c).unwrap_or_else(|| user_id.to_owned())
+    }
+}
+
 impl Server {
     /// Panics after the request has been registered for deduplication, with
     /// the state lock held, for the cleanup test.
@@ -1682,6 +1698,18 @@ impl Server {
         std::thread::sleep(std::time::Duration::from_millis(300));
         let _st = self.lock();
         panic!("test_panic");
+    }
+
+    /// Fails after a while without holding the state lock, so a test can
+    /// change the user while it runs.
+    #[cfg(test)]
+    fn test_fail(
+        self: &Arc<Self>,
+        _c: &Arc<Client>,
+        _req: &Request,
+    ) -> Result<(Json, bool), RpcError> {
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        Err(invalid_params("test_fail"))
     }
 }
 
@@ -1708,6 +1736,7 @@ impl Drop for Detach<'_> {
 /// and a retry runs again.
 struct AbandonDedup<'a> {
     server: &'a Arc<Server>,
+    client: &'a Arc<Client>,
     user_id: &'a str,
     req_id: &'a str,
     entry: &'a Arc<DedupEntry>,
@@ -1718,9 +1747,12 @@ impl Drop for AbandonDedup<'_> {
         if self.entry.is_closed() {
             return;
         }
-        if let Some(u) = self.server.lock().users.get_mut(self.user_id) {
+        let mut st = self.server.lock();
+        let user_id = st.dedup_user(self.client, self.user_id);
+        if let Some(u) = st.users.get_mut(&user_id) {
             u.dedup.remove(self.req_id, self.entry);
         }
+        drop(st);
         self.entry
             .finish(Err(RpcError::new(CODE_INTERNAL_ERROR, "Internal error")));
     }
