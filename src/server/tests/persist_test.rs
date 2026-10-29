@@ -491,3 +491,29 @@ fn test_roles_and_welcome() {
     );
     drop(server);
 }
+
+/// An avatar comes only from /avatar, so one stored without its upload, as
+/// `me` once set from a URL, is dropped at startup.
+#[test]
+fn test_url_avatars_are_dropped() {
+    let kept: Arc<dyn Store> = Arc::new(store::Memory::new());
+    let dir = TempDir::new("apron-avatar-");
+    let mut server = start_with_store(kept.clone(), &format!("{dir}/before"));
+    let (mut ada, _) = dial_origin(&server, TEST_PASSKEY_ORIGIN);
+    let registered = register_test_passkey(&mut ada, &mut new_test_authenticator());
+    let ada_id = you_of(&registered)["user_id"].as_str().unwrap().to_owned();
+    {
+        let mut st = server.app.lock();
+        st.users.get_mut(&ada_id).unwrap().avatar = "https://example.com/a.png".into();
+        st.touch_user(&ada_id);
+    }
+    drop(ada);
+    server.stop();
+    assert!(
+        load(kept.as_ref())[&format!("user/{ada_id}")].contains("example.com"),
+        "the avatar was not stored"
+    );
+
+    let server = start_with_store(kept, &format!("{dir}/after"));
+    assert_eq!(server.app.lock().users[&ada_id].avatar, "");
+}

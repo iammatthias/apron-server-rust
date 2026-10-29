@@ -1578,7 +1578,8 @@ fn test_profiles_and_user_notifications() {
         obj! {"name" => "  Ada  ", "avatar" => "data:image/png;base64,iVBORw0KGgo=", "ext" => ext.clone()},
     )["you"]
         .clone();
-    let want = obj! {"user_id" => "guest_1", "name" => "Ada", "avatar" => "data:image/png;base64,iVBORw0KGgo=", "ext" => ext.clone(), "status" => "online", "roles" => strings(&[])};
+    // An avatar comes only from /avatar: `me` ignores any but "".
+    let want = obj! {"user_id" => "guest_1", "name" => "Ada", "ext" => ext.clone(), "status" => "online", "roles" => strings(&[])};
     assert_eq!(you, Json::from(yours(&want)), "you");
     assert_eq!(
         b.notification("user"),
@@ -1688,11 +1689,14 @@ fn test_profiles_and_user_notifications() {
         "clearing the name"
     );
     b.notification("user");
-    a.expect_error(
+    let you = you_of(&a.result(
         "me",
-        "bad-avatar",
-        obj! {"avatar" => "javascript:alert(1)"},
-        CODE_INVALID_PARAMS,
+        "other-avatar",
+        obj! {"avatar" => "https://example.com/a.png"},
+    ));
+    assert!(
+        !you.contains_key("avatar"),
+        "an https: avatar was kept: {you:?}"
     );
     a.expect_error("me", "bad-name", obj! {"name" => 7i64}, CODE_INVALID_PARAMS);
     b.expect_quiet();
@@ -1729,6 +1733,9 @@ fn test_names_are_normalized_without_nfkc() {
 fn test_avatar_command() {
     let server = new_test_server(default_config());
     let mut clients = dial_group(&server, 2);
+    for c in &clients {
+        make_account(&server, &c.user_id);
+    }
     let (mut a, mut b) = (clients.remove(0), clients.remove(0));
     for (i, embeds) in [
         None,
@@ -1869,8 +1876,8 @@ fn test_commands() {
 
     let text = help(&mut a, &ops);
     assert!(
-        text.contains("`/help`") && text.contains("`/avatar`") && !text.contains("/kick"),
-        "creator's help: {text:?}"
+        text.contains("`/help`") && !text.contains("/avatar") && !text.contains("/kick"),
+        "guest's help: {text:?}"
     );
     for client in [&mut a, &mut b, &mut c] {
         client.expect_quiet();

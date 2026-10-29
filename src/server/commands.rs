@@ -79,7 +79,7 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         name: "avatar",
         usage: "/avatar",
         help: "with one image attached: set your avatar",
-        audience: Audience::Everyone,
+        audience: Audience::Accounts,
         writes: true,
         run: State::avatar_command,
     },

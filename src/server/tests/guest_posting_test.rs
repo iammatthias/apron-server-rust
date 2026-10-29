@@ -207,6 +207,13 @@ fn test_guests_keep_their_name() {
         obj! {"title" => "Top level"},
     );
     assert_eq!(error_code(&frame), Some(CODE_DENIED));
+    let frame = reply(
+        &mut guest,
+        "command",
+        "avatar",
+        obj! {"body" => obj! {"text" => "/avatar", "embeds" => vec![Json::from(obj! {"kind" => "upload"})]}},
+    );
+    assert_eq!(error_code(&frame), Some(CODE_DENIED), "a guest's /avatar");
     let you = you_of(&guest.result("me", "status", obj! {"status" => "dnd"}));
     assert_eq!(you["name"], Json::from("Guest 1"));
 }
