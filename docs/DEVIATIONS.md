@@ -708,6 +708,30 @@ held wakes, with these differences:
 **Why.** The allowances bound a metered platform's spend. The per-user cap
 already bounds a flood here.
 
+### Push `unread` (§4.9.3)
+
+**Reference.** apron-server-cloudflare counts `unread` as the pushes claimed
+for the user since they last came back: signed in, sent `idle: false`,
+moved a read cursor, or sent any frame from a connection that is not idle.
+Coming back sets it to 0. A message coalesced away counts nothing, and held
+wakes released together count one. A push only for `joined` carries no
+`unread`, and nor does an operator alert. The count is a column of the
+recipient's daily push counter, so only the current UTC day's count stands.
+
+**This server.** Counts `unread` as the messages after the user's read
+position in each room they joined, or in a room where a message mentioned
+or replied to them: messages by others, not deleted, and not in a room they
+muted, at most 999. The count is the same on every kind, `relay` included,
+and on every push, a push only for `joined` included. It is kept in memory
+per user and room and counted again from the log when something changes
+it. Coming back without reading leaves it as it is. Reading lowers it, and
+a `badge` registration is told (see
+[Push kind `relay` and the `badge` scope](#push-kind-relay-and-the-badge-scope-49)).
+
+**Why.** §4.9.3 gives messages after the user's read cursors as the
+example count, and the `badge` scope needs a count that reading lowers.
+Cloudflare's count saves the reads its storage bill would charge.
+
 ### Push delivery (§4.9), *interim until the rust-stdlib transport fix*
 
 **Reference.** apron-server-cloudflare, like any HTTP client that detects
@@ -817,16 +841,16 @@ member's kept cursor follows `room_list`.
 
 **Why.** Read receipts are a privacy choice for the server's owner.
 
-### Push kind `relay`, the `badge` scope and `unread` (§4.9)
+### Push kind `relay` and the `badge` scope (§4.9)
 
-**Reference.** apron-server-cloudflare has kind `webpush` only, no `badge`
-scope and no `unread` count.
+**Reference.** apron-server-cloudflare has kind `webpush` only and no
+`badge` scope.
 
 **This server.** Also takes kind `relay`, whose host must be in
-`--push.hosts` like any other. `push.relay` is `{}`, `push.wake` also lists
-`badge`, and every payload carries `unread`, the user's count of messages
-after their read positions. A `badge` registration of kind `relay` gets a
-low-urgency push without a message on each change of that count.
+`--push.hosts` like any other. `push.relay` is `{}` and `push.wake` also
+lists `badge`. A `badge` registration of kind `relay` gets a low-urgency
+push without a message, `{push_id, unread}`, on each change of `unread`
+(see [Push `unread`](#push-unread-493)).
 An unknown kind is `Unknown push kind; this server offers relay and
 webpush`, and a `token` past 4,096 bytes is `too_large` with `token is at
 most 4096 bytes`. `--push.allow-insecure`, for tests only, admits `http`,
