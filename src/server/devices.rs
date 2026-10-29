@@ -6,9 +6,8 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use rust_stdlib::encoding::base64::URL_SAFE_NO_PAD;
 use rust_stdlib::time::{self, Time};
-use rust_stdlib_crypto::{rand, sha256};
+use rust_stdlib_crypto::sha256;
 
 use super::email::web_socket_url;
 use super::protocol::*;
@@ -146,10 +145,7 @@ impl State {
             self.devices.remove(&old);
             self.touch_device(old);
         }
-        let mut secret = [0u8; 32];
-        rand::read(&mut secret);
-        let token = format!("{DEVICE_TOKEN_PREFIX}{}", URL_SAFE_NO_PAD.encode(secret));
-        let key = sha256::sum256(token.as_bytes());
+        let (token, key) = super::invites::new_token(DEVICE_TOKEN_PREFIX);
         self.devices.insert(
             key,
             DeviceToken {
