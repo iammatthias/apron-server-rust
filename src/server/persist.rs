@@ -74,6 +74,8 @@ pub const ENTRY_BOT: &str = "bot";
 pub const ENTRY_INVITE: &str = "invite";
 pub const ENTRY_EMBED: &str = "embed";
 pub const ENTRY_PUSH: &str = "push";
+/// An accepted request's outcome (§1.2), keyed `<user_id> <request id>`.
+pub const ENTRY_DEDUP: &str = "dedup";
 
 /// The state changed since the last batch, by key. A key missing from the
 /// server's maps at flush time is deleted from the store.
@@ -89,6 +91,8 @@ pub struct DirtySet {
     pub invites: BTreeSet<[u8; 32]>,
     pub embeds: BTreeSet<String>,
     pub pushes: BTreeSet<String>,
+    /// (user_id, request id) of deduplicated requests.
+    pub dedup: BTreeSet<(String, String)>,
     pub used_ids: Vec<String>,
     pub vapid: bool,
     pub server: bool,
@@ -301,6 +305,16 @@ pub struct StoredPush {
     pub wake: Vec<String>,
     #[json("renewed,omitzero")]
     pub renewed: Time,
+}
+
+#[derive(Clone, Debug, Default, MarshalTo, UnmarshalFrom)]
+pub struct StoredDedup {
+    #[json("fingerprint")]
+    pub fingerprint: String,
+    #[json("at")]
+    pub at: i64,
+    #[json("result")]
+    pub result: Value,
 }
 
 #[derive(Clone, Debug, Default, MarshalTo, UnmarshalFrom)]
@@ -572,6 +586,26 @@ impl State {
                     put(&mut batch, ENTRY_PUSH, key, &stored);
                 }
                 None => batch.push(Entry::delete(ENTRY_PUSH, key)),
+            }
+        }
+        for (user_id, request_id) in &d.dedup {
+            let key = format!("{user_id} {request_id}");
+            let stored = self
+                .users
+                .get(user_id)
+                .filter(|u| u.persists())
+                .and_then(|u| u.dedup.get(request_id))
+                .and_then(|e| {
+                    let result = e.result()?;
+                    Some(StoredDedup {
+                        fingerprint: hex::encode(&e.fingerprint),
+                        at: e.at,
+                        result: Value::from(encode_json(&result)?),
+                    })
+                });
+            match stored {
+                Some(stored) => put(&mut batch, ENTRY_DEDUP, &key, &stored),
+                None => batch.push(Entry::delete(ENTRY_DEDUP, &key)),
             }
         }
         if d.server {
@@ -1104,6 +1138,40 @@ impl Server {
                     st.add_push_locked(p);
                 } else {
                     st.touch_push(key);
+                }
+            }
+        }
+
+        // Kept oldest first, so each user's window drops its oldest.
+        let mut dedups: Vec<(i64, String, String, StoredDedup)> = Vec::new();
+        for (key, raw) in of(ENTRY_DEDUP) {
+            let stored = decode::<StoredDedup>(ENTRY_DEDUP, key, raw)?;
+            let (user_id, request_id) = key.split_once(' ').unwrap_or((key, ""));
+            dedups.push((stored.at, user_id.to_owned(), request_id.to_owned(), stored));
+        }
+        dedups.sort_by_key(|d| d.0);
+        for (_, user_id, request_id, stored) in dedups {
+            let fingerprint = hex::decode(&stored.fingerprint)
+                .ok()
+                .and_then(|f| <[u8; 32]>::try_from(f).ok());
+            let mut result = Json::Null;
+            let decoded = json::unmarshal(&stored.result.0, &mut result, &[]).is_ok();
+            let entry = fingerprint.filter(|_| decoded).map(|fingerprint| {
+                Arc::new(super::users::DedupEntry::finished(
+                    fingerprint,
+                    stored.at,
+                    result,
+                ))
+            });
+            let fresh = time::now().unix_milli() - stored.at < super::users::DEDUP_WINDOW_MS;
+            match (entry, st.users.get_mut(&user_id)) {
+                (Some(entry), Some(u)) if fresh && u.persists() => {
+                    for dropped in u.dedup.put(&request_id, entry) {
+                        st.dirty.dedup.insert((user_id.clone(), dropped));
+                    }
+                }
+                _ => {
+                    st.dirty.dedup.insert((user_id, request_id));
                 }
             }
         }

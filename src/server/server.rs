@@ -1620,7 +1620,9 @@ impl Server {
                 }
                 let new_entry = Arc::new(DedupEntry::new(fingerprint));
                 if let Some(u) = st.users.get_mut(&user_id) {
-                    u.dedup.put(&req.id, new_entry.clone());
+                    for dropped in u.dedup.put(&req.id, new_entry.clone()) {
+                        st.dirty.dedup.insert((user_id.clone(), dropped));
+                    }
                 }
                 entry = Some(new_entry);
             }
@@ -1653,7 +1655,13 @@ impl Server {
                     u.dedup.remove(&req.id, entry);
                 }
             }
+            let kept = !failed && !read_only_op(&req.method);
             entry.finish(outcome.map(|(result, _)| result));
+            // Kept across restarts for the window (§1.2), for an identity
+            // that outlives its connections.
+            if kept && st.users.get(&user_id).is_some_and(|u| u.persists()) {
+                st.dirty.dedup.insert((user_id.clone(), req.id.clone()));
+            }
         }
     }
 }
