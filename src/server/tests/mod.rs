@@ -60,5 +60,6 @@ mod toggle_test;
 mod unfurl_test;
 mod wake_test;
 mod webauthn_test;
+mod webauthn_validation_test;
 mod webpush_test;
 mod welcome_test;
