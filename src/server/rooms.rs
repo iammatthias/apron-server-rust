@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use rust_stdlib::encoding::json::jsontext::Value;
 
-use super::bots::BOT_ID_PREFIX;
 use super::limits::{refused, Allowance, Category, Charge, Principal, Rate, Scope};
 use super::messages::MessageState;
 use super::protocol::*;
@@ -88,7 +87,7 @@ impl RoomState {
     /// Reports whether u may remove target from r with room_leave's
     /// user_id (§4.2.2): an admin anyone, an account its own bot, and the
     /// room's creator, if an account, anyone.
-    pub fn may_remove(&self, u: &UserState, target: &str) -> bool {
+    pub fn may_remove(&self, u: &UserState, target: Option<&UserState>) -> bool {
         u.has_role(ADMIN_ROLE) || (u.account() && (self.creator == u.id || owns_bot(u, target)))
     }
 
@@ -135,8 +134,8 @@ impl RoomState {
 }
 
 /// Reports whether target is u's `/invite-bot` bot.
-fn owns_bot(u: &UserState, target: &str) -> bool {
-    target.strip_prefix(BOT_ID_PREFIX) == Some(u.id.as_str())
+fn owns_bot(u: &UserState, target: Option<&UserState>) -> bool {
+    target.is_some_and(|t| t.owner.as_deref() == Some(u.id.as_str()))
 }
 
 /// Renders a room_update notification (§4.2.3) with one field.
@@ -1222,7 +1221,7 @@ impl State {
                 || (u.account()
                     && (r.private
                         || self.feature_on(Feature::AddMember)
-                        || owns_bot(u, &target_id)));
+                        || owns_bot(u, self.users.get(&target_id))));
             if !may_add {
                 return Err(RpcError::new(
                     CODE_DENIED,
@@ -1291,7 +1290,7 @@ impl State {
         };
         let mut target = user_id.clone();
         if has_target && target_id != user_id {
-            if !r.may_remove(&self.users[&user_id], &target_id) {
+            if !r.may_remove(&self.users[&user_id], self.users.get(&target_id)) {
                 return Err(RpcError::new(
                     CODE_DENIED,
                     "Only an admin, the room's creator, or a bot's owner, can remove someone else",

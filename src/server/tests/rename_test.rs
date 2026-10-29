@@ -16,15 +16,15 @@ use crate::server::push::push_key;
 use crate::server::Config;
 use crate::store::{self, Store};
 
-/// What `traces` finds of a renamed user_id that had a bot: its used_id
-/// entry, and the bot's user and token entries, which name it as the
-/// owner, as on Cloudflare, where the bot keeps its user_id and token.
-fn left_behind(server: &TestServer, from: &str) -> BTreeSet<String> {
+/// What `traces` finds of a user_id that has a bot, the bot's own user_id
+/// aside, split into the bot's user and token entries, which name it as the
+/// owner, and the rest. The bot keeps its user_id and token through a
+/// rename, as on Cloudflare, so its entries keep their places.
+fn held(server: &TestServer, from: &str) -> (BTreeSet<String>, BTreeSet<String>) {
     let bot = format!("bot_{from}");
     traces(server, from, &[&bot])
         .into_iter()
-        .filter(|place| !place.starts_with("bot ") && *place != format!("user {bot}"))
-        .collect()
+        .partition(|place| place.starts_with("bot ") || *place == format!("user {bot}"))
 }
 
 /// What `traces` should find under `to` after `from` was renamed to it,
@@ -53,7 +53,8 @@ fn test_rename_moves_everything() {
     let made = entangle(&server, &mut c, &mut other);
     let from = c.user_id.clone();
     let bot = format!("bot_{from}");
-    let before = left_behind(&server, &from);
+    let (bot_entries, before) = held(&server, &from);
+    assert_eq!(bot_entries.len(), 2, "the bot's entries: {bot_entries:?}");
     assert!(
         before.len() > 20,
         "the user is held in few places: {before:?}"
@@ -63,11 +64,18 @@ fn test_rename_moves_everything() {
     let to = "david_moved";
     let text = private_reply(&mut admin, &format!("/rename @{from} @{to}"));
     assert_eq!(text, format!("Renamed `{from}` to `{to}`."));
+    let (left_bot, left) = held(&server, &from);
+    assert!(
+        left_bot.is_empty(),
+        "the bot still names {from}: {left_bot:?}"
+    );
     assert_eq!(
-        left_behind(&server, &from),
+        left,
         BTreeSet::from([format!("used_id {}", from.to_lowercase())]),
     );
-    assert_eq!(traces(&server, to, &[]), moved(&before, &from, to));
+    let mut want = moved(&before, &from, to);
+    want.extend(bot_entries);
+    assert_eq!(traces(&server, to, &[]), want);
 
     let st = server.app.lock();
     assert_eq!(st.messages[&made.message].owner, to);
@@ -419,21 +427,29 @@ fn test_rename_persists() {
         (c.user_id.clone(), made)
     };
     let bot = format!("bot_{from}");
-    let stored: BTreeSet<String> = stored_traces(&*open(), &from, &[&bot])
-        .into_iter()
-        .filter(|place| !place.starts_with("bot ") && *place != format!("user {bot}"))
-        .collect();
     assert_eq!(
-        stored,
+        stored_traces(&*open(), &from, &[&bot]),
         BTreeSet::from([format!("used_id {}", from.to_lowercase())]),
         "the store keeps the old user_id"
     );
     let server = start_with(open(), &upload_dir, configure);
     assert_eq!(
-        left_behind(&server, &from),
-        BTreeSet::from([format!("used_id {}", from.to_lowercase())]),
+        held(&server, &from),
+        (
+            BTreeSet::new(),
+            BTreeSet::from([format!("used_id {}", from.to_lowercase())])
+        ),
     );
     let st = server.app.lock();
+    assert_eq!(
+        st.users[&bot].owner.as_deref(),
+        Some("david"),
+        "the bot's owner"
+    );
+    assert!(
+        st.bots.of_bot(&bot).is_some(),
+        "the bot's token did not survive the restart"
+    );
     assert_eq!(st.messages[&made.upload_message].owner, "david");
     assert!(st.users["david"].passkey.is_some() && st.users["david"].joined.contains(&made.thread));
     assert!(
@@ -541,5 +557,79 @@ fn test_rename_keeps_timed_mutes_running() {
     assert!(
         server.app.lock().users["david"].mute.until.is_zero(),
         "the mute did not end"
+    );
+}
+
+/// The renamed user's bot stays theirs: purging them under the new user_id
+/// takes the bot and its token too.
+#[test]
+fn test_rename_then_purge_takes_the_bot() {
+    let server = new_test_server(account_config());
+    let mut admin = admin(&server);
+    let (mut dave, _) = named_account(&server, "Dave");
+    let from = dave.user_id.clone();
+    let bot = format!("bot_{from}");
+    let bot_token = token_in(&private_reply(&mut dave, "/invite-bot"));
+    admin.drain();
+
+    private_reply(&mut admin, &format!("/rename {from} david"));
+    private_reply(&mut admin, "/purge david");
+    assert!(
+        !server.app.lock().users.contains_key(&bot),
+        "the bot outlived its purged owner"
+    );
+    let (mut again, _) = dial_raw(&server);
+    let frame = token_auth(&mut again, &bot_token);
+    assert_eq!(
+        frame.get("error"),
+        Some(&Json::from(obj! {
+            "code" => CODE_DENIED,
+            "message" => "Bot token is not valid; its owner can get a new one with /invite-bot",
+        })),
+        "the purged bot's token: {frame:?}"
+    );
+}
+
+/// After a rename, /invite-bot finds the bot the user already has and
+/// mints it a new token, instead of making a second bot.
+#[test]
+fn test_rename_then_invite_bot_rotates_the_bot() {
+    let server = new_test_server(account_config());
+    let mut admin = admin(&server);
+    let (mut dave, _) = named_account(&server, "Dave");
+    let from = dave.user_id.clone();
+    let bot = format!("bot_{from}");
+    let first = token_in(&private_reply(&mut dave, "/invite-bot"));
+    admin.drain();
+
+    private_reply(&mut admin, &format!("/rename {from} david"));
+    dave.drain();
+    let text = private_reply(&mut dave, "/invite-bot");
+    assert!(text.contains(&format!("(`{bot}`)")), "{text}");
+    let second = token_in(&text);
+    let st = server.app.lock();
+    assert!(!st.users.contains_key("bot_david"), "a second bot was made");
+    assert_eq!(
+        st.users[&bot].owner.as_deref(),
+        Some("david"),
+        "the bot's owner"
+    );
+    drop(st);
+    let (mut old, _) = dial_raw(&server);
+    assert!(
+        token_auth(&mut old, &first).contains_key("error"),
+        "the replaced token still signs in"
+    );
+    let (mut new, _) = dial_raw(&server);
+    assert_eq!(
+        user_id_of(&passkey_result(&token_auth(&mut new, &second))),
+        bot
+    );
+    // The bot's owner, by owner and not by name, may still remove it.
+    dave.drain();
+    dave.request(
+        "room_leave",
+        "remove-bot",
+        obj! {"room_id" => "general", "user_id" => bot.as_str()},
     );
 }

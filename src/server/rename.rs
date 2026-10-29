@@ -96,7 +96,8 @@ impl State {
     /// Moves everything kept under `from` to `to`: the user, with its
     /// profile, passkeys, roles, mutes, status and accepted requests; its
     /// address, invite and device tokens, push registrations, waiting wakes,
-    /// coalescing and limits; its memberships, read cursors and the rooms
+    /// coalescing and limits; its bots, which keep their user_ids, and their
+    /// tokens; its memberships, read cursors and the rooms
     /// it created; its messages, reaction sets and avatar; and its
     /// connections. Its logged messages, reaction sets and memberships are
     /// rewritten to `to`. Its sessions are deleted.
@@ -238,6 +239,13 @@ impl State {
                 record.rewrite(|v| *v = value);
                 self.touch_record(log_id);
             }
+        }
+        for bot_id in self.bots_of(from) {
+            self.users.get_mut(&bot_id).expect("listed").owner = Some(to.to_owned());
+            self.touch_user(&bot_id);
+        }
+        for key in self.bots.move_owner(from, to) {
+            self.touch_bot(key);
         }
         let avatars: Vec<String> = self
             .embeds
