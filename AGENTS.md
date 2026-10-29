@@ -168,12 +168,12 @@ commit that changes nothing a client sees (a Cloudflare budget, say). Then
 move the pin in the same change. If the script reports rewritten history,
 stop and compare by hand.
 
-`tools/reference/demo-room.mjs [room_id]` reads a room on the demo server
-as a guest, with its threads, and prints what was posted since its last run
-(state and a running log in `tools/reference/.demo-room/`, which git
-ignores). It defaults to "Apron Chefs", where client and server authors
-discuss protocol changes before they land in `REFERENCE`'s repositories.
-Read it alongside `check.sh`.
+`tools/reference/demo-room.mjs [room_id]` reads every public room on the demo
+server as a guest, with their threads, or one room when given its id, and
+prints what was posted since its last run (state and a running log in
+`tools/reference/.demo-room/`, which git ignores). Client and server authors
+discuss protocol changes there, mostly in "Apron Chefs", before they land in
+`REFERENCE`'s repositories. Read it alongside `check.sh`.
 
 `tools/smoke/frame-diff.mjs` compares the shape of this server's `server`
 frame (its keys and capabilities, not their values) with the live
