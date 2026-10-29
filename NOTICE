@@ -34,7 +34,7 @@ match their behavior byte for byte. Each module's license follows.
 - src/webp.rs ports the configuration path of golang.org/x/image/webp
   (v0.46.0).
 - src/aprond/acme ports golang.org/x/crypto/acme/autocert (v0.57.0).
-- src/webauthn, src/cbor.rs, tests/webauthn_protocol.rs, and the files in
+- src/webauthn, src/cbor.rs, tests/webauthn_protocol/, and the files in
   tests/data/webauthn port github.com/go-webauthn/webauthn (v0.18.2). The
   JSON files in tests/data/webauthn are copied from its tests.
 - src/ws.rs reproduces the behavior of github.com/coder/websocket (v1.8.14).
