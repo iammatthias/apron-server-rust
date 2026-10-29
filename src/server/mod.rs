@@ -19,6 +19,7 @@ pub mod persist;
 pub mod protocol;
 pub mod purge;
 pub mod push;
+pub mod rename;
 pub mod retention;
 pub mod rooms;
 #[allow(clippy::module_inception)]

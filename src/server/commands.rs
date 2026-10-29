@@ -134,6 +134,14 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         run: State::role_command,
     },
     ServerCommand {
+        name: "rename",
+        usage: "/rename <old_user_id> <new_user_id>",
+        help: "change a registered user's user_id",
+        audience: Audience::Admins,
+        writes: true,
+        run: State::rename_command,
+    },
+    ServerCommand {
         name: "invite-token",
         usage: "/invite-token <user_id>",
         help: "create a user who signs in with a token instead of a passkey, and get the token",

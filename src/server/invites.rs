@@ -91,11 +91,14 @@ impl InviteTokens {
     }
 }
 
+/// Why an admin may not give out a user_id (`issuable`).
+pub(super) const NOT_ISSUABLE: &str = "A user_id is 1 to 64 letters, digits, _ or -, starting with a letter or digit, ending with a letter, digit or _, and not guest_ or bot_";
+
 /// Reports whether an admin may give out `user_id`: 1 to 64 letters,
 /// digits, `_` or `-`, starting with a letter or digit and ending with a
 /// letter, digit or `_`, so that `@` and the whole ID make a mention in text
 /// (Appendix A.3), and not a guest's or bot's.
-fn issuable(user_id: &str) -> bool {
+pub(super) fn issuable(user_id: &str) -> bool {
     let bytes = user_id.as_bytes();
     let inner = |b: &u8| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-');
     let lower = user_id.to_ascii_lowercase();
@@ -167,9 +170,7 @@ impl State {
             return Err(taken);
         }
         if !issuable(user_id) {
-            return Err(invalid_params(
-                "A user_id is 1 to 64 letters, digits, _ or -, starting with a letter or digit, ending with a letter, digit or _, and not guest_ or bot_",
-            ));
+            return Err(invalid_params(NOT_ISSUABLE));
         }
         // A user_id --role grants is free for an admin to make.
         if self.used_ids.contains(&user_id.to_lowercase()) || self.room_named_locked(user_id) {

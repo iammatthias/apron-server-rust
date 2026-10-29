@@ -32,6 +32,7 @@ mod push_fixture_test;
 mod push_test;
 mod reactions_test;
 mod reference_test;
+mod rename_test;
 mod retention_test;
 mod server_test;
 mod status_test;
