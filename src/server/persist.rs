@@ -12,6 +12,7 @@
 //! meta     "vapid"      the webpush VAPID private key (§4.9)
 //! meta     "server"     the server's title, description and avatar as
 //!                       `/server` set them (an extension)
+//! meta     "emoji"      the custom emoji catalog (an extension)
 //! used_id  lowercased user_id ever assigned
 //! record   log_id       a logged record and the rooms whose logs hold it
 //! room     room_id
@@ -42,6 +43,7 @@ use rust_stdlib::time::{self, Time};
 use rust_stdlib_derive::{MarshalTo, UnmarshalFrom};
 
 use super::bots::{BotToken, BOT_ROLE};
+use super::custom_emoji::StoredEmoji;
 use super::devices::DeviceToken;
 use super::embeds::{EmbedPurpose, EmbedState, StreamBuffer};
 use super::emoji::normalize_entries;
@@ -90,6 +92,7 @@ pub struct DirtySet {
     pub used_ids: Vec<String>,
     pub vapid: bool,
     pub server: bool,
+    pub emoji: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, MarshalTo, UnmarshalFrom)]
@@ -363,6 +366,9 @@ pub struct StoredEmbed {
     /// Set for the server's avatar (`/server avatar`).
     #[json("server_avatar,omitzero")]
     pub server_avatar: bool,
+    /// The custom emoji key whose image the upload is (`/emoji add`).
+    #[json("emoji,omitzero")]
+    pub emoji: String,
     #[json("base_url")]
     pub base_url: String,
     #[json("secret")]
@@ -575,6 +581,14 @@ impl State {
                 put(&mut batch, ENTRY_META, "server", &self.server_meta);
             }
         }
+        if d.emoji {
+            let stored = self.stored_emoji();
+            if stored == StoredEmoji::default() {
+                batch.push(Entry::delete(ENTRY_META, "emoji"));
+            } else {
+                put(&mut batch, ENTRY_META, "emoji", &stored);
+            }
+        }
         if d.vapid && self.vapid_stored {
             if let Some(vapid) = &self.vapid {
                 put(&mut batch, ENTRY_META, "vapid", &vapid.encoded());
@@ -621,6 +635,10 @@ pub fn stored_embed_of(e: &EmbedState) -> StoredEmbed {
             _ => String::new(),
         },
         server_avatar: e.purpose == EmbedPurpose::ServerAvatar,
+        emoji: match &e.purpose {
+            EmbedPurpose::Emoji(key) => key.clone(),
+            _ => String::new(),
+        },
         base_url: e.base_url.clone(),
         secret: e.secret.clone(),
         title: e.title.clone(),
@@ -999,6 +1017,8 @@ impl Server {
                 message_id: stored.message_id,
                 purpose: if stored.server_avatar {
                     EmbedPurpose::ServerAvatar
+                } else if !stored.emoji.is_empty() {
+                    EmbedPurpose::Emoji(stored.emoji)
                 } else if st.users.contains_key(&stored.avatar_for) {
                     EmbedPurpose::Avatar(stored.avatar_for)
                 } else {
@@ -1031,6 +1051,9 @@ impl Server {
                 st.upload_bytes += e.size;
             }
             st.embeds.insert(id.clone(), e);
+        }
+        if let Some(raw) = of(ENTRY_META).get("emoji") {
+            st.restore_emoji(decode::<StoredEmoji>(ENTRY_META, "emoji", raw)?);
         }
         if let Some(raw) = of(ENTRY_META).get("server") {
             st.server_meta = decode::<StoredServer>(ENTRY_META, "server", raw)?;

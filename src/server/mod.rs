@@ -4,6 +4,7 @@
 pub mod admin;
 pub mod bots;
 pub mod commands;
+pub mod custom_emoji;
 pub mod devices;
 pub mod email;
 pub mod embeds;

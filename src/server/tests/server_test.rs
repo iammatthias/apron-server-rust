@@ -231,8 +231,8 @@ fn test_guest_auth() {
 }
 
 /// ext.media (EXTENSIONS.md) states Cloudflare's defaults: attachments of
-/// its seven image and audio types up to 5 MiB, and avatars of the four
-/// image types up to 256 KiB.
+/// its seven image and audio types up to 5 MiB, and avatars and custom
+/// emoji of the four image types up to 256 KiB.
 #[test]
 fn test_server_frame_media() {
     let server = new_test_server(default_config());
@@ -250,6 +250,11 @@ fn test_server_frame_media() {
                 "audio/webm" => file.clone(), "audio/ogg" => file.clone(), "audio/mp4" => file,
             },
             "avatar" => obj! {
+                "image/png" => avatar.clone(), "image/jpeg" => avatar.clone(),
+                "image/gif" => avatar.clone(), "image/webp" => avatar.clone(),
+            },
+            // This server's own: images for /emoji add (ext:emoji).
+            "emoji" => obj! {
                 "image/png" => avatar.clone(), "image/jpeg" => avatar.clone(),
                 "image/gif" => avatar.clone(), "image/webp" => avatar,
             },

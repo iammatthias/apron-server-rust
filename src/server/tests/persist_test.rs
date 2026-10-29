@@ -55,6 +55,7 @@ impl State {
         all.pushes = self.pushes.keys().cloned().collect();
         all.vapid = self.vapid_stored;
         all.server = self.server_meta != Default::default();
+        all.emoji = self.stored_emoji() != Default::default();
         let mut entries = self.entries_for(&all);
         entries.push(Entry::put(
             ENTRY_META,

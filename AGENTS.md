@@ -252,7 +252,7 @@ The Compose project runs three containers behind one hostname:
   publish elsewhere, such as `127.0.0.1:18901` on a Mac.
 
 aprond's paths come from `Server::handler` in `src/server/server.rs`: `/ws`,
-`/healthz`, `/write/`, `/files/`, `/streams/`, and
+`/healthz`, `/write/`, `/files/`, `/streams/`, `/emoji/`, and
 `/.well-known/apple-app-site-association`. A new route there needs the same
 path in the router's `@aprond` matcher.
 

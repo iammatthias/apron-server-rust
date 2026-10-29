@@ -15,6 +15,7 @@ use rust_stdlib_crypto::sha256;
 
 use super::bots::BotTokens;
 use super::commands::{PRIVATE_NOTICE_ID, PRIVATE_NOTICE_NAME};
+use super::custom_emoji::{EmojiCatalog, CATALOG_PATH, DEFAULT_MAX_EMOJI, DEFAULT_MAX_EMOJI_BYTES};
 use super::devices::DeviceTokens;
 use super::email::{EmailSender, EmailState, ProposalId};
 use super::embeds::EmbedState;
@@ -127,6 +128,10 @@ pub struct Config {
     pub max_private_rooms: usize,
     /// server.welcome (§3.2): Markdown shown on the sign-in screen.
     pub welcome: String,
+    /// The most custom emoji the catalog holds (ext:emoji), and the largest
+    /// image of one.
+    pub max_emoji: usize,
+    pub max_emoji_bytes: i64,
     /// The server frame's `title`, `description` and `avatar` (§3.1)
     /// unless an admin's `/server` sets them.
     pub server: ServerMetadata,
@@ -215,6 +220,8 @@ pub fn default_config() -> Config {
         max_private_rooms: 20,
         welcome: String::new(),
         server: ServerMetadata::default(),
+        max_emoji: DEFAULT_MAX_EMOJI,
+        max_emoji_bytes: DEFAULT_MAX_EMOJI_BYTES,
         roles: BTreeMap::new(),
         admin_token: None,
         email_sender: None,
@@ -689,6 +696,8 @@ pub struct State {
     pub features_off: BTreeSet<Feature>,
     /// What admins set with `/server` (metadata.rs).
     pub server_meta: StoredServer,
+    /// The custom emoji (custom_emoji.rs).
+    pub emoji: EmojiCatalog,
     /// When the idle bot sweep is next due, in Unix milliseconds; 0 until
     /// the first sweep sets it (bots.rs).
     pub bot_sweep_at: i64,
@@ -877,6 +886,7 @@ pub fn open(config: Config) -> Result<Arc<Server>, store::StoreError> {
                 join_invite: None,
                 features_off: BTreeSet::new(),
                 server_meta: StoredServer::default(),
+                emoji: EmojiCatalog::default(),
                 bot_sweep_at: 0,
                 email: EmailState::default(),
                 vapid,
@@ -991,6 +1001,9 @@ impl Server {
             server.handle_stream(w, r)
         })
         .expect("constant pattern");
+        let server = self.clone();
+        mux.handle_func(CATALOG_PATH, move |w, r| server.handle_catalog(w, r))
+            .expect("constant pattern");
         if !self.config.apple_app_ids.is_empty() {
             let apps: Vec<Json> = self
                 .config
@@ -1207,9 +1220,7 @@ impl Server {
             }
             if self.config.max_connections > 0 && st.clients.len() >= self.config.max_connections {
                 // An error about the connection as a whole omits id (§1.1).
-                client.enqueue(
-                    &obj! {"method" => "server", "params" => st.server_params(&client.origin)},
-                );
+                client.enqueue(&obj! {"method" => "server", "params" => st.server_params(&client)});
                 client.close_with_error(RpcError::with_data(
                     CODE_RETRY_AFTER,
                     "Server at capacity; try again shortly",
@@ -1234,9 +1245,7 @@ impl Server {
             );
             // The server announcement and the welcome are queued before the
             // reader starts accepting auth.
-            client.enqueue(
-                &obj! {"method" => "server", "params" => st.server_params(&client.origin)},
-            );
+            client.enqueue(&obj! {"method" => "server", "params" => st.server_params(&client)});
             client.enqueue(&st.welcome_notice(&client.origin));
         }
         let auth_deadline = {
@@ -1642,8 +1651,9 @@ impl State {
         })
     }
 
-    /// The `server` frame's params (§3.1) for a connection from `origin`.
-    pub fn server_params(&self, origin: &str) -> Object {
+    /// The `server` frame's params (§3.1) for a connection.
+    pub fn server_params(&self, client: &Client) -> Object {
+        let origin = client.origin.as_str();
         // signup (§3.2) lists the schemes that can create an account: a
         // token does as an admin's sign-up invite (`/invite`); a guest is no
         // account.
@@ -1723,16 +1733,24 @@ impl State {
                 .collect();
             media.insert("upload".into(), upload.into());
             media.insert("avatar".into(), avatar.into());
+            let emoji: Object = AVATAR_TYPES
+                .iter()
+                .map(|t| (t.to_string(), sized(self.config.max_emoji_bytes)))
+                .collect();
+            media.insert("emoji".into(), emoji.into());
         }
         capabilities.extend([
             "ext:settings".into(),
             "ext:media".into(),
             "ext:permissions".into(),
         ]);
-        params.insert(
-            "ext".into(),
-            obj! {"settings" => settings, "media" => media}.into(),
-        );
+        let mut ext = obj! {"settings" => settings, "media" => media};
+        // ext:emoji, once an admin has added a custom emoji.
+        if let Some(url) = self.catalog_url(&client.base_url) {
+            capabilities.push("ext:emoji".into());
+            ext.insert("emoji".into(), obj! {"catalog_url" => url}.into());
+        }
+        params.insert("ext".into(), ext.into());
         params.insert("capabilities".into(), capabilities.into());
         params.insert("signup".into(), signup.into());
         params

@@ -150,6 +150,14 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         run: State::invite_command,
     },
     ServerCommand {
+        name: "emoji",
+        usage: "/emoji add|remove :name:",
+        help: "add a custom emoji, or replace its image: send /emoji add :name: with one image attached; /emoji remove :name: removes it",
+        audience: Audience::Admins,
+        writes: true,
+        run: State::emoji_command,
+    },
+    ServerCommand {
         name: "server",
         usage: "/server [title|description [<text>] | avatar]",
         help: "show this server's title, description and avatar; set one, the avatar with one image attached; or clear one, back to the deployment's",

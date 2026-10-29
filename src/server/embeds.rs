@@ -53,6 +53,8 @@ pub enum EmbedPurpose {
     Avatar(String),
     /// The server's avatar, from `/server avatar` (§3.1).
     ServerAvatar,
+    /// The image of this custom emoji key, from `/emoji add` (ext:emoji).
+    Emoji(String),
 }
 
 impl EmbedPurpose {
@@ -65,7 +67,7 @@ impl EmbedPurpose {
     /// Whether the server keeps the upload's file URL for good, so clients
     /// may cache it as long as they like.
     fn immutable(&self) -> bool {
-        matches!(self, EmbedPurpose::ServerAvatar)
+        matches!(self, EmbedPurpose::ServerAvatar | EmbedPurpose::Emoji(_))
     }
 }
 
@@ -931,6 +933,7 @@ impl Server {
                     self.config.max_message_upload_bytes
                         - st.message_upload_bytes_locked(&e.message_id),
                 ),
+                EmbedPurpose::Emoji(_) => self.config.max_emoji_bytes,
                 EmbedPurpose::Avatar(_) | EmbedPurpose::ServerAvatar => {
                     self.config.max_avatar_bytes
                 }
@@ -953,8 +956,12 @@ impl Server {
                 other => other,
             },
         };
-        if err.is_none() && purpose.image() && image_size(&content_type, file.as_ref()).is_none() {
-            err = Some(UploadError::NotImage);
+        let mut size_px = None;
+        if err.is_none() && purpose.image() {
+            size_px = image_size(&content_type, file.as_ref());
+            if size_px.is_none() {
+                err = Some(UploadError::NotImage);
+            }
         }
         let (declared_type, _) = mime::parse_media_type(&declared);
         if err.is_none()
@@ -1009,7 +1016,7 @@ impl Server {
             Some(UploadError::NotImage) => {
                 let message = match purpose {
                     EmbedPurpose::Avatar(_) => "Avatars must be PNG, JPEG, GIF, or WebP images",
-                    _ => "Only PNG, JPEG, GIF, and WebP images can be the server's avatar",
+                    _ => "Only PNG, JPEG, GIF, and WebP images can be custom emoji or the server's avatar",
                 };
                 fail(&mut st, w, http::STATUS_UNSUPPORTED_MEDIA_TYPE, message);
                 return;
@@ -1079,6 +1086,10 @@ impl Server {
             }
             EmbedPurpose::Avatar(_) => st.remove_embed_locked(id),
             EmbedPurpose::ServerAvatar => st.set_server_avatar_locked(Some(id.to_owned())),
+            EmbedPurpose::Emoji(key) => {
+                let (width, height) = size_px.unwrap_or_default();
+                st.add_emoji_locked(&key, id, width, height);
+            }
             EmbedPurpose::Message if st.messages.contains_key(&message_id) => {
                 let owned = st
                     .embeds

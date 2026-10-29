@@ -685,10 +685,9 @@ impl State {
         // user's set on the message: a request carries the whole set, so a
         // removed emoji must not stop the user changing their other
         // reactions (ext:emoji).
-        if let Some(key) = emojis
-            .iter()
-            .find(|entry| is_emoji_key(entry) && !current.contains(entry))
-        {
+        if let Some(key) = emojis.iter().find(|entry| {
+            is_emoji_key(entry) && !current.contains(entry) && !self.has_custom_emoji(entry)
+        }) {
             return Err(invalid_params(format!("{key} is not a custom emoji here")));
         }
         if !same_entries(&current, &emojis) {
