@@ -63,9 +63,8 @@ pub const ENTRY_BOT: &str = "bot";
 pub const ENTRY_EMBED: &str = "embed";
 pub const ENTRY_PUSH: &str = "push";
 
-/// The state changed since the last batch, by key. For users, embeds, and
-/// pushes, a key missing from the server's maps at flush time is deleted
-/// from the store.
+/// The state changed since the last batch, by key. A key missing from the
+/// server's maps at flush time is deleted from the store.
 #[derive(Debug, Default)]
 pub struct DirtySet {
     pub records: BTreeSet<i64>,
@@ -93,6 +92,13 @@ pub struct StoredMeta {
     pub embed_number: u64,
     #[json("upload_seq")]
     pub upload_seq: i64,
+    /// `State.history_floor`, absent until retention discards a record. Go's
+    /// decoder skips the member.
+    #[json("history_floor,omitzero")]
+    pub history_floor: i64,
+    /// `State.rooms_removed_at`, absent until retention removes a thread.
+    #[json("rooms_removed_at,omitzero")]
+    pub rooms_removed_at: i64,
 }
 
 #[derive(Clone, Debug, Default, MarshalTo, UnmarshalFrom)]
@@ -145,6 +151,10 @@ pub struct StoredReaction {
     pub from: Object,
     #[json("emojis")]
     pub emojis: Vec<String>,
+    /// The record that logged the set, which retention reads; absent in
+    /// stores written before it, and Go's decoder skips the member.
+    #[json("log_id,omitzero")]
+    pub log_id: i64,
 }
 
 #[derive(Clone, Debug, Default, MarshalTo, UnmarshalFrom)]
@@ -323,6 +333,8 @@ impl State {
             account_number: self.account_number,
             embed_number: self.embed_number,
             upload_seq: self.upload_seq,
+            history_floor: self.history_floor,
+            rooms_removed_at: self.rooms_removed_at,
         }
     }
 
@@ -351,8 +363,8 @@ impl State {
             put(&mut batch, ENTRY_USED_ID, id, &true);
         }
         for id in &d.records {
-            if let Some(r) = self.records.get(id) {
-                put(
+            match self.records.get(id) {
+                Some(r) => put(
                     &mut batch,
                     ENTRY_RECORD,
                     &format_id(r.id),
@@ -361,17 +373,20 @@ impl State {
                         raw: Value::from(r.raw.clone()),
                         rooms: r.rooms.clone(),
                     },
-                );
+                ),
+                None => batch.push(Entry::delete(ENTRY_RECORD, &format_id(*id))),
             }
         }
         for id in &d.rooms {
-            if let Some(r) = self.rooms.get(id) {
-                put(&mut batch, ENTRY_ROOM, id, &self.stored_room_locked(r));
+            match self.rooms.get(id) {
+                Some(r) => put(&mut batch, ENTRY_ROOM, id, &self.stored_room_locked(r)),
+                None => batch.push(Entry::delete(ENTRY_ROOM, id)),
             }
         }
         for id in &d.messages {
-            if let Some(m) = self.messages.get(id) {
-                put(&mut batch, ENTRY_MESSAGE, id, &stored_message_of(m));
+            match self.messages.get(id) {
+                Some(m) => put(&mut batch, ENTRY_MESSAGE, id, &stored_message_of(m)),
+                None => batch.push(Entry::delete(ENTRY_MESSAGE, id)),
             }
         }
         for id in &d.users {
@@ -531,6 +546,7 @@ pub fn stored_message_of(m: &MessageState) -> StoredMessage {
                     StoredReaction {
                         from: set.from.clone(),
                         emojis: set.emojis.clone(),
+                        log_id: set.log_id,
                     },
                 )
             })
@@ -629,6 +645,8 @@ impl Server {
             st.account_number = st.stored_meta.account_number;
             st.embed_number = st.stored_meta.embed_number;
             st.upload_seq = st.stored_meta.upload_seq;
+            st.history_floor = st.stored_meta.history_floor;
+            st.rooms_removed_at = st.stored_meta.rooms_removed_at;
         }
         Server::restore_vapid_locked(st, of(ENTRY_META).get("vapid"))?;
         for id in of(ENTRY_USED_ID).keys() {
@@ -720,6 +738,13 @@ impl Server {
                     ReactionSet {
                         from: set.from,
                         emojis: set.emojis,
+                        // A set stored without its record lives as long as
+                        // the message's latest snapshot.
+                        log_id: if set.log_id == 0 {
+                            stored.log_id
+                        } else {
+                            set.log_id
+                        },
                     },
                 );
             }
@@ -730,7 +755,10 @@ impl Server {
                 }
             }
             if m.records.is_empty() {
-                continue; // A message without its records cannot be served.
+                // A message without its records cannot be served, and its
+                // entry goes at the first write.
+                st.touch_message(id);
+                continue;
             }
             st.messages.insert(id.clone(), m);
         }

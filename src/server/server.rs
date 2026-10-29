@@ -582,6 +582,11 @@ pub struct State {
     pub config: Arc<Config>,
     /// The single log_id sequence shared by every record kind and room.
     pub last_id: i64,
+    /// Every record below it was discarded by retention (Config.retention);
+    /// 0 until retention first discards one. It never decreases.
+    pub history_floor: i64,
+    /// The last log_id when retention last removed a thread; 0 if never.
+    pub rooms_removed_at: i64,
     pub rooms: BTreeMap<String, RoomState>,
     pub messages: BTreeMap<String, MessageState>,
     pub records: BTreeMap<i64, LogRecord>,
@@ -774,6 +779,8 @@ pub fn open(config: Config) -> Result<Arc<Server>, store::StoreError> {
                 server: weak.clone(),
                 config: config.clone(),
                 last_id: 0,
+                history_floor: 0,
+                rooms_removed_at: 0,
                 rooms: BTreeMap::new(),
                 messages: BTreeMap::new(),
                 records: BTreeMap::new(),
@@ -836,6 +843,9 @@ pub fn open(config: Config) -> Result<Arc<Server>, store::StoreError> {
         if let Some(vapid) = &st.vapid {
             let _ = server.push.vapid.set(vapid.clone());
         }
+        // A restart after a long stop discards what expired meanwhile before
+        // anyone reads it.
+        st.expire_history_locked(&time::now());
         if !st.rooms.contains_key(DEFAULT_ROOM_ID) {
             // The seeded default room has a logged creation record like any
             // other room, so its history_log_id is never null.
@@ -843,7 +853,7 @@ pub fn open(config: Config) -> Result<Arc<Server>, store::StoreError> {
         }
         st.remove_stale_uploads(&files);
     }
-    server.sweep_pushes();
+    server.sweep();
     Ok(server)
 }
 
