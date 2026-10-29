@@ -17,6 +17,7 @@ pub mod outbound;
 pub mod passkeys;
 pub mod persist;
 pub mod protocol;
+pub mod purge;
 pub mod push;
 pub mod retention;
 pub mod rooms;

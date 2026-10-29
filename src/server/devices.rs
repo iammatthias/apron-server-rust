@@ -64,6 +64,29 @@ impl DeviceTokens {
         Some(token)
     }
 
+    /// Removes an account's tokens and returns their keys.
+    pub fn remove_user(&mut self, user_id: &str) -> Vec<SessionKey> {
+        let keys = self.by_user.remove(user_id).unwrap_or_default();
+        for key in &keys {
+            self.by_key.remove(key);
+        }
+        keys
+    }
+
+    /// Moves an account's tokens to a new user_id and returns their keys.
+    pub fn move_user(&mut self, from: &str, to: &str) -> Vec<SessionKey> {
+        let keys = self.by_user.remove(from).unwrap_or_default();
+        for key in &keys {
+            if let Some(token) = self.by_key.get_mut(key) {
+                token.user = to.to_owned();
+            }
+        }
+        if !keys.is_empty() {
+            self.by_user.insert(to.to_owned(), keys.clone());
+        }
+        keys
+    }
+
     /// An account's tokens, oldest first.
     pub fn of_user<'a>(
         &'a self,

@@ -27,6 +27,7 @@ mod passkeys_test;
 mod permissions_test;
 mod persist_test;
 mod posting_test;
+mod purge_test;
 mod push_fixture_test;
 mod push_test;
 mod reactions_test;
