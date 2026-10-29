@@ -302,8 +302,8 @@ fn test_push_wakes_mentions_and_replies_of_idle_users() {
     b.write(
         &obj! {"method" => "activity", "params" => obj! {"room_id" => "general", "typing" => 3i64}},
     );
+    // Typing reaches the others only.
     a.notification("activity");
-    b.notification("activity");
     let (own, _) = save(&mut b, "own", obj! {"body" => obj! {"text" => "mine"}});
     a.notification("message");
     post(&mut a, &b, "still-idle", mention_b());

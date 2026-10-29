@@ -929,7 +929,12 @@ pub fn open(config: Config) -> Result<Arc<Server>, store::StoreError> {
         if !st.rooms.contains_key(DEFAULT_ROOM_ID) {
             // The seeded default room has a logged creation record like any
             // other room, so its history_log_id is never null.
-            st.commit_room_locked(DEFAULT_ROOM_ID, None, false, obj! {"title" => "General"});
+            st.commit_room_locked(
+                DEFAULT_ROOM_ID,
+                None,
+                false,
+                obj! {"title" => super::rooms::DEFAULT_ROOM_TITLE},
+            );
         }
         st.remove_stale_uploads(&files);
     }

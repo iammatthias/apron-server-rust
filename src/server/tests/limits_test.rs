@@ -253,8 +253,9 @@ fn test_history_pages_are_bounded_and_records_unescaped() {
 fn test_profile_and_push_size_limits() {
     let mut config = large_frames_config();
     config.allow_insecure_push = true;
+    config.web_authn = Some(super::webauthn_test::test_web_authn());
     let server = new_test_server(config);
-    let mut a = dial_test_client(&server);
+    let mut a = super::admin_test::account(&server);
     // A value rejected for its size is too_large (§1.1).
     a.expect_error(
         "me",

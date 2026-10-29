@@ -16,6 +16,10 @@ use crate::obj;
 
 pub const MAX_THREAD_TITLE_RUNES: usize = 60;
 pub const DEFAULT_THREAD_TITLE: &str = "Thread";
+/// The titles of `general` and of another public top-level room saved
+/// without one (apron-server-cloudflare's ROOM_TITLE and DEFAULT_ROOM_TITLE).
+pub const DEFAULT_ROOM_TITLE: &str = "General";
+pub const TOP_LEVEL_ROOM_TITLE: &str = "Room";
 /// Bounds a room's description, and MAX_ROOM_EXT_BYTES its merged ext, which
 /// every room record carries.
 pub const MAX_DESCRIPTION_BYTES: usize = 16 << 10;
@@ -331,11 +335,16 @@ impl State {
     /// Sends a frame to every connection of every member of the given
     /// rooms, once per connection.
     pub fn deliver_locked(&self, frame: &Frame, rooms: &[String]) {
+        self.deliver_except_locked(frame, rooms, "");
+    }
+
+    /// `deliver_locked` to every member but `except`.
+    fn deliver_except_locked(&self, frame: &Frame, rooms: &[String], except: &str) {
         let mut seen = BTreeSet::new();
         for room_id in rooms {
             if let Some(r) = self.rooms.get(room_id) {
                 for id in &r.members {
-                    if seen.insert(id.clone()) {
+                    if id != except && seen.insert(id.clone()) {
                         self.send_to_user(id, frame);
                     }
                 }
@@ -798,11 +807,13 @@ impl State {
         let user_id = self.user_of(c)?;
         let mut parent: Option<String> = None;
         let mut kept_ext = ExtObject::new();
+        let mut private_room = private;
         if updating {
             let Some(existing) = self.visible_room_locked(&user_id, &room_id) else {
                 return Err(invalid_params(format!("Unknown room {}", quote(&room_id))));
             };
             parent = existing.parent.clone();
+            private_room = existing.private;
             kept_ext = ext_of(existing.record.get("ext"));
             self.may_edit_room_locked(&self.users[&user_id], existing)?;
         } else if !parent_id.is_empty() {
@@ -871,6 +882,15 @@ impl State {
             // Servers title threads so clients unaware of parent_room_id
             // render them.
             title = thread_title(&description);
+        } else if title.trim().is_empty() && parent.is_none() && !private_room {
+            // So do public top-level rooms, as on Cloudflare; a private room
+            // goes without, and clients name it after its members.
+            title = if room_id == DEFAULT_ROOM_ID {
+                DEFAULT_ROOM_TITLE
+            } else {
+                TOP_LEVEL_ROOM_TITLE
+            }
+            .into();
         }
         if !title.is_empty() {
             fields.insert("title".into(), title.into());
@@ -1327,7 +1347,7 @@ impl State {
     }
 
     /// Applies a connection's activity (§4.6). typing is relayed to the
-    /// room's members, at most MAX_TYPING_SECONDS and within
+    /// room's other members, at most MAX_TYPING_SECONDS and within
     /// ACTIVITY_RELAYS_PER_MINUTE. A read cursor must name a message and only
     /// advances; an account's is kept, sent after the room is listed, and
     /// relayed to its other connections, or with Config.read_receipts to the
@@ -1434,11 +1454,23 @@ impl State {
                 typed = true;
             }
         }
+        // Typing goes to the room's other members only, as on Cloudflare;
+        // a read receipt also to the user's own connections.
+        let rooms = [room_id.clone()];
+        if read && self.rooms[&room_id].members.contains(&user_id) {
+            let mut own = params.clone();
+            own.remove("typing");
+            if let Some(frame) =
+                super::server::render(&obj! {"method" => "activity", "params" => own})
+            {
+                self.send_to_user(&user_id, &frame);
+            }
+        }
         if typed || read {
             if let Some(frame) =
                 super::server::render(&obj! {"method" => "activity", "params" => params})
             {
-                self.deliver_locked(&frame, &[room_id.clone()]);
+                self.deliver_except_locked(&frame, &rooms, &user_id);
             }
         }
         Ok((result.into(), false))
