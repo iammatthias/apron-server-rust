@@ -36,6 +36,7 @@ pub struct Settings {
     pub messages_per_minute: i64,
     pub max_listed_members: i64,
     pub max_private_rooms: i64,
+    pub read_receipts: bool,
     pub welcome: String,
     pub client_ip_header: String,
     /// Holders by lowercased role; empty is Go's nil map.
@@ -94,6 +95,7 @@ pub fn server_settings(options: &Options) -> Result<Settings, String> {
     config.messages_per_minute = options.messages_per_minute;
     config.max_listed_members = options.max_listed_members;
     config.max_private_rooms = options.max_private_rooms;
+    config.read_receipts = options.read_receipts;
     config.welcome = options.welcome.clone();
     config.client_ip_header = options.client_ip_header.clone();
     for grant in &options.roles {

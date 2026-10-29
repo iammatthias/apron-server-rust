@@ -153,6 +153,10 @@ pub struct Config {
     /// An extension Go lacks (docs/DEVIATIONS.md): false keeps guests
     /// read-only, as apron-server-cloudflare's `GUEST_POSTING` does.
     pub guest_posting: bool,
+    /// Relays read cursors to the room's members, an extension: without
+    /// it, as on apron-server-cloudflare, they go only to the user's own
+    /// connections.
+    pub read_receipts: bool,
     /// An extension Go lacks (docs/DEVIATIONS.md): how long history is
     /// kept; `None` keeps it forever.
     pub retention: Option<Duration>,
@@ -212,6 +216,7 @@ pub fn default_config() -> Config {
         unfurl_timeout: unfurl::FETCH_TIMEOUT,
         auth_timeout: AUTH_TIMEOUT,
         guest_posting: false,
+        read_receipts: false,
         retention: None,
     }
 }
