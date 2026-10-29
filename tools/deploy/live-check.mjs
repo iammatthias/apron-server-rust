@@ -86,7 +86,9 @@ class Conn {
   // Sends a request and returns its reply and the frames that arrived since
   // the send, which hold a command's ~private notice.
   async call(method, params) {
-    const id = `c${this.#next++}`;
+    // The server keeps an account's request ids as idempotency keys, so a
+    // rerun as the same admin needs ids no earlier run used.
+    const id = `lc-${suffix}-${this.#next++}`;
     const from = this.frames.length;
     this.ws.send(JSON.stringify({ method, id, params }));
     const reply = await this.until(() => this.frames.slice(from).find((f) => f.id === id), 8000, `the ${method} reply`);
