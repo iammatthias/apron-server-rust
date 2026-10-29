@@ -49,10 +49,36 @@ pub struct PendingWake {
     record: Option<i64>,
     snapshot: Object,
     reasons: Reasons,
-    /// For held wakes released together: older messages, newest first, to
-    /// push instead when this one wakes no one.
-    others: Vec<String>,
+    /// For held wakes released together: older messages and their rooms,
+    /// newest first, to push instead when this one wakes no one or is read
+    /// first.
+    others: Vec<(String, String)>,
     timer: Option<Timer>,
+}
+
+/// Which of a user's waiting and held wakes something they did shows they
+/// no longer need.
+#[derive(Clone, Copy)]
+pub enum Seen<'a> {
+    /// They came back (`idle: false`): all of them.
+    All,
+    /// They posted in the room: its wakes.
+    Room(&'a str),
+    /// Their read cursor in the room passed the message with this id
+    /// (§4.9.4's suggested convention): its wakes up to it.
+    Through(&'a str, i64),
+}
+
+impl Seen<'_> {
+    fn covers(self, message_id: &str, room_id: &str) -> bool {
+        match self {
+            Seen::All => true,
+            Seen::Room(room) => room == room_id,
+            Seen::Through(room, through) => {
+                room == room_id && message_id.parse::<i64>().is_ok_and(|id| id <= through)
+            }
+        }
+    }
 }
 
 /// A wake passed over because its user was attended.
@@ -96,8 +122,8 @@ impl State {
         };
         let (room_id, owner) = (m.room_id.clone(), m.owner.clone());
         if previous.is_none() {
-            self.drop_wakes_locked(&owner, Some(&room_id));
-            self.drop_held_locked(&owner, Some(&room_id));
+            self.drop_wakes_locked(&owner, Seen::Room(&room_id));
+            self.drop_held_locked(&owner, Seen::Room(&room_id));
         }
         // Transient notices, which have no message_id, are never pushed
         // (§4.9).
@@ -187,7 +213,12 @@ impl State {
     /// with the message as it is then, or at once without a delay or past
     /// MAX_PENDING_WAKES. Nothing is pushed once the server is shutting
     /// down.
-    fn schedule_wake_locked(&mut self, message_id: &str, reasons: Reasons, others: Vec<String>) {
+    fn schedule_wake_locked(
+        &mut self,
+        message_id: &str,
+        reasons: Reasons,
+        others: Vec<(String, String)>,
+    ) {
         // A wake lost with the server is not pushed.
         if self.closed {
             return;
@@ -251,9 +282,14 @@ impl State {
 
     /// Pushes a wake; for held wakes released together, one whose message
     /// wakes no one falls back to the next of `others` that still exists.
-    fn send_wake_locked(&mut self, message_id: &str, reasons: &Reasons, others: Vec<String>) {
+    fn send_wake_locked(
+        &mut self,
+        message_id: &str,
+        reasons: &Reasons,
+        others: Vec<(String, String)>,
+    ) {
         let mut next = Some(message_id.to_owned());
-        let mut others = others.into_iter();
+        let mut others = others.into_iter().map(|(id, _)| id);
         while let Some(id) = next {
             if let Some(snapshot) = self.wake_snapshot(&id) {
                 if self.push_wake_locked(&id, &snapshot, reasons) {
@@ -355,13 +391,39 @@ impl State {
         woken > 0
     }
 
-    /// Drops a user from the wakes waiting to push: from all of them when
-    /// they come back (`idle: false`), or from `room_id`'s when they post
-    /// there.
-    pub fn drop_wakes_locked(&mut self, user_id: &str, room_id: Option<&str>) {
-        drop_reasons(&mut self.pending_wakes, |id, room| {
-            id == user_id && room_id.is_none_or(|room_id| room_id == room)
-        });
+    /// Drops a user from the wakes waiting to push that `seen` covers. For
+    /// held wakes released together, the messages seen in a room go from
+    /// `others`, and when the newest is one, the next left waits in its
+    /// place (schedule_held).
+    pub fn drop_wakes_locked(&mut self, user_id: &str, seen: Seen) {
+        let mut emptied = Vec::new();
+        for (id, wake) in self.pending_wakes.iter_mut() {
+            let Some(at) = wake.reasons.iter().position(|(id, _)| id == user_id) else {
+                continue;
+            };
+            if !matches!(seen, Seen::All) {
+                wake.others
+                    .retain(|(message_id, room_id)| !seen.covers(message_id, room_id));
+            }
+            if !seen.covers(&wake.message_id, &wake.room_id) {
+                continue;
+            }
+            let (_, why) = wake.reasons.remove(at);
+            if wake.reasons.is_empty() {
+                emptied.push((*id, why));
+            }
+        }
+        for (id, why) in emptied {
+            let Some(wake) = self.pending_wakes.remove(&id) else {
+                continue;
+            };
+            if let Some(timer) = wake.timer {
+                timer.stop();
+            }
+            if !matches!(seen, Seen::All) {
+                self.schedule_held_locked(user_id, why, wake.others);
+            }
+        }
     }
 
     /// The users the waiting wakes would wake, for tests.
@@ -410,12 +472,11 @@ impl State {
         u.held.drain(..excess);
     }
 
-    /// Forgets a user's held wakes: `room_id`'s when they post there, which
-    /// shows they saw it, or all of them.
-    pub fn drop_held_locked(&mut self, user_id: &str, room_id: Option<&str>) {
+    /// Forgets the held wakes of a user that `seen` covers.
+    pub fn drop_held_locked(&mut self, user_id: &str, seen: Seen) {
         if let Some(u) = self.users.get_mut(user_id) {
             u.held
-                .retain(|held| room_id.is_some_and(|room_id| room_id != held.room_id));
+                .retain(|held| !seen.covers(&held.message_id, &held.room_id));
         }
     }
 
@@ -452,16 +513,30 @@ impl State {
             .filter(|held| held.at.after(&attended_until))
             .cloned()
             .collect();
-        self.drop_held_locked(user_id, None);
+        self.drop_held_locked(user_id, Seen::All);
         due.sort_by(|a, b| b.at.compare(&a.at).cmp(&0));
         let reasons = due
             .iter()
             .fold(WakeScope::NONE, |all, held| all | held.reasons);
-        let mut ids: Vec<String> = due.into_iter().map(|held| held.message_id).collect();
+        let mut ids: Vec<(String, String)> = due
+            .into_iter()
+            .map(|held| (held.message_id, held.room_id))
+            .collect();
         ids.dedup();
         ids.truncate(MAX_HELD_WAKES);
+        self.schedule_held_locked(user_id, reasons, ids);
+    }
+
+    /// Schedules held wakes released together as one: the first of `ids`
+    /// whose message is still there, the rest standing by.
+    fn schedule_held_locked(
+        &mut self,
+        user_id: &str,
+        reasons: WakeScope,
+        mut ids: Vec<(String, String)>,
+    ) {
         while !ids.is_empty() {
-            let id = ids.remove(0);
+            let (id, _) = ids.remove(0);
             if self.wake_snapshot(&id).is_some() {
                 self.schedule_wake_locked(&id, vec![(user_id.to_owned(), reasons)], ids);
                 return;

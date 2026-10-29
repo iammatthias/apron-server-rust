@@ -707,7 +707,7 @@ impl State {
                 // Back: a push still waiting for them is not needed. Gone:
                 // what they were passed over for since is pushed.
                 match idle {
-                    Idle::Back => self.drop_wakes_locked(user_id, None),
+                    Idle::Back => self.drop_wakes_locked(user_id, super::wake::Seen::All),
                     Idle::For(_) => self.release_held_locked(user_id, &now),
                 }
                 self.announce_status_locked(user_id, Cause::Connection);

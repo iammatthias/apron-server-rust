@@ -485,6 +485,94 @@ fn test_held_wakes_keep_the_newest_eight() {
 }
 
 /// The default `--push.delay` is 30 seconds: nothing goes at once.
+/// Sends a read cursor (§4.6), applied once a reply on the same connection
+/// comes back after it.
+fn read_through(c: &mut TestClient, room_id: &str, message_id: &str) {
+    c.drain();
+    c.write(&obj! {"method" => "activity", "params" => obj! {"room_id" => room_id, "read_message_id" => message_id}});
+    let id = c.next_id("after-read");
+    reply(
+        c,
+        "history",
+        &id,
+        obj! {"room_id" => "general", "limit" => 1i64},
+    );
+}
+
+#[test]
+fn test_read_cursor_drops_waiting_wakes_it_passes_in_its_room() {
+    let relay = new_test_relay();
+    let server = wake_server(DELAY);
+    let mut alice = push_client(&server);
+    let mut bob = push_client(&server);
+    subscribe(&mut bob, &relay, "bob");
+    go_idle(&mut bob);
+    let bob_id = bob.user_id.clone();
+    alice.drain();
+    let one = thread(&mut alice, "Read one");
+    let two = thread(&mut alice, "Read two");
+    let first = post(&mut alice, mention(&one, "first", &[&bob_id]));
+    let second = post(&mut alice, mention(&one, "second", &[&bob_id]));
+    let elsewhere = post(&mut alice, mention(&two, "elsewhere", &[&bob_id]));
+    // Bob, still idle, reads the first room through its first message only.
+    read_through(&mut bob, &one, &first);
+    wait_out();
+    let got = relay.pushes(&server, &mut alice);
+    let mut pushed: Vec<String> = got
+        .iter()
+        .map(|push| push.message()["message_id"].as_str().unwrap().to_owned())
+        .collect();
+    pushed.sort();
+    let mut want = vec![second, elsewhere];
+    want.sort();
+    assert_eq!(pushed, want, "pushed messages");
+    // Unread here counts messages past the read positions (DEVIATIONS.md):
+    // the second in the first room and the one in the other, for both.
+    let unread: Vec<Json> = got
+        .iter()
+        .map(|push| push.payload()["unread"].clone())
+        .collect();
+    assert_eq!(unread, vec![Json::from(2i64), Json::from(2i64)], "unread");
+}
+
+#[test]
+fn test_read_cursor_forgets_held_wakes_and_falls_back_past_a_released_one_read() {
+    let relay = new_test_relay();
+    let server = wake_server(DELAY);
+    let mut alice = push_client(&server);
+    let mut bob = push_client(&server);
+    subscribe(&mut bob, &relay, "bob");
+    let bob_id = bob.user_id.clone();
+    alice.drain();
+    let rooms: Vec<String> = ["A", "B", "C"]
+        .iter()
+        .map(|title| thread(&mut alice, &format!("Held {title}")))
+        .collect();
+    // Bob is attended: each mention is held, oldest first.
+    let ids: Vec<String> = rooms
+        .iter()
+        .enumerate()
+        .map(|(index, room)| {
+            post(
+                &mut alice,
+                mention(room, &format!("held {index}"), &[&bob_id]),
+            )
+        })
+        .collect();
+    // He reads B there: it is held no longer.
+    read_through(&mut bob, &rooms[1], &ids[1]);
+    // Gone a minute: C, the newest, waits to push, with A behind it.
+    idle_for(&mut bob, 60);
+    // He reads C before the wait is over: A waits in its place.
+    read_through(&mut bob, &rooms[2], &ids[2]);
+    wait_out();
+    let got = relay.pushes(&server, &mut alice);
+    assert_eq!(paths(&got), strs(&["/bob"]), "one push");
+    assert_eq!(got[0].message()["message_id"], Json::from(ids[0].as_str()));
+    wait_out();
+    assert!(relay.pushes(&server, &mut alice).is_empty(), "pushed again");
+}
+
 #[test]
 fn test_wakes_wait_by_default() {
     let relay = new_test_relay();
