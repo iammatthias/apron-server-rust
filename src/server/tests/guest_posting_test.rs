@@ -165,7 +165,10 @@ fn test_server_frame_advertises_guest_posting() {
         let (_, frame) = dial_raw(&server);
         assert_eq!(
             settings_of(&frame),
-            (vec!["ext:settings".to_owned()], want),
+            (
+                vec!["ext:settings".to_owned(), "ext:media".to_owned()],
+                want
+            ),
             "{name}"
         );
     }

@@ -87,7 +87,8 @@ fn test_server_frame() {
             "command",
             "status",
             "ext",
-            "ext:settings"
+            "ext:settings",
+            "ext:media"
         ]),
         "capabilities"
     );
@@ -122,12 +123,12 @@ fn test_server_frame() {
     // the default config keeps guests read-only and bounds private rooms at
     // 20, and this one lets guests post.
     assert_eq!(
-        params["ext"],
-        Json::from(obj! {"settings" => obj! {
+        params["ext"].as_object().unwrap()["settings"],
+        Json::from(obj! {
             "guest_posting" => true, "read_cursors" => true, "add_members" => true,
             "private_rooms" => f(20),
-        }}),
-        "server.ext"
+        }),
+        "server.ext.settings"
     );
     // Without a bound, private_rooms is absent, as no stated limit is.
     let mut unbounded = default_config();
@@ -136,10 +137,10 @@ fn test_server_frame() {
     let (_, frame) = dial_raw(&unbounded_server);
     let params = frame["params"].as_object().unwrap();
     assert_eq!(
-        params["ext"],
-        Json::from(obj! {"settings" => obj! {
+        params["ext"].as_object().unwrap()["settings"],
+        Json::from(obj! {
             "guest_posting" => true, "read_cursors" => true, "add_members" => true,
-        }}),
+        }),
         "unbounded private rooms"
     );
 
@@ -234,6 +235,30 @@ fn test_guest_auth() {
         listed["users"]
     );
     c.expect_quiet();
+}
+
+/// ext.media (apron-web EXT.md §6) states the configured sizes: an
+/// attachment of any type, and an avatar of the image types /avatar keeps.
+#[test]
+fn test_server_frame_media() {
+    let mut config = default_config();
+    config.max_upload_bytes = 5_242_880;
+    config.max_avatar_bytes = 262_144;
+    let server = new_test_server(config);
+    let (_, frame) = dial_raw(&server);
+    let avatar = obj! {"max_bytes" => f(262_144)};
+    assert_eq!(
+        frame["params"].as_object().unwrap()["ext"]
+            .as_object()
+            .unwrap()["media"],
+        Json::from(obj! {
+            "upload" => obj! {"*/*" => obj! {"max_bytes" => f(5_242_880)}},
+            "avatar" => obj! {
+                "image/png" => avatar.clone(), "image/jpeg" => avatar.clone(),
+                "image/gif" => avatar.clone(), "image/webp" => avatar,
+            },
+        }),
+    );
 }
 
 #[test]

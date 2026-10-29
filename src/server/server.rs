@@ -18,6 +18,7 @@ use super::commands::{PRIVATE_NOTICE_ID, PRIVATE_NOTICE_NAME};
 use super::devices::DeviceTokens;
 use super::email::{EmailSender, EmailState, ProposalId};
 use super::embeds::EmbedState;
+use super::embeds::AVATAR_TYPES;
 use super::messages::MessageState;
 use super::outbound;
 use super::persist::{DirtySet, StoredMeta};
@@ -1546,8 +1547,23 @@ impl State {
         if self.config.max_private_rooms > 0 {
             settings.insert("private_rooms".into(), self.config.max_private_rooms.into());
         }
-        capabilities.push("ext:settings".into());
-        params.insert("ext".into(), obj! {"settings" => settings}.into());
+        // ext:media (EXT.md §6): uploads are served from this server's own
+        // origin, an attachment may be any type, and an avatar one of the
+        // image types /avatar keeps, each up to its configured size.
+        let sized = |max_bytes: i64| Json::from(obj! {"max_bytes" => max_bytes});
+        let avatar: Object = AVATAR_TYPES
+            .iter()
+            .map(|t| (t.to_string(), sized(self.config.max_avatar_bytes)))
+            .collect();
+        let media = obj! {
+            "upload" => obj! {"*/*" => sized(self.config.max_upload_bytes)},
+            "avatar" => avatar,
+        };
+        capabilities.extend(["ext:settings".into(), "ext:media".into()]);
+        params.insert(
+            "ext".into(),
+            obj! {"settings" => settings, "media" => media}.into(),
+        );
         params.insert("capabilities".into(), capabilities.into());
         if signup != auth_schemes {
             params.insert("signup".into(), signup.into());
