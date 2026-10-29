@@ -23,6 +23,7 @@ mod reference_test;
 mod retention_test;
 mod server_test;
 mod status_test;
+mod toggle_test;
 mod unfurl_test;
 mod webauthn_test;
 mod webpush_test;

@@ -31,6 +31,7 @@ use rust_stdlib::time::{self, Duration, Time};
 
 use super::protocol::*;
 use super::server::{Client, Frame, Server, State};
+use super::toggles::Feature;
 use super::users::UserState;
 use crate::obj;
 use crate::rate::{every, Limiter};
@@ -229,7 +230,12 @@ impl State {
         let Some(u) = self.users.get(user_id) else {
             return;
         };
-        let shown = u.shown_status(self.attended(u));
+        // With presence off, nobody is shown a status (`/toggle`).
+        let shown = if self.feature_on(Feature::Presence) {
+            u.shown_status(self.attended(u))
+        } else {
+            STATUS_NONE.to_owned()
+        };
         let u = self.users.get_mut(user_id).expect("user exists");
         if shown == u.shown {
             return;

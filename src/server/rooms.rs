@@ -3,12 +3,14 @@ use std::sync::Arc;
 
 use rust_stdlib::encoding::json::jsontext::Value;
 
+use super::bots::BOT_ID_PREFIX;
 use super::messages::MessageState;
 use super::protocol::*;
 use super::server::{
     Client, Frame, LogRecord, RecordKind, Server, State, DEFAULT_ROOM_ID, MAX_HISTORY_PAGE_SIZE,
     MAX_HISTORY_REPLY_BYTES,
 };
+use super::toggles::Feature;
 use super::users::{UserState, ADMIN_ROLE, MOD_ROLE};
 use crate::obj;
 
@@ -906,6 +908,17 @@ impl State {
         };
         let mut target = user_id.clone();
         if has_target && target_id != user_id {
+            // With addmember off, only an admin adds others, and an
+            // account its own bot.
+            let may_add = self.feature_on(Feature::AddMember)
+                || self.users[&user_id].has_role(ADMIN_ROLE)
+                || target_id == format!("{BOT_ID_PREFIX}{user_id}");
+            if !may_add {
+                return Err(RpcError::new(
+                    CODE_DENIED,
+                    "Only an admin, or a bot's owner, can add someone else here",
+                ));
+            }
             if !r.members.contains(&user_id) {
                 return Err(RpcError::new(
                     CODE_DENIED,
