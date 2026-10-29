@@ -109,9 +109,7 @@ impl State {
                 self.send_to_user(user_id, &frame);
             }
         }
-        let Some(r) = self.rooms.remove(room_id) else {
-            return;
-        };
+        let r = self.rooms.remove(room_id).expect("thread exists");
         if let Some(parent) = r.parent.as_ref().and_then(|p| self.rooms.get_mut(p)) {
             parent.children.retain(|id| id != room_id);
         }
