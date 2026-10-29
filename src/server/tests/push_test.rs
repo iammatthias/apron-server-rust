@@ -540,9 +540,9 @@ fn test_push_registration() {
         CODE_INVALID_PARAMS,
     );
 
-    // A user holds at most ten; another replaces the least recently
+    // A user holds at most five; another replaces the least recently
     // registered, and registering a url again renews it.
-    for i in 0..MAX_PUSHES_PER_USER {
+    for i in 0..5 {
         a.result(
             "push_register",
             &format!("many-{i}"),
@@ -557,7 +557,7 @@ fn test_push_registration() {
     );
     a.result(
         "push_register",
-        "eleventh",
+        "sixth",
         obj! {"kind" => "relay", "url" => format!("{endpoint}new")},
     );
     let prefix = format!("{} {endpoint}", a.user_id);
@@ -569,11 +569,11 @@ fn test_push_registration() {
         .map(|k| k.trim_start_matches(&prefix).to_owned())
         .collect();
     assert!(
-        urls.len() == MAX_PUSHES_PER_USER
+        urls.len() == 5
             && !urls.contains(&"1".to_owned())
             && urls.contains(&"0".to_owned())
             && urls.contains(&"new".to_owned()),
-        "registrations after the eleventh: {urls:?}"
+        "registrations after the sixth: {urls:?}"
     );
     a.expect_quiet();
     b.expect_quiet();
@@ -1112,18 +1112,15 @@ fn test_push_payload_fits_in_limit() {
         "reply_to" => obj! {"message_id" => "1724803200001"}, "body" => obj! {"text" => "short"},
     }};
     assert_eq!(got, want, "payload");
-    // Text is truncated to MAX_PUSH_TEXT_RUNES.
-    snapshot.insert(
-        "body".into(),
-        obj! {"text" => "e".repeat(MAX_PUSH_TEXT_RUNES + 500)}.into(),
-    );
+    // Text is cut to 200 code points, the last of them `…`.
+    snapshot.insert("body".into(), obj! {"text" => "e".repeat(700)}.into());
     let text = body_of(&decode_payload(push_payload("", 0, &snapshot)))["text"]
         .as_str()
         .unwrap()
         .to_owned();
     let runes: Vec<char> = text.chars().collect();
     assert!(
-        runes.len() == MAX_PUSH_TEXT_RUNES && runes.last() == Some(&'…'),
+        runes.len() == 200 && runes.last() == Some(&'…'),
         "truncated text: {} runes",
         runes.len()
     );
@@ -1140,10 +1137,15 @@ fn test_push_payload_fits_in_limit() {
         obj! {"text" => "hi"},
         "body without mentions"
     );
-    // Then text is shortened to fit.
+    // Then text is shortened to fit, which takes a long name besides: 200
+    // code points of text alone always fit.
     snapshot.insert(
         "body".into(),
         obj! {"text" => "\u{2028}".repeat(MAX_PUSH_TEXT_RUNES)}.into(),
+    );
+    snapshot.insert(
+        "from".into(),
+        obj! {"user_id" => "alice", "name" => "\\".repeat(900)}.into(),
     );
     let payload = push_payload("", 0, &snapshot);
     let size = payload.len();
@@ -1181,7 +1183,7 @@ fn test_push_registrations_expire() {
         &server,
         "dora",
         PushRegistration {
-            renewed: time::now().add(-PUSH_EXPIRY - time::MINUTE),
+            renewed: time::now().add(-time::Duration::from_hours(7 * 24) - time::MINUTE),
             ..relay_push(format!("{}/stale", relay.url), WakeScope::DEFAULT)
         },
     );
@@ -1189,7 +1191,7 @@ fn test_push_registrations_expire() {
         &server,
         "dora",
         PushRegistration {
-            renewed: time::now().add(-PUSH_EXPIRY + time::HOUR),
+            renewed: time::now().add(-time::Duration::from_hours(6 * 24)),
             ..relay_push(format!("{}/fresh", relay.url), WakeScope::DEFAULT)
         },
     );

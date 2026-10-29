@@ -26,8 +26,8 @@ use super::webpush::{self, PushKeys, VapidKey};
 use crate::obj;
 use crate::rate::{every, Limiter};
 
-pub const MAX_PUSH_TEXT_RUNES: usize = 1000;
-pub const MAX_PUSHES_PER_USER: usize = 10;
+pub const MAX_PUSH_TEXT_RUNES: usize = 200;
+pub const MAX_PUSHES_PER_USER: usize = 5;
 pub const MAX_PUSH_URL_BYTES: usize = 512;
 pub const MAX_PUSH_TOKEN_LEN: usize = 4096;
 /// Bounds the JSON payload every kind delivers (§4.9).
@@ -39,7 +39,7 @@ pub const MAX_WAKE_SCOPE_BYTES: usize = 64;
 /// How long a registration lasts unless registered again (§4.9); clients
 /// register on each connection. PUSH_SWEEP_INTERVAL is how often expired
 /// registrations are looked for.
-pub const PUSH_EXPIRY: Duration = Duration::from_hours(30 * 24);
+pub const PUSH_EXPIRY: Duration = Duration::from_hours(7 * 24);
 pub const PUSH_SWEEP_INTERVAL: Duration = Duration::from_hours(1);
 pub const PUSH_TIMEOUT: Duration = Duration::from_secs(10);
 /// Deliveries run in lanes per push host, at most MAX_PUSH_PER_HOST at once

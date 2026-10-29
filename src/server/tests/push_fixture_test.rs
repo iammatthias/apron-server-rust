@@ -6,7 +6,7 @@
 //! `schema/apron.schema.json` and the 2048-byte bound, so a valid case passes
 //! and an invalid one breaks a rule. Each valid case with a message is what
 //! `push_payload` makes of a snapshot of that message carrying log_id,
-//! format, embeds, and ext, once its text is cut to this server's 1000
+//! format, embeds, and ext, once its text is cut to this server's 200
 //! characters (`long-text-that-fits` has more), and the invalid cases a server could be handed
 //! (a log_id, a text too long) come out conforming.
 //!
