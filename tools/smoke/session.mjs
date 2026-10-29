@@ -1,7 +1,7 @@
-// Runs one guest session against an aprond and prints every frame, so the
-// Go and Rust servers can be compared: usage `node session.mjs ws://host:port/ws`.
-// Besides the WebSocket frames it prints the one HTTP exchange, the upload's
-// PUT, as `h`. Compare two transcripts with compare.mjs.
+// Runs one guest session against an aprond and prints every frame: usage
+// `node session.mjs ws://host:port/ws`. Besides the WebSocket frames it prints
+// the one HTTP exchange, the upload's PUT, as `h`. Check the transcript with
+// check.mjs.
 const url = process.argv[2] ?? "ws://127.0.0.1:8080/ws";
 const ws = new WebSocket(url);
 const frames = [];

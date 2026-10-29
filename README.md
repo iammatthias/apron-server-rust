@@ -29,7 +29,8 @@ These checks pass at the current commit:
   The run includes comparisons against the Go binary, the shared JSON
   fixtures from the Go repository, and ACME certificates issued by Pebble.
 - `tools/smoke/run.sh` runs a guest session and an email sign-in session
-  against the Go server and this one, and finds the transcripts identical.
+  against this server and checks that every request is answered once,
+  without an internal error.
 
 `docs/PORT.md` records two more results from earlier in the port:
 
