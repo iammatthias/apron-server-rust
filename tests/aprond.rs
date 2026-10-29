@@ -548,7 +548,8 @@ fn server_frame(addr: &str) -> String {
     String::from_utf8(conn.read().unwrap().1).unwrap()
 }
 
-/// Guests only read unless `--guest.posting`, and the `server` frame says so.
+/// Guests only read unless `--guest.posting`, and the `server` frame's
+/// welcome says so.
 #[test]
 fn test_guest_posting_flag() {
     let dir = TempDir::new();
@@ -561,14 +562,17 @@ fn test_guest_posting_flag() {
         "--addr",
         "127.0.0.1:0",
     ];
-    for (extra, want) in [(None, false), (Some("--guest.posting"), true)] {
+    for (extra, want) in [
+        (None, "Guests can read along."),
+        (
+            Some("--guest.posting"),
+            "Guests can post under a new name each visit.",
+        ),
+    ] {
         let args: Vec<&str> = base.iter().copied().chain(extra).collect();
         let mut aprond = Aprond::start(&args);
         let frame = server_frame(&aprond.addr("apron server"));
-        assert!(
-            frame.contains(&format!("\"guest_posting\":{want}")),
-            "{extra:?}: {frame}"
-        );
+        assert!(frame.contains(want), "{extra:?}: {frame}");
     }
 }
 

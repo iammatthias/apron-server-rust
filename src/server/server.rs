@@ -1680,15 +1680,10 @@ impl State {
             params.insert("push".into(), super::push::server_push_params(self).into());
         }
         params.insert("welcome".into(), self.welcome(origin).into());
-        // ext:settings, the extension apron-web defines (its EXT.md §3),
-        // always with every key apron-server-cloudflare sends: read cursors
-        // are kept with activity. private_rooms is left out when unlimited,
-        // as an absent key says.
-        let mut settings = obj! {
-            "guest_posting" => self.config.guest_posting,
-            "read_cursors" => activity,
-            "add_members" => self.feature_on(Feature::AddMember),
-        };
+        // ext:settings (EXTENSIONS.md): read cursors are kept with activity.
+        // private_rooms is left out when unlimited, as an absent key says.
+        // What each user may do is in `you` (ext:permissions).
+        let mut settings = obj! {"read_cursors" => activity};
         if self.config.max_private_rooms > 0 {
             settings.insert("private_rooms".into(), self.config.max_private_rooms.into());
         }

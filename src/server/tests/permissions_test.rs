@@ -1,4 +1,4 @@
-//! Moderator moves and `ext:permissions` (apron-web EXT.md §7), ported from
+//! Moderator moves and `ext:permissions` (EXTENSIONS.md), ported from
 //! apron-server-cloudflare's test/admin.integration.test.ts.
 
 use super::admin_test::{account, admin, admin_test_server, private_reply, token_auth};
@@ -34,8 +34,13 @@ fn their_new(c: &mut TestClient, user_id: &str) -> Object {
     }
 }
 
-fn permissions(list: &[&str]) -> Json {
-    Json::from(obj! {"permissions" => strings(list)})
+/// The ext of a `you` whose permissions grant `granted`, each `true`.
+fn permissions(granted: &[&str]) -> Json {
+    let fields: Object = granted
+        .iter()
+        .map(|key| ((*key).to_owned(), Json::Bool(true)))
+        .collect();
+    Json::from(obj! {"permissions" => fields})
 }
 
 fn move_to(c: &mut TestClient, id: &str, message_id: &str, room_id: &str) -> Object {
@@ -55,8 +60,8 @@ fn denied(frame: &Object) -> bool {
 }
 
 /// Admin, mod and threader move others' messages, keeping their content;
-/// every account but a bot adds members and is pushed for `joined`; only
-/// the user is told their own permissions.
+/// every account but a bot adds members; only the user is told their own
+/// permissions.
 #[test]
 fn test_permissions_and_moderator_moves() {
     let server = admin_test_server();
@@ -84,7 +89,7 @@ fn test_permissions_and_moderator_moves() {
     assert!(denied(&move_to(&mut tia, "before", &posted, &thread)));
     for role in ["threader", "mod", "admin"] {
         private_reply(&mut admin, &format!("/role {tia_id} {role}"));
-        let want: &[&str] = &["move_any", "add_members", "push_joined"];
+        let want: &[&str] = &["add_members", "move_any"];
         assert_eq!(own_ext(&mut tia), permissions(want), "{role}");
         assert!(!their_new(&mut mate, &tia_id).contains_key("ext"), "{role}");
         let frame = move_to(&mut tia, &format!("{role}-in"), &posted, &thread);
@@ -114,7 +119,7 @@ fn test_permissions_and_moderator_moves() {
         private_reply(&mut admin, &format!("/role {tia_id} {role}"));
         assert_eq!(
             own_ext(&mut tia),
-            permissions(&["add_members", "push_joined"]),
+            permissions(&["add_members"]),
             "{role} taken"
         );
         their_new(&mut mate, &tia_id);
@@ -145,13 +150,13 @@ fn test_permissions_and_moderator_moves() {
     assert!(denied(&move_to(&mut bot, "bot-move", &posted, &thread)));
 }
 
-/// A guest carries no permissions, and `me` cannot write them.
+/// A guest who may post has the defaults, and `me` cannot write them.
 #[test]
 fn test_permissions_belong_to_the_server() {
     let server = admin_test_server();
     let mut guest = dial_test_client(&server);
     let you = you_of(&guest.result("me", "guest", obj! {"status" => "dnd"}));
-    assert!(!you.contains_key("ext"), "guest you: {you:?}");
+    assert_eq!(you["ext"], permissions(&[]), "guest you: {you:?}");
     let mut ada = account(&server);
     let you = you_of(&ada.result(
         "me",
@@ -160,7 +165,7 @@ fn test_permissions_belong_to_the_server() {
     ));
     assert_eq!(
         you["ext"],
-        Json::from(obj! {"bio" => "hi", "permissions" => strings(&["add_members", "push_joined"])}),
+        Json::from(obj! {"bio" => "hi", "permissions" => obj! {"add_members" => true}}),
     );
     assert!(!server.app.lock().users[&ada.user_id]
         .ext
@@ -190,30 +195,28 @@ fn test_toggle_addmember_sends_permissions() {
     let you = you_of(&admin.result("me", "admin-me", Object::new()));
     assert_eq!(
         you["ext"],
-        permissions(&["move_any", "add_members", "push_joined"]),
+        permissions(&["add_members", "move_any"]),
         "an admin adds members while addmember is off"
     );
     let frame = ada.read();
     assert_eq!(
         notification_params(&frame, "user"),
-        obj! {"you" => obj! {"user_id" => ada.user_id.as_str(), "ext" => permissions(&["push_joined"])}},
+        obj! {"you" => obj! {"user_id" => ada.user_id.as_str(), "ext" => permissions(&[])}},
     );
     admin.expect_quiet();
     guest.expect_quiet();
     private_reply(&mut admin, "/toggle addmember");
-    assert_eq!(
-        own_ext(&mut ada),
-        permissions(&["add_members", "push_joined"])
-    );
+    assert_eq!(own_ext(&mut ada), permissions(&["add_members"]));
 }
 
-/// Without push, no one is told `push_joined`.
+/// A guest who only reads is told it may not write.
 #[test]
-fn test_no_push_joined_without_push() {
-    let mut config = super::admin_test::admin_config();
-    config.disable_push = true;
-    let server = new_test_server(config);
-    let mut ada = account(&server);
-    let you = you_of(&ada.result("me", "me", Object::new()));
-    assert_eq!(you["ext"], permissions(&["add_members"]));
+fn test_read_only_guest_may_not_write() {
+    let server = new_test_server(crate::server::default_config());
+    let mut guest = dial_test_client(&server);
+    let you = you_of(&guest.result("me", "me", Object::new()));
+    assert_eq!(
+        you["ext"],
+        Json::from(obj! {"permissions" => obj! {"write" => false}})
+    );
 }

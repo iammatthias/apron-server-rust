@@ -1566,10 +1566,7 @@ fn test_profiles_and_user_notifications() {
             .and_then(Json::as_object)
             .cloned()
             .unwrap_or_default();
-        ext.insert(
-            "permissions".into(),
-            strings(&["add_members", "push_joined"]),
-        );
+        ext.insert("permissions".into(), obj! {"add_members" => true}.into());
         you.insert("ext".into(), ext.into());
         you
     };

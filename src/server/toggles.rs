@@ -103,16 +103,14 @@ impl State {
     }
 
     /// Sends each connected account whose `add_members` follows the toggle,
-    /// every one but admins and bots, `user` with `you` carrying only its
-    /// user_id and new permissions (EXT.md §7).
+    /// every one but admins, `user` with `you` carrying only its user_id
+    /// and new permissions (EXTENSIONS.md, `ext:permissions`).
     fn send_add_members_locked(&self) {
         for u in self.users.values() {
-            if u.clients.is_empty() || u.has_role(ADMIN_ROLE) {
+            if u.clients.is_empty() || !u.account() || u.has_role(ADMIN_ROLE) {
                 continue;
             }
-            let Some(ext) = self.permissions_ext_locked(u).filter(|_| !u.bot()) else {
-                continue;
-            };
+            let ext = self.permissions_ext_locked(u);
             let frame = Frame::from(notification(
                 "user",
                 obj! {"you" => obj! {"user_id" => u.id.as_str(), "ext" => Json::Ext(ext)}},

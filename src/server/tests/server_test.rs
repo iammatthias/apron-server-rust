@@ -116,15 +116,10 @@ fn test_server_frame() {
             && push.len() == 3,
         "push: {push:?}"
     );
-    // ext:settings always carries every key apron-server-cloudflare sends;
-    // the default config keeps guests read-only and bounds private rooms at
-    // 20, and this one lets guests post.
+    // ext:settings keeps read_cursors and private_rooms (EXTENSIONS.md).
     assert_eq!(
         params["ext"].as_object().unwrap()["settings"],
-        Json::from(obj! {
-            "guest_posting" => true, "read_cursors" => true, "add_members" => true,
-            "private_rooms" => f(20),
-        }),
+        Json::from(obj! {"read_cursors" => true, "private_rooms" => f(20)}),
         "server.ext.settings"
     );
     // Without a bound, private_rooms is absent, as no stated limit is.
@@ -135,9 +130,7 @@ fn test_server_frame() {
     let params = frame["params"].as_object().unwrap();
     assert_eq!(
         params["ext"].as_object().unwrap()["settings"],
-        Json::from(obj! {
-            "guest_posting" => true, "read_cursors" => true, "add_members" => true,
-        }),
+        Json::from(obj! {"read_cursors" => true}),
         "unbounded private rooms"
     );
 
@@ -219,6 +212,9 @@ fn test_guest_auth() {
         !listed.contains_key("not_joined") && listed["joined"].as_list().len() == 1,
         "joined rooms: {listed:?}"
     );
+    // Others see the guest without the permissions only its `you` carries.
+    let mut shown = you.clone();
+    shown.remove("ext");
     let general = listed["joined"].as_list()[0].as_object().unwrap().clone();
     let log_id = general["log_id"].clone();
     parse_id(Some(&log_id));
@@ -227,7 +223,7 @@ fn test_guest_auth() {
         "members" => vec![Json::from(obj! {"user_id" => "guest_1", "status" => "online"})],
     };
     assert!(
-        general == want && listed["users"] == Json::Array(vec![you.into()]),
+        general == want && listed["users"] == Json::Array(vec![shown.into()]),
         "general = {general:?} with users {:?}, want {want:?}",
         listed["users"]
     );
