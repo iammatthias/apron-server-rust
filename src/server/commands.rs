@@ -4,12 +4,13 @@
 
 use std::sync::Arc;
 
+use super::client::Client;
 use super::embeds::EmbedPurpose;
 use super::messages::{parse_message_ref, validate_body, MessageState};
 use super::metadata::one_upload;
 use super::protocol::*;
 use super::rooms::RoomState;
-use super::server::{Client, Server, State, DEFAULT_ROOM_ID};
+use super::server::{Server, State, DEFAULT_ROOM_ID};
 use super::toggles::{Feature, UPLOADS_OFF};
 use super::users::{UserState, ADMIN_ROLE, EMOJI_ROLES, GUEST_READ_ONLY};
 use crate::obj;

@@ -8,9 +8,9 @@ use super::helpers::*;
 use super::push_test::*;
 use super::webauthn_test::{new_test_authenticator, register_test_passkey, TEST_PASSKEY_ORIGIN};
 use crate::obj;
+use crate::server::config::Config;
 use crate::server::protocol::*;
 use crate::server::push::{PushHosts, WakeScope};
-use crate::server::Config;
 
 const DELAY: Duration = Duration::from_millis(300);
 

@@ -10,12 +10,13 @@ use rust_stdlib::net::http::{self, Request as HttpRequest, ResponseWriter};
 use rust_stdlib_crypto::sha256;
 use rust_stdlib_derive::{MarshalTo, UnmarshalFrom};
 
+use super::client::Client;
 use super::commands::private_notice;
 use super::embeds::EmbedPurpose;
 use super::emoji::is_emoji_key;
 use super::metadata::one_upload;
 use super::protocol::*;
-use super::server::{Client, Server, State};
+use super::server::{Server, State};
 use super::toggles::{Feature, UPLOADS_OFF};
 use crate::obj;
 

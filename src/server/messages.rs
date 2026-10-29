@@ -3,11 +3,12 @@ use std::sync::Arc;
 
 use rust_stdlib::encoding::json::jsontext::Value;
 
+use super::client::{Client, Frame};
 use super::embeds::MAX_EMBEDS_PER_MESSAGE;
 use super::emoji::{is_emoji_key, normalize_entries, same_entries};
 use super::limits::{refused, Allowance, Category, Charge, Poster, Principal, Scope};
 use super::protocol::*;
-use super::server::{Client, Frame, LogRecord, RecordKind, Server, State, DEFAULT_ROOM_ID};
+use super::server::{LogRecord, RecordKind, Server, State, DEFAULT_ROOM_ID};
 use super::users::{json_equal, MODERATOR_ROLES};
 use crate::obj;
 

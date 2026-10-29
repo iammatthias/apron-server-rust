@@ -4,10 +4,10 @@
 
 use super::admin_test::{admin_config, token_auth, ADMIN_TOKEN};
 use super::helpers::*;
+use crate::server::config::Config;
+use crate::server::config::RETRY_AFTER_SECONDS;
 use crate::server::limits::Limits;
 use crate::server::protocol::*;
-use crate::server::server::RETRY_AFTER_SECONDS;
-use crate::server::Config;
 
 fn limited(limits: Limits) -> Config {
     Config {

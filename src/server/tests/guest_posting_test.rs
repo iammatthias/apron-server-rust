@@ -5,9 +5,9 @@ use super::helpers::*;
 use super::invite_bot_test::account;
 use super::webauthn_test::*;
 use crate::obj;
+use crate::server::config::Config;
 use crate::server::protocol::*;
 use crate::server::users::GUEST_READ_ONLY;
-use crate::server::Config;
 
 fn read_only_server() -> TestServer {
     let mut config = default_config();
@@ -167,12 +167,16 @@ fn test_server_frame_advertises_guest_posting() {
     };
     type Case = (&'static str, Config, Option<Json>);
     let cases: Vec<Case> = vec![
-        ("default", crate::server::default_config(), settings(false)),
+        (
+            "default",
+            crate::server::config::default_config(),
+            settings(false),
+        ),
         (
             "guest posting",
             Config {
                 guest_posting: true,
-                ..crate::server::default_config()
+                ..crate::server::config::default_config()
             },
             settings(true),
         ),

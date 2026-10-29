@@ -15,10 +15,11 @@ use std::sync::Arc;
 use rust_stdlib::time::{self, Duration, Time};
 use rust_stdlib_crypto::sha256;
 
+use super::client::{Client, ClientId};
 use super::email::web_socket_url;
 use super::protocol::*;
 use super::remap::{Fate, Remap};
-use super::server::{Client, ClientId, State};
+use super::server::State;
 use super::user_ids::normalize_name;
 use super::users::UserState;
 use super::webauthn::SessionKey;

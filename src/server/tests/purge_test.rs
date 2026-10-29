@@ -14,11 +14,11 @@ use super::persist_test::start_with;
 use super::push_test::{add_push, go_idle, relay_push};
 use super::webauthn_test::*;
 use crate::obj;
+use crate::server::config::Config;
 use crate::server::protocol::*;
 use crate::server::push::{PushHosts, WakeScope};
 use crate::server::rooms::ReadCursor;
 use crate::server::status::MuteState;
-use crate::server::Config;
 use crate::store::{self, Store};
 
 /// An admin server with pushes to any host that wait a minute, so a wake

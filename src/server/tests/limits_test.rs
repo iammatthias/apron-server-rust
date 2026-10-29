@@ -6,12 +6,12 @@ use rust_stdlib::path::filepath;
 
 use super::helpers::*;
 use crate::obj;
+use crate::server::config::RETRY_AFTER_SECONDS;
 use crate::server::embeds::{MAX_EMBEDS_PER_MESSAGE, UPLOAD_SUFFIX};
 use crate::server::limits::Posts;
 use crate::server::messages::MAX_MENTIONS;
 use crate::server::protocol::*;
 use crate::server::push::MAX_PUSH_URL_BYTES;
-use crate::server::server::RETRY_AFTER_SECONDS;
 use crate::server::users::MAX_PROFILE_EXT_BYTES;
 
 fn write_urls(result: &Object) -> Vec<String> {

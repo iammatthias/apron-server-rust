@@ -11,12 +11,12 @@ use rust_stdlib::time::Duration;
 
 use super::helpers::*;
 use crate::obj;
+use crate::server::config::Config;
 use crate::server::embeds::{image_size, upload_content_type, FILE_PATH, STREAM_PATH, WRITE_PATH};
 use crate::server::protocol::*;
 use crate::server::rooms::{MAX_CREATED_ROOMS, MAX_THREADS, MAX_THREADS_PER_USER};
 use crate::server::user_ids::normalize_name;
 use crate::server::users::MAX_NAME_RUNES;
-use crate::server::Config;
 use crate::ws;
 
 /// After a guest joins general and posts one message, room_list reports the

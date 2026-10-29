@@ -8,8 +8,8 @@ use super::helpers::*;
 use super::metadata_test::{command_with, next_server, upload_embed, write_url};
 use super::persist_test::start_with;
 use crate::obj;
+use crate::server::config::Config;
 use crate::server::protocol::*;
-use crate::server::Config;
 use crate::store::{self, Store};
 
 /// A PNG of `width` by `height` pixels.

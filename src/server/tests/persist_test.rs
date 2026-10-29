@@ -9,9 +9,10 @@ use rust_stdlib::encoding::json::v2 as json;
 use rust_stdlib::time;
 
 use super::webauthn_test::*;
+use crate::server::config::Config;
 use crate::server::persist::{DirtySet, StoredUser, ENTRY_META};
 use crate::server::protocol::*;
-use crate::server::{Config, State};
+use crate::server::State;
 use crate::store::{self, Entry, Store};
 
 /// Starts a passkey-enabled server on a store.

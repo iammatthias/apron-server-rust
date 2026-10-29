@@ -71,7 +71,9 @@ fn test_signed_in_connection_outlives_the_deadline() {
 #[test]
 fn test_default_deadline_is_thirty_seconds() {
     assert_eq!(
-        crate::server::default_config().auth_timeout.as_nanos(),
+        crate::server::config::default_config()
+            .auth_timeout
+            .as_nanos(),
         (time::SECOND * 30).as_nanos()
     );
 }

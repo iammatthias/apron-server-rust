@@ -6,12 +6,13 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use super::admin::ADMIN_USER_ID;
+use super::client::{Client, Frame};
 use super::commands::private_notice;
 use super::invites::{issuable, NOT_ISSUABLE};
 use super::protocol::*;
 use super::purge::truncate_chars;
 use super::remap::Remap;
-use super::server::{Client, Frame, State};
+use super::server::State;
 use crate::obj;
 
 impl State {

@@ -29,8 +29,9 @@ use std::sync::Arc;
 
 use rust_stdlib::time::{self, Duration, Time};
 
+use super::client::{Client, Frame};
 use super::protocol::*;
-use super::server::{Client, Frame, Server, State};
+use super::server::{Server, State};
 use super::toggles::Feature;
 use super::users::UserState;
 use super::wake::HELD_WAKE_WINDOW;

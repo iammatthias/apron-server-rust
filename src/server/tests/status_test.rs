@@ -640,7 +640,7 @@ fn test_status_changes_coalesce() {
 
 /// The test server with status changes coalesced over `coalesce_ms` and
 /// a closed connection's change held for `grace_ms`.
-fn coalescing(coalesce_ms: i64, grace_ms: i64) -> crate::server::Config {
+fn coalescing(coalesce_ms: i64, grace_ms: i64) -> crate::server::config::Config {
     let mut config = default_config();
     config.web_authn = Some(test_web_authn());
     config.limits.status_coalesce = time::Duration::from_millis(coalesce_ms);

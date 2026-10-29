@@ -14,7 +14,9 @@ use super::persist_test::{start_with, start_with_store};
 use super::status_test::{add_account, check_mute, expect_echo, expect_mute};
 use super::webpush_test::{check_vapid, decode, must_decode, test_subscription};
 use crate::obj;
+use crate::server::config::Config;
 use crate::server::messages::MessageState;
+use crate::server::open;
 use crate::server::persist::{ENTRY_PUSH, ENTRY_USER};
 use crate::server::protocol::*;
 use crate::server::push::*;
@@ -22,7 +24,6 @@ use crate::server::status::{
     MuteState, StatusUpdate, STATUS_DND, STATUS_INVISIBLE, STATUS_NONE, STATUS_ONLINE,
 };
 use crate::server::webpush::{decrypt_push, encode_base64_url, parse_push_keys, VapidKey};
-use crate::server::{open, Config};
 use crate::store::{self, Entry, Store};
 use crate::ws;
 

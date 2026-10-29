@@ -6,9 +6,10 @@ use std::sync::Arc;
 
 use rust_stdlib::time;
 
+use super::client::Client;
 use super::commands::{private_notice, PRIVATE_NOTICE_ID, PRIVATE_NOTICE_NAME};
 use super::protocol::*;
-use super::server::{Client, State};
+use super::server::State;
 use super::webpush::encode_base64_url;
 use crate::obj;
 
@@ -38,7 +39,7 @@ impl State {
             "from" => obj! {"user_id" => PRIVATE_NOTICE_ID, "name" => PRIVATE_NOTICE_NAME},
             "body" => obj! {"text" => text, "format" => "markdown"},
         }};
-        let Some(frame) = super::server::render(&notice) else {
+        let Some(frame) = super::client::render(&notice) else {
             return;
         };
         for id in &self.users[user_id].clients {

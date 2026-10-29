@@ -3,9 +3,9 @@
 
 use super::helpers::*;
 use crate::obj;
+use crate::server::config::Config;
 use crate::server::limits::{Limits, Posts};
 use crate::server::protocol::*;
-use crate::server::Config;
 
 fn proxied(limits: Limits) -> TestServer {
     new_test_server(Config {

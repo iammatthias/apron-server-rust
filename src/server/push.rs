@@ -16,10 +16,11 @@ use rust_stdlib::net::netip::Addr;
 use rust_stdlib::net::url;
 use rust_stdlib::time::{self, Duration, Time};
 
+use super::client::Client as Connection;
 use super::messages::mentions;
 use super::outbound::{self, public_address};
 use super::protocol::*;
-use super::server::{Client as Connection, Server, State};
+use super::server::{Server, State};
 use super::status::retry_after;
 use super::users::UserState;
 use super::webpush::{self, PushKeys, VapidKey};

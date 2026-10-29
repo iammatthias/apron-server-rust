@@ -3,13 +3,12 @@ use std::sync::Arc;
 
 use rust_stdlib::encoding::json::jsontext::Value;
 
+use super::client::{Client, Frame};
+use super::config::{MAX_HISTORY_PAGE_SIZE, MAX_HISTORY_REPLY_BYTES};
 use super::limits::{refused, Allowance, Category, Charge, Principal, Rate, Scope};
 use super::messages::MessageState;
 use super::protocol::*;
-use super::server::{
-    Client, Frame, LogRecord, RecordKind, Server, State, DEFAULT_ROOM_ID, MAX_HISTORY_PAGE_SIZE,
-    MAX_HISTORY_REPLY_BYTES,
-};
+use super::server::{LogRecord, RecordKind, Server, State, DEFAULT_ROOM_ID};
 use super::toggles::Feature;
 use super::users::{UserState, ADMIN_ROLE, ROOM_CREATOR_ROLES};
 use crate::obj;
@@ -334,7 +333,7 @@ impl State {
             let frame = obj! {"method" => "activity", "params" => obj! {
                 "room_id" => r.id.as_str(), "from" => cursor.from.clone(), "read_message_id" => cursor.message_id.as_str(),
             }};
-            if let Some(frame) = super::server::render(&frame) {
+            if let Some(frame) = super::client::render(&frame) {
                 frames.push(frame);
             }
         }
@@ -716,7 +715,7 @@ impl State {
         if u.clients.len() < 2 || !u.read_relays.get_or_insert_with(activity_limiter).allow() {
             return;
         }
-        let Some(frame) = super::server::render(frame) else {
+        let Some(frame) = super::client::render(frame) else {
             return;
         };
         for id in &self.users[user_id].clients {
@@ -1181,7 +1180,7 @@ impl State {
             result.insert("users".into(), profiles(self, &users).into());
         }
         let mut frames: Vec<Frame> = Vec::new();
-        if let Some(frame) = super::server::render(&response(&req.id, result.clone().into())) {
+        if let Some(frame) = super::client::render(&response(&req.id, result.clone().into())) {
             frames.push(frame);
         }
         for r in joined.iter().chain(others.iter()) {
@@ -1537,7 +1536,7 @@ impl State {
                     // for a room the user has not joined to their own
                     // connections as well.
                     if !joined {
-                        if let Some(frame) = super::server::render(&frame) {
+                        if let Some(frame) = super::client::render(&frame) {
                             self.send_to_user(&user_id, &frame);
                         }
                     }
@@ -1563,14 +1562,14 @@ impl State {
             let mut own = params.clone();
             own.remove("typing");
             if let Some(frame) =
-                super::server::render(&obj! {"method" => "activity", "params" => own})
+                super::client::render(&obj! {"method" => "activity", "params" => own})
             {
                 self.send_to_user(&user_id, &frame);
             }
         }
         if typed || read {
             if let Some(frame) =
-                super::server::render(&obj! {"method" => "activity", "params" => params})
+                super::client::render(&obj! {"method" => "activity", "params" => params})
             {
                 self.deliver_except_locked(&frame, &rooms, &user_id);
             }

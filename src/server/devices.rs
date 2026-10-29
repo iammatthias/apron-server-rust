@@ -9,10 +9,11 @@ use std::sync::Arc;
 use rust_stdlib::time::{self, Time};
 use rust_stdlib_crypto::sha256;
 
+use super::client::{Client, ClientId};
 use super::email::web_socket_url;
 use super::protocol::*;
 use super::remap::{Fate, Remap};
-use super::server::{Client, ClientId, State};
+use super::server::State;
 use super::webauthn::SessionKey;
 
 /// Device tokens an account may hold at once, each under its own name.

@@ -9,9 +9,10 @@ use rust_stdlib::net::http::httptest;
 use rust_stdlib::time::{self, Duration};
 
 use crate::obj;
+use crate::server::config::Config;
 use crate::server::protocol::*;
 use crate::server::status::STATUS_OFFLINE;
-use crate::server::{open, Config, Server};
+use crate::server::{open, Server};
 use crate::ws;
 
 pub struct TestServer {
@@ -89,7 +90,7 @@ pub fn default_config() -> Config {
         guest_posting: true,
         max_connections: 0,
         limits: crate::server::limits::Limits::unlimited(),
-        ..crate::server::default_config()
+        ..crate::server::config::default_config()
     }
 }
 
@@ -914,7 +915,7 @@ pub fn token_connection(
     user_id: &str,
     token: &str,
     is: bool,
-) -> Arc<crate::server::server::Client> {
+) -> Arc<crate::server::client::Client> {
     let key = rust_stdlib_crypto::sha256::sum256(token.as_bytes());
     let st = server.app.lock();
     st.clients
@@ -938,9 +939,9 @@ const LATE_POST: &[u8] =
 pub fn command_revoking(
     server: &TestServer,
     asker: &mut TestClient,
-    asker_conn: &Arc<crate::server::server::Client>,
+    asker_conn: &Arc<crate::server::client::Client>,
     text: &str,
-    revoked: &Arc<crate::server::server::Client>,
+    revoked: &Arc<crate::server::client::Client>,
     user_id: &str,
 ) -> Vec<Object> {
     let command = encode_json(&obj! {
@@ -988,7 +989,7 @@ pub fn command_revoking(
 /// ignored, a sign-in included, and that no message reached watcher.
 pub fn assert_revoked_runs_nothing(
     server: &TestServer,
-    c: &Arc<crate::server::server::Client>,
+    c: &Arc<crate::server::client::Client>,
     watcher: &mut TestClient,
 ) {
     let (messages, users) = {
