@@ -3,10 +3,8 @@
 //! turns typing activity, uploads, user status or adding others to rooms
 //! off or on for everyone, kept across restarts.
 
-use std::sync::Arc;
-
-use super::client::{Client, Frame};
-use super::commands::private_notice;
+use super::client::Frame;
+use super::commands::{private_notice, CommandCtx};
 use super::protocol::*;
 use super::server::State;
 use super::users::ADMIN_ROLE;
@@ -61,6 +59,18 @@ impl Feature {
     }
 }
 
+impl Feature {
+    /// Refuses what needs the feature while it is off.
+    pub fn off_message(self) -> &'static str {
+        match self {
+            Feature::Uploads => UPLOADS_OFF,
+            Feature::Activity => "Activity is turned off here",
+            Feature::Presence => "Status is turned off here",
+            Feature::AddMember => "Adding members is turned off here",
+        }
+    }
+}
+
 /// Refuses a new upload embed or `/avatar` while uploads are off.
 pub const UPLOADS_OFF: &str = "Uploads are turned off here";
 
@@ -74,13 +84,13 @@ impl State {
     /// New connections are offered what is on; connected ones keep what
     /// they were offered. Presence turned off tells every connection that
     /// each user's status is now `""`, and turned on, what it is again.
-    pub(super) fn toggle_command(
-        &mut self,
-        c: &Arc<Client>,
-        room_id: &str,
-        _body: &Object,
-        args: &str,
-    ) -> Result<Object, RpcError> {
+    pub(super) fn toggle_command(&mut self, cx: &CommandCtx) -> Result<Object, RpcError> {
+        let CommandCtx {
+            client: c,
+            room_id,
+            args,
+            ..
+        } = *cx;
         let Some(feature) = Feature::named(args) else {
             let names: Vec<&str> = Feature::ALL.iter().map(|f| f.name()).collect();
             return Err(invalid_params(format!(

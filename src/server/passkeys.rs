@@ -2,12 +2,10 @@
 //! apron-server-cloudflare's (its SPEC.md, section 5, WebAuthn): an account
 //! lists its passkeys and removes one it no longer trusts.
 
-use std::sync::Arc;
-
 use rust_stdlib::time;
 
 use super::client::Client;
-use super::commands::{private_notice, PRIVATE_NOTICE_ID, PRIVATE_NOTICE_NAME};
+use super::commands::{private_notice, CommandCtx, PRIVATE_NOTICE_ID, PRIVATE_NOTICE_NAME};
 use super::protocol::*;
 use super::server::State;
 use super::webpush::encode_base64_url;
@@ -58,13 +56,13 @@ impl State {
     /// a ~private notice before the result (§1), and a removal is also told
     /// to the account's other connections. Sessions the passkey started stay
     /// valid until they expire.
-    pub(super) fn passkeys_command(
-        &mut self,
-        c: &Arc<Client>,
-        room_id: &str,
-        _body: &Object,
-        args: &str,
-    ) -> Result<Object, RpcError> {
+    pub(super) fn passkeys_command(&mut self, cx: &CommandCtx) -> Result<Object, RpcError> {
+        let CommandCtx {
+            client: c,
+            room_id,
+            args,
+            ..
+        } = *cx;
         let usage = || invalid_params("Usage: /passkeys, or /passkeys remove <n>");
         let words: Vec<&str> = args.split_whitespace().collect();
         let chosen = match words.as_slice() {
@@ -76,7 +74,7 @@ impl State {
             }
             _ => return Err(usage()),
         };
-        let user_id = self.client_user(c).unwrap_or_default();
+        let user_id = cx.user_id.to_owned();
         let passkey = self.users[&user_id].passkey.clone().unwrap_or_default();
         let count = passkey.credentials.len();
         let Some(n) = chosen else {

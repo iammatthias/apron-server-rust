@@ -3,11 +3,9 @@
 //! store.ts `purgeUsers`).
 
 use std::collections::BTreeSet;
-use std::sync::Arc;
 
 use super::admin::ADMIN_USER_ID;
-use super::client::Client;
-use super::commands::private_notice;
+use super::commands::{no_user, private_notice, user_id_args, CommandCtx};
 use super::embeds::{EmbedPurpose, EmbedState};
 use super::protocol::*;
 use super::remap::Remap;
@@ -34,28 +32,22 @@ impl State {
     /// announces it. Threads it leaves empty are removed. The user_id stays
     /// used, so it is never issued again. The sender gets a ~private notice
     /// with the counts before the result (§1).
-    pub(super) fn purge_command(
-        &mut self,
-        c: &Arc<Client>,
-        room_id: &str,
-        _body: &Object,
-        args: &str,
-    ) -> Result<Object, RpcError> {
-        let mut words = args.split_whitespace();
-        let (Some(word), None) = (words.next(), words.next()) else {
-            return Err(invalid_params("Usage: /purge <user_id>"));
-        };
-        let user_id = word.strip_prefix('@').unwrap_or(word);
-        if self.client_user(c).as_deref() == Some(user_id) {
+    pub(super) fn purge_command(&mut self, cx: &CommandCtx) -> Result<Object, RpcError> {
+        let CommandCtx {
+            client: c,
+            room_id,
+            args,
+            ..
+        } = *cx;
+        let [user_id] = user_id_args(args, "Usage: /purge <user_id>")?;
+        if cx.user_id == user_id {
             return Err(RpcError::new(CODE_DENIED, "You can't purge yourself"));
         }
         if user_id == ADMIN_USER_ID {
             return Err(RpcError::new(CODE_DENIED, "The admin user can't be purged"));
         }
         if !self.users.contains_key(user_id) {
-            let mut message = format!("No user has the user_id {user_id}");
-            truncate_chars(&mut message, 200);
-            return Err(invalid_params(message));
+            return Err(no_user("user", user_id));
         }
         let mut ids = BTreeSet::from([user_id.to_owned()]);
         ids.extend(self.bots_of(user_id));
@@ -110,12 +102,5 @@ impl State {
             u.unread = None;
         }
         purged
-    }
-}
-
-/// Cuts `s` to at most `max` characters.
-pub(super) fn truncate_chars(s: &mut String, max: usize) {
-    if let Some((at, _)) = s.char_indices().nth(max) {
-        s.truncate(at);
     }
 }

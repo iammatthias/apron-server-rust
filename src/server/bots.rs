@@ -16,6 +16,7 @@ use rust_stdlib::time::{self, Duration, Time};
 use rust_stdlib_crypto::sha256;
 
 use super::client::{Client, ClientId};
+use super::commands::CommandCtx;
 use super::email::web_socket_url;
 use super::protocol::*;
 use super::remap::{Fate, Remap};
@@ -143,14 +144,14 @@ impl State {
     /// connections that signed in with it close. A new bot joins the default
     /// room, as a new guest does. The token goes to this connection only, in
     /// a ~private notice before the result (§1).
-    pub(super) fn invite_bot_command(
-        &mut self,
-        c: &Arc<Client>,
-        room_id: &str,
-        _body: &Object,
-        args: &str,
-    ) -> Result<Object, RpcError> {
-        let owner_id = self.client_user(c).unwrap_or_default();
+    pub(super) fn invite_bot_command(&mut self, cx: &CommandCtx) -> Result<Object, RpcError> {
+        let CommandCtx {
+            client: c,
+            room_id,
+            args,
+            ..
+        } = *cx;
+        let owner_id = cx.user_id.to_owned();
         let owner = &self.users[&owner_id];
         if !args.is_empty() {
             return Err(invalid_params("Usage: /invite-bot"));

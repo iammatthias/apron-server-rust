@@ -16,7 +16,7 @@ use super::client::{Client, ClientId, Conn, Done, Frame, PING_FRAME};
 use super::config::{Config, RETRY_AFTER_SECONDS, UNTRUSTED_ADDRESS};
 use super::custom_emoji::{EmojiCatalog, CATALOG_PATH};
 use super::devices::DeviceTokens;
-use super::dispatch::{operations, Operation};
+use super::dispatch::{methods, Method};
 use super::email::EmailState;
 use super::embeds::EmbedState;
 use super::invites::{InviteTokens, JoinInvite};
@@ -217,7 +217,7 @@ pub struct Server {
     pub(crate) unfurler: Option<Arc<Unfurler>>,
     /// Set by `shutdown`; ends the sweep of expired registrations.
     pub(crate) stopped: Arc<Done>,
-    pub(crate) ops: BTreeMap<&'static str, Operation>,
+    pub(crate) methods: BTreeMap<&'static str, &'static Method>,
 }
 
 /// The lock on `State`. Dropping it writes the changes made under the lock
@@ -360,7 +360,7 @@ pub fn open(config: Config) -> Result<Arc<Server>, store::StoreError> {
             push,
             unfurler,
             stopped: Arc::new(Done::default()),
-            ops: operations(&config),
+            methods: methods(&config),
         }
     });
     {

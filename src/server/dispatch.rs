@@ -13,7 +13,7 @@ use super::limits::refused;
 use super::protocol::*;
 use super::server::{Server, State};
 use super::toggles::Feature;
-use super::users::{guest_write, GUEST_READ_ONLY};
+use super::users::GUEST_READ_ONLY;
 use crate::obj;
 use crate::ws;
 
@@ -24,34 +24,125 @@ use crate::ws;
 /// causes, which precede its result (§1).
 pub type Operation = fn(&Arc<Server>, &Arc<Client>, &Request) -> Result<(Json, bool), RpcError>;
 
-pub(super) fn operations(config: &Config) -> BTreeMap<&'static str, Operation> {
-    let mut ops: BTreeMap<&'static str, Operation> = BTreeMap::new();
-    ops.insert("me", Server::update_profile);
-    #[cfg(test)]
-    ops.insert("test_panic", Server::test_panic);
-    #[cfg(test)]
-    ops.insert("test_fail", Server::test_fail);
-    ops.insert("message", Server::save_message);
-    ops.insert("command", Server::command);
-    ops.insert("history", Server::history);
-    ops.insert("room_set", Server::set_room);
-    ops.insert("room_list", Server::list_rooms);
-    ops.insert("room_join", Server::join_room);
-    ops.insert("room_leave", Server::leave_room);
-    ops.insert("reactions", Server::react);
-    ops.insert("activity", Server::activity);
-    ops.insert("status", Server::status);
-    if !config.disable_push {
-        ops.insert("push_register", Server::register_push);
-        ops.insert("push_unregister", Server::unregister_push);
-    }
-    ops
+/// Brings a duplicate's result up to date (§1.2).
+type Refresh = fn(&State, &str, Json) -> Json;
+
+/// One method a signed-in connection may call (§4). `ping` and `auth` are
+/// answered before sign-in and are not here.
+pub struct Method {
+    pub name: &'static str,
+    pub run: Operation,
+    /// Changes nothing, so its result is not kept for deduplication (§1.2):
+    /// a duplicate after the original finished runs again.
+    pub read_only: bool,
+    /// Denied outright to a guest while guests only read
+    /// (Config.guest_posting). `command` and `activity` decide per request,
+    /// and push registration refuses every guest with its own message.
+    pub guest_write: bool,
+    /// Sent only as a notification (§1.1): its id is ignored, and nothing
+    /// about it is answered.
+    pub notification: bool,
+    /// Off with this feature, when it takes the unsupported-method path.
+    pub feature: Option<Feature>,
+    /// Push registration, which Config.disable_push removes.
+    pub push: bool,
+    /// Brings a duplicate's result up to date; other results name what the
+    /// request made, which does not change.
+    pub refresh: Option<Refresh>,
 }
 
-/// The operations that change nothing, so their results are not kept for
-/// deduplication (§1.2): a duplicate after the original finished runs again.
-fn read_only_op(method: &str) -> bool {
-    matches!(method, "history" | "room_list")
+impl Method {
+    const fn new(name: &'static str, run: Operation) -> Method {
+        Method {
+            name,
+            run,
+            read_only: false,
+            guest_write: false,
+            notification: false,
+            feature: None,
+            push: false,
+            refresh: None,
+        }
+    }
+}
+
+const METHODS: &[Method] = &[
+    Method {
+        refresh: Some(State::refresh_profile),
+        ..Method::new("me", Server::update_profile)
+    },
+    Method {
+        guest_write: true,
+        refresh: Some(State::refresh_writes),
+        ..Method::new("message", Server::save_message)
+    },
+    Method {
+        refresh: Some(State::refresh_writes),
+        ..Method::new("command", Server::command)
+    },
+    Method {
+        read_only: true,
+        ..Method::new("history", Server::history)
+    },
+    Method {
+        guest_write: true,
+        ..Method::new("room_set", Server::set_room)
+    },
+    Method {
+        read_only: true,
+        ..Method::new("room_list", Server::list_rooms)
+    },
+    Method {
+        guest_write: true,
+        ..Method::new("room_join", Server::join_room)
+    },
+    Method {
+        guest_write: true,
+        ..Method::new("room_leave", Server::leave_room)
+    },
+    Method {
+        guest_write: true,
+        ..Method::new("reactions", Server::react)
+    },
+    Method {
+        notification: true,
+        feature: Some(Feature::Activity),
+        ..Method::new("activity", Server::activity)
+    },
+    Method::new("status", Server::status),
+    Method {
+        push: true,
+        ..Method::new("push_register", Server::register_push)
+    },
+    Method {
+        push: true,
+        ..Method::new("push_unregister", Server::unregister_push)
+    },
+];
+
+#[cfg(test)]
+const TEST_METHODS: &[Method] = &[
+    Method::new("test_panic", Server::test_panic),
+    Method::new("test_fail", Server::test_fail),
+];
+
+/// The methods `config` serves, by name.
+pub(super) fn methods(config: &Config) -> BTreeMap<&'static str, &'static Method> {
+    #[cfg(not(test))]
+    const TEST_METHODS: &[Method] = &[];
+    METHODS
+        .iter()
+        .chain(TEST_METHODS)
+        .filter(|m| !(m.push && config.disable_push))
+        .map(|m| (m.name, m))
+        .collect()
+}
+
+/// Reports whether clients send `method` only as a notification (§1.1). A
+/// server may ignore the id of one and handle the frame as a notification,
+/// and this one does: nothing about it is answered.
+pub fn notification_only(method: &str) -> bool {
+    method == "ping" || METHODS.iter().any(|m| m.notification && m.name == method)
 }
 
 impl Server {
@@ -134,7 +225,7 @@ impl Server {
             return;
         }
 
-        let (user_id, op, entry) = {
+        let (user_id, method, entry) = {
             let mut st = self.lock();
             let Some(user_id) = st.client_user(c) else {
                 drop(st);
@@ -146,13 +237,12 @@ impl Server {
                 }
                 return;
             };
-            // Activity turned off takes the unsupported-method path.
-            let op = self
-                .ops
+            let method = self
+                .methods
                 .get(req.method.as_str())
                 .copied()
-                .filter(|_| req.method != "activity" || st.feature_on(Feature::Activity));
-            let Some(op) = op else {
+                .filter(|m| m.feature.is_none_or(|f| st.feature_on(f)));
+            let Some(method) = method else {
                 drop(st);
                 if req.has_id {
                     c.send_error(
@@ -165,7 +255,7 @@ impl Server {
                 }
                 return;
             };
-            if guest_write(&req.method) && st.read_only_guest(&user_id) {
+            if method.guest_write && st.read_only_guest(&user_id) {
                 drop(st);
                 c.send_error(&req, RpcError::new(CODE_DENIED, GUEST_READ_ONLY));
                 return;
@@ -193,7 +283,10 @@ impl Server {
                         Err(err) => c.send_error(&req, err),
                         Ok(result) => {
                             let st = self.lock();
-                            let result = st.current_result_locked(&user_id, &req.method, result);
+                            let result = match method.refresh {
+                                Some(refresh) => refresh(&st, &user_id, result),
+                                None => result,
+                            };
                             c.send_result(&req, result);
                         }
                     }
@@ -207,7 +300,7 @@ impl Server {
                 }
                 entry = Some(new_entry);
             }
-            (user_id, op, entry)
+            (user_id, method, entry)
         };
 
         let _abandon = entry.as_ref().map(|entry| AbandonDedup {
@@ -217,7 +310,7 @@ impl Server {
             req_id: &req.id,
             entry,
         });
-        let outcome = op(self, c, &req);
+        let outcome = (method.run)(self, c, &req);
         if req.has_id {
             match &outcome {
                 Ok((_, true)) => {}
@@ -229,7 +322,7 @@ impl Server {
             let mut st = self.lock();
             let user_id = st.dedup_user(c, &user_id);
             let failed = outcome.is_err();
-            if failed || read_only_op(&req.method) {
+            if failed || method.read_only {
                 // Failed operations are not cached, and neither are reads,
                 // whose results can be large and which are safe to run
                 // again: a retry executes again. Concurrent duplicates still
@@ -238,7 +331,7 @@ impl Server {
                     u.dedup.remove(&req.id, entry);
                 }
             }
-            let kept = !failed && !read_only_op(&req.method);
+            let kept = !failed && !method.read_only;
             entry.finish(outcome.map(|(result, _)| result));
             // Kept across restarts for the window (§1.2), for an identity
             // that outlives its connections.
@@ -316,48 +409,45 @@ impl Drop for AbandonDedup<'_> {
 }
 
 impl State {
-    /// Brings a duplicate's result up to date (§1.2): `me` answers with the
-    /// current profile, and a message result lists only the write URLs that
-    /// are still unused. Other results name what the request made, which
-    /// does not change.
-    pub fn current_result_locked(&self, user_id: &str, method: &str, result: Json) -> Json {
-        match method {
-            "me" => match self.users.get(user_id) {
-                Some(u) => obj! {"you" => self.you_locked(u)}.into(),
-                None => result,
-            },
-            "message" | "command" => {
-                let Json::Object(original) = &result else {
-                    return result;
-                };
-                if original.get("embeds").is_none() {
-                    return result;
-                }
-                let mut current = original.clone();
-                let writes: Vec<Json> = original
-                    .get("embeds")
-                    .map(|e| e.as_list().to_vec())
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter(|written| {
-                        let id = written
-                            .as_object()
-                            .and_then(|w| w.get("embed_id"))
-                            .and_then(Json::as_str)
-                            .unwrap_or("");
-                        self.embeds
-                            .get(id)
-                            .is_some_and(|e| !e.started && self.writes.get(&e.token) == Some(&e.id))
-                    })
-                    .collect();
-                if writes.is_empty() {
-                    current.remove("embeds");
-                } else {
-                    current.insert("embeds".into(), writes.into());
-                }
-                current.into()
-            }
-            _ => result,
+    /// `me` answers a duplicate with the current profile.
+    fn refresh_profile(&self, user_id: &str, result: Json) -> Json {
+        match self.users.get(user_id) {
+            Some(u) => obj! {"you" => self.you_locked(u)}.into(),
+            None => result,
         }
+    }
+
+    /// A message or command result lists only the write URLs that are still
+    /// unused.
+    fn refresh_writes(&self, _user_id: &str, result: Json) -> Json {
+        let Json::Object(original) = &result else {
+            return result;
+        };
+        if original.get("embeds").is_none() {
+            return result;
+        }
+        let mut current = original.clone();
+        let writes: Vec<Json> = original
+            .get("embeds")
+            .map(|e| e.as_list().to_vec())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|written| {
+                let id = written
+                    .as_object()
+                    .and_then(|w| w.get("embed_id"))
+                    .and_then(Json::as_str)
+                    .unwrap_or("");
+                self.embeds
+                    .get(id)
+                    .is_some_and(|e| !e.started && self.writes.get(&e.token) == Some(&e.id))
+            })
+            .collect();
+        if writes.is_empty() {
+            current.remove("embeds");
+        } else {
+            current.insert("embeds".into(), writes.into());
+        }
+        current.into()
     }
 }
