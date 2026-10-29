@@ -528,20 +528,47 @@ fn test_unfurl_flag() {
         .contains("\nenable = true\n\n[guest]\n"));
 }
 
-/// `--guest.read-only` and `--history.retention`, extensions: off by
-/// default, kept by `--print-config`, and a retention that is not a
-/// positive Go duration stops the server.
+/// The first frame a WebSocket client at `addr` reads: the `server` frame.
+fn server_frame(addr: &str) -> String {
+    let timeout = rust_stdlib::time::SECOND;
+    let conn = apron::ws::dial(&format!("ws://{addr}/ws"), &[], timeout).unwrap();
+    String::from_utf8(conn.read().unwrap().1).unwrap()
+}
+
+/// Guests only read unless `--guest.posting`, and the `server` frame says so.
+#[test]
+fn test_guest_posting_flag() {
+    let dir = TempDir::new();
+    let uploads = dir.join("uploads");
+    let base = [
+        "--store",
+        "memory",
+        "--upload.dir",
+        &uploads,
+        "--addr",
+        "127.0.0.1:0",
+    ];
+    for (extra, want) in [(None, false), (Some("--guest.posting"), true)] {
+        let args: Vec<&str> = base.iter().copied().chain(extra).collect();
+        let mut aprond = Aprond::start(&args);
+        let frame = server_frame(&aprond.addr("apron server"));
+        assert!(
+            frame.contains(&format!("\"guest_posting\":{want}")),
+            "{extra:?}: {frame}"
+        );
+    }
+}
+
+/// `--guest.posting` and `--history.retention`, extensions: kept by
+/// `--print-config`, and a retention that is not a positive Go duration
+/// stops the server.
 #[test]
 fn test_guest_and_history_flags() {
-    let (code, out, _) = output(APROND, &["--print-config"]);
-    assert_eq!(code, 0);
-    let out = String::from_utf8(out).unwrap();
-    assert!(out.ends_with("\n[guest]\n\n# Guests may read but not post, react, join, leave, or make rooms; server.ext.settings says so (off by default; not in the Go aprond)\nread-only = false\n\n[history]\n\n# Delete messages, reactions, and their uploads older than this, such as 168h, checking hourly; emptied threads go, other rooms stay (default: keep forever; not in the Go aprond)\nretention = \"\"\n"), "{out}");
     let (code, out, _) = output(
         APROND,
         &[
             "--print-config",
-            "--guest.read-only",
+            "--guest.posting",
             "--history.retention",
             "168h",
         ],
@@ -549,7 +576,7 @@ fn test_guest_and_history_flags() {
     assert_eq!(code, 0);
     assert!(String::from_utf8(out)
         .unwrap()
-        .ends_with("\nread-only = true\n\n[history]\n\n# Delete messages, reactions, and their uploads older than this, such as 168h, checking hourly; emptied threads go, other rooms stay (default: keep forever; not in the Go aprond)\nretention = \"168h\"\n"));
+        .ends_with("\nposting = true\n\n[history]\n\n# Delete messages, reactions, and their uploads older than this, such as 168h, checking hourly; emptied threads go, other rooms stay (default: keep forever; not in the Go aprond)\nretention = \"168h\"\n"));
     for bad in ["7d", "-1h"] {
         let flag = format!("--history.retention={bad}");
         let (code, _, err) = output(APROND, &["--store", "memory", &flag]);

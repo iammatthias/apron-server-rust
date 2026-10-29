@@ -186,7 +186,7 @@ pub fn default_config() -> Config {
         max_connections: 0,
         messages_per_minute: 0,
         max_listed_members: DEFAULT_MAX_LISTED_MEMBERS,
-        max_private_rooms: 0,
+        max_private_rooms: 20,
         welcome: String::new(),
         roles: BTreeMap::new(),
         email_sender: None,
@@ -196,7 +196,7 @@ pub fn default_config() -> Config {
         unfurl: false,
         unfurl_allow_internal: false,
         unfurl_timeout: unfurl::FETCH_TIMEOUT,
-        guest_posting: true,
+        guest_posting: false,
         retention: None,
     }
 }
@@ -1534,20 +1534,20 @@ impl State {
         if !self.config.welcome.is_empty() {
             params.insert("welcome".into(), self.config.welcome.as_str().into());
         }
-        // ext:settings, the extension apron-web defines (its EXT.md §3):
-        // private_rooms is a number, where its other keys are booleans that
-        // an absent key makes true, so only false ones are sent.
-        let mut settings = Object::new();
-        if !self.config.guest_posting {
-            settings.insert("guest_posting".into(), false.into());
-        }
+        // ext:settings, the extension apron-web defines (its EXT.md §3),
+        // always with every key apron-server-cloudflare sends. Activity is
+        // always on, so read cursors are kept, and any member may add others.
+        // private_rooms is left out when unlimited, as an absent key says.
+        let mut settings = obj! {
+            "guest_posting" => self.config.guest_posting,
+            "read_cursors" => true,
+            "add_members" => true,
+        };
         if self.config.max_private_rooms > 0 {
             settings.insert("private_rooms".into(), self.config.max_private_rooms.into());
         }
-        if !settings.is_empty() {
-            capabilities.push("ext:settings".into());
-            params.insert("ext".into(), obj! {"settings" => settings}.into());
-        }
+        capabilities.push("ext:settings".into());
+        params.insert("ext".into(), obj! {"settings" => settings}.into());
         params.insert("capabilities".into(), capabilities.into());
         if signup != auth_schemes {
             params.insert("signup".into(), signup.into());

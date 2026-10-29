@@ -14,7 +14,7 @@ use super::persist_test::start_with;
 use crate::obj;
 use crate::server::embeds::UPLOAD_SUFFIX;
 use crate::server::protocol::*;
-use crate::server::{default_config, Config};
+use crate::server::Config;
 use crate::store::{self, Store};
 
 const RETENTION: Duration = Duration::from_hours(1);
@@ -199,7 +199,7 @@ fn test_retention_drops_expired_reaction_sets() {
     assert_eq!(
         logged["reactions"],
         Json::from(vec![Json::from(
-            obj! {"from" => obj! {"user_id" => a.user_id.as_str()}, "emojis" => vec!["👍".to_owned()]}
+            obj! {"from" => obj! {"user_id" => a.user_id.as_str(), "name" => "Guest 1"}, "emojis" => vec!["👍".to_owned()]}
         )])
     );
 }

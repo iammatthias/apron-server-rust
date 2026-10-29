@@ -19,7 +19,6 @@
 use super::helpers::*;
 use super::webpush_test::test_subscription;
 use crate::obj;
-use crate::server::default_config;
 use crate::server::protocol::*;
 use crate::server::push::{
     parse_wake_names, push_key, push_payload, valid_push_id, MAX_PUSH_PAYLOAD_BYTES,

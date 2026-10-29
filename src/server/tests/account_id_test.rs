@@ -212,7 +212,8 @@ fn test_guest_registration_frames() {
         ],
         "the registering connection after its result"
     );
-    let guest_recorded = obj! {"user_id" => guest.as_str()};
+    let guest_name = format!("Guest {}", &guest["guest_".len()..]);
+    let guest_recorded = obj! {"user_id" => guest.as_str(), "name" => guest_name};
     assert_eq!(
         frames_without_log_ids(&a.drain()),
         vec![

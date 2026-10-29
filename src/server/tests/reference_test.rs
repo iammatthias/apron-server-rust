@@ -11,7 +11,6 @@ use rust_stdlib::time::Duration;
 
 use super::helpers::*;
 use crate::obj;
-use crate::server::default_config;
 use crate::server::embeds::{
     upload_content_type, valid_avatar_image, FILE_PATH, STREAM_PATH, WRITE_PATH,
 };
@@ -625,7 +624,7 @@ fn test_room_list_filters_and_order() {
     );
     let want_users = vec![
         Json::from(obj! {"user_id" => "guest_1", "name" => "Ada", "status" => "online"}),
-        Json::from(obj! {"user_id" => "guest_2", "status" => "online"}),
+        Json::from(obj! {"user_id" => "guest_2", "name" => "Guest 2", "status" => "online"}),
     ];
     assert_eq!(
         with_members.get("users"),
@@ -1388,7 +1387,7 @@ fn test_read_cursors() {
     b.notification("message");
 
     a.write(&obj! {"method" => "activity", "params" => obj! {"room_id" => "general", "read_message_id" => second.as_str()}});
-    let want = obj! {"room_id" => "general", "from" => obj! {"user_id" => "guest_1"}, "read_message_id" => second.as_str()};
+    let want = obj! {"room_id" => "general", "from" => obj! {"user_id" => "guest_1", "name" => "Guest 1"}, "read_message_id" => second.as_str()};
     for c in [&a, &b] {
         assert_eq!(c.notification("activity"), want, "read cursor");
     }

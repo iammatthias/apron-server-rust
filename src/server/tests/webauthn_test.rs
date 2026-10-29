@@ -15,7 +15,7 @@ use crate::cbor;
 use crate::obj;
 use crate::server::protocol::*;
 use crate::server::webauthn::SESSION_LIFETIME;
-use crate::server::{default_config, Config};
+use crate::server::Config;
 use crate::webauthn::{self, WebAuthn};
 
 pub const TEST_PASSKEY_ORIGIN: &str = "http://localhost:5173";
@@ -291,9 +291,10 @@ pub fn expect_registered(c: &TestClient, account: &str) -> String {
     check_membership(&membership_only(&next()), "general", &guest, false);
     check_membership(&membership_only(&next()), "general", account, true);
     let user = notification_params(&next(), "user");
+    let guest_name = format!("Guest {}", &guest["guest_".len()..]);
     assert_eq!(
         user["old"],
-        Json::from(obj! {"user_id" => guest.as_str()}),
+        Json::from(obj! {"user_id" => guest.as_str(), "name" => guest_name}),
         "user = {user:?}"
     );
     assert_eq!(

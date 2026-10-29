@@ -11,7 +11,7 @@ use rust_stdlib::time;
 use super::webauthn_test::*;
 use crate::server::persist::{DirtySet, StoredUser, ENTRY_META};
 use crate::server::protocol::*;
-use crate::server::{default_config, Config, State};
+use crate::server::{Config, State};
 use crate::store::{self, Entry, Store};
 
 /// Starts a passkey-enabled server on a store.

@@ -6,7 +6,6 @@ use rust_stdlib::encoding::json::jsontext::Value;
 use super::helpers::*;
 use super::webauthn_test::*;
 use crate::obj;
-use crate::server::default_config;
 use crate::server::messages::MAX_MESSAGE_EXT_BYTES;
 use crate::server::protocol::*;
 use crate::server::rooms::MAX_ROOM_EXT_BYTES;
@@ -289,7 +288,7 @@ fn test_profile_ext_limit_applies_to_the_merged_ext() {
         .unwrap();
     let ext = you["ext"].as_object().unwrap();
     assert!(
-        ext.len() == 2 && you.get("name").is_none_or(|n| *n == Json::Null),
+        ext.len() == 2 && you["name"] == Json::from("Guest 1"),
         "a refused me changed the profile: {you:?}"
     );
     let raw = {

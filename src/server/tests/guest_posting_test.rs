@@ -7,7 +7,7 @@ use super::webauthn_test::*;
 use crate::obj;
 use crate::server::protocol::*;
 use crate::server::users::GUEST_READ_ONLY;
-use crate::server::{default_config, Config};
+use crate::server::Config;
 
 fn read_only_server() -> TestServer {
     let mut config = default_config();
@@ -138,34 +138,35 @@ fn test_read_only_guest_reads() {
     );
 }
 
-/// ext:settings carries guest_posting only when it is false, so the default
-/// server frame is Go's.
+/// Guests only read by default, and ext:settings always says whether they
+/// may post.
 #[test]
 fn test_server_frame_advertises_guest_posting() {
-    type Case = (&'static str, fn(&mut Config), Vec<String>, Option<Json>);
+    let settings = |guest_posting: bool| {
+        Some(Json::from(obj! {
+            "guest_posting" => guest_posting, "read_cursors" => true, "add_members" => true,
+            "private_rooms" => 20i64,
+        }))
+    };
+    type Case = (&'static str, Config, Option<Json>);
     let cases: Vec<Case> = vec![
-        ("default", |_| {}, vec![], None),
+        ("default", crate::server::default_config(), settings(false)),
         (
-            "read-only guests",
-            |c| c.guest_posting = false,
-            vec!["ext:settings".into()],
-            Some(obj! {"guest_posting" => false}.into()),
-        ),
-        (
-            "with private_rooms",
-            |c| {
-                c.guest_posting = false;
-                c.max_private_rooms = 3;
+            "guest posting",
+            Config {
+                guest_posting: true,
+                ..crate::server::default_config()
             },
-            vec!["ext:settings".into()],
-            Some(obj! {"guest_posting" => false, "private_rooms" => 3i64}.into()),
+            settings(true),
         ),
     ];
-    for (name, configure, capabilities, settings) in cases {
-        let mut config = default_config();
-        configure(&mut config);
+    for (name, config, want) in cases {
         let server = new_test_server(config);
         let (_, frame) = dial_raw(&server);
-        assert_eq!(settings_of(&frame), (capabilities, settings), "{name}");
+        assert_eq!(
+            settings_of(&frame),
+            (vec!["ext:settings".to_owned()], want),
+            "{name}"
+        );
     }
 }
