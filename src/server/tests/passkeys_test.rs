@@ -190,3 +190,25 @@ fn test_passkeys_without_one() {
         ),
     );
 }
+
+/// An account holds at most 8 passkeys: a ninth registration is denied at
+/// its begin.
+#[test]
+fn test_an_account_holds_at_most_8_passkeys() {
+    let server = passkey_test_server();
+    let (mut owner, _) = dial_origin(&server, TEST_PASSKEY_ORIGIN);
+    register_test_passkey(&mut owner, &mut new_test_authenticator());
+    for _ in 0..7 {
+        owner.drain();
+        add_passkey(&mut owner);
+    }
+    owner.drain();
+    let refused = passkey_call(&mut owner, "ninth", "register", "begin", Object::new());
+    assert_eq!(
+        refused["error"],
+        Json::from(
+            obj! {"code" => CODE_DENIED, "message" => "An account holds at most 8 passkeys"}
+        ),
+        "{refused:?}"
+    );
+}
