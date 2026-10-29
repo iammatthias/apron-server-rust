@@ -5,6 +5,7 @@
 mod account_id_test;
 mod email_test;
 mod ext_test;
+mod guest_posting_test;
 mod helpers;
 mod invite_bot_test;
 mod invite_device_test;
@@ -14,6 +15,7 @@ mod persist_test;
 mod push_fixture_test;
 mod push_test;
 mod reference_test;
+mod retention_test;
 mod server_test;
 mod status_test;
 mod unfurl_test;

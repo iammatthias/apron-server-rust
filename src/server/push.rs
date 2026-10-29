@@ -980,8 +980,8 @@ impl PushDeliverer {
 impl Server {
     /// Forgets expired registrations every PUSH_SWEEP_INTERVAL until the
     /// server shuts down, so the store drops them though their users stay
-    /// away.
-    pub(crate) fn sweep_pushes(self: &Arc<Self>) {
+    /// away, and discards the history Config.retention expired.
+    pub(crate) fn sweep(self: &Arc<Self>) {
         let server = Arc::downgrade(self);
         let stopped = self.stopped.clone();
         thread::spawn(move || loop {
@@ -997,6 +997,7 @@ impl Server {
             for id in ids {
                 st.expire_pushes_locked(&id, &now);
             }
+            st.expire_history_locked(&now);
         });
     }
 

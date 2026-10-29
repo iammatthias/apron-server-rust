@@ -8,7 +8,7 @@ use super::messages::{mentions, parse_message_ref, validate_body, MessageState};
 use super::protocol::*;
 use super::rooms::RoomState;
 use super::server::{Client, Server, State, DEFAULT_ROOM_ID};
-use super::users::UserState;
+use super::users::{UserState, GUEST_READ_ONLY};
 use crate::obj;
 
 /// Scoped system identities (Appendix A.1). user_ids starting with `~` are
@@ -30,6 +30,8 @@ struct ServerCommand {
     /// Reports whether the sender may use the command in the room; `None`
     /// means everyone may.
     available: Option<fn(&UserState, &RoomState) -> bool>,
+    /// Whether it changes anything, which a read-only guest may not do.
+    writes: bool,
     /// Executes the command, sending the frames it causes, and returns its
     /// result, which the caller sends after them (§1).
     run: CommandFn,
@@ -42,6 +44,7 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         usage: "/help",
         help: "list the commands you can use here",
         available: None,
+        writes: false,
         run: State::help_command,
     },
     ServerCommand {
@@ -49,6 +52,7 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         usage: "/avatar",
         help: "with one image attached: set your avatar",
         available: None,
+        writes: true,
         run: State::avatar_command,
     },
     ServerCommand {
@@ -56,6 +60,7 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         usage: "/invite-device <name>",
         help: "get a token that signs in as you on another device, named <name>; at most 3 names, and a name again replaces its token",
         available: Some(|u, _| u.account()),
+        writes: true,
         run: State::invite_device_command,
     },
     ServerCommand {
@@ -63,6 +68,7 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         usage: "/invite-bot",
         help: "get a token that signs in as your bot, named after you; again, it replaces the token and renames the bot",
         available: Some(|u, _| u.account()),
+        writes: true,
         run: State::invite_bot_command,
     },
     ServerCommand {
@@ -70,6 +76,7 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         usage: "/kick @user [reason]",
         help: "remove someone from this room (its creator or a moderator)",
         available: Some(|u, r| r.may_remove(u)),
+        writes: true,
         run: State::kick_command,
     },
 ];
@@ -136,6 +143,9 @@ impl State {
         }
         for command in SERVER_COMMANDS {
             if command.name == name {
+                if command.writes && self.read_only_guest(&user_id) {
+                    return Err(RpcError::new(CODE_DENIED, GUEST_READ_ONLY));
+                }
                 let result = (command.run)(self, c, &room_id, &body, args.trim())?;
                 c.send_result(req, result.clone().into());
                 return Ok((result.into(), true));
@@ -186,8 +196,10 @@ impl State {
     ) -> Result<Object, RpcError> {
         let user_id = self.client_user(c).unwrap_or_default();
         let (u, r) = (&self.users[&user_id], &self.rooms[room_id]);
+        let read_only = self.read_only_guest(&user_id);
         let lines: Vec<String> = SERVER_COMMANDS
             .iter()
+            .filter(|command| !(command.writes && read_only))
             .filter(|command| command.available.is_none_or(|available| available(u, r)))
             .map(|command| format!("- `{}`: {}", command.usage, command.help))
             .collect();

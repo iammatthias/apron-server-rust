@@ -18,7 +18,7 @@ const OTHER_ORIGIN: &str = "http://127.0.0.1:5173";
 
 /// Signs a new connection in as a passkey account named name, and returns
 /// it with its user_id.
-fn account(server: &TestServer, name: &str) -> (TestClient, String) {
+pub(super) fn account(server: &TestServer, name: &str) -> (TestClient, String) {
     let (mut c, _) = dial_origin(server, TEST_PASSKEY_ORIGIN);
     let registered = register_test_passkey(&mut c, &mut new_test_authenticator());
     let user_id = you_of(&registered)["user_id"].as_str().unwrap().to_owned();
