@@ -96,6 +96,13 @@ fn posts(flag: &str, minute: i64, day: i64) -> Result<crate::server::limits::Pos
     })
 }
 
+fn seconds_to_60(flag: &str, value: i64) -> Result<Duration, String> {
+    if !(0..=60).contains(&value) {
+        return Err(format!("invalid --{flag} {value}: use 0 to 60"));
+    }
+    Ok(Duration::from_secs(value))
+}
+
 fn positive(flag: &str, value: i64) -> Result<usize, String> {
     usize::try_from(value)
         .ok()
@@ -289,6 +296,8 @@ pub fn server_settings(options: &Options) -> Result<Settings, String> {
             l.server_frames_per_minute,
         )?,
         policy_violations: nonnegative("limit.policy-violations", l.policy_violations)?,
+        status_coalesce: seconds_to_60("limit.status-coalesce-seconds", l.status_coalesce_seconds)?,
+        offline_grace: seconds_to_60("limit.offline-grace-seconds", l.offline_grace_seconds)?,
     };
     Ok(config)
 }

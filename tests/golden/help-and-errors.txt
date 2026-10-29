@@ -358,6 +358,16 @@ Limits:
                                             connection with 1008; 0 never
                                             closes (not in the Go aprond)
                                             (default: 3)
+      --limit.status-coalesce-seconds=      Seconds between the status changes
+                                            of one user that others are sent,
+                                            the latest winning; a change made
+                                            with me goes at once; 0 to 60 (not
+                                            in the Go aprond) (default: 60)
+      --limit.offline-grace-seconds=        Seconds a status change a closed
+                                            connection caused waits, so a
+                                            reconnect within them shows others
+                                            nothing; 0 to 60 (not in the Go
+                                            aprond) (default: 60)
 
 Server:
       --server.title=                       Plain name clients show for this
@@ -746,6 +756,16 @@ Limits:
                                             connection with 1008; 0 never
                                             closes (not in the Go aprond)
                                             (default: 3)
+      --limit.status-coalesce-seconds=      Seconds between the status changes
+                                            of one user that others are sent,
+                                            the latest winning; a change made
+                                            with me goes at once; 0 to 60 (not
+                                            in the Go aprond) (default: 60)
+      --limit.offline-grace-seconds=        Seconds a status change a closed
+                                            connection caused waits, so a
+                                            reconnect within them shows others
+                                            nothing; 0 to 60 (not in the Go
+                                            aprond) (default: 60)
 
 Server:
       --server.title=                       Plain name clients show for this
@@ -1134,6 +1154,16 @@ Limits:
                                             connection with 1008; 0 never
                                             closes (not in the Go aprond)
                                             (default: 3)
+      --limit.status-coalesce-seconds=      Seconds between the status changes
+                                            of one user that others are sent,
+                                            the latest winning; a change made
+                                            with me goes at once; 0 to 60 (not
+                                            in the Go aprond) (default: 60)
+      --limit.offline-grace-seconds=        Seconds a status change a closed
+                                            connection caused waits, so a
+                                            reconnect within them shows others
+                                            nothing; 0 to 60 (not in the Go
+                                            aprond) (default: 60)
 
 Server:
       --server.title=                       Plain name clients show for this

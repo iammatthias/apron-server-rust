@@ -248,6 +248,12 @@ server-frames-per-minute = 600
 # Malformed or invalid requests within a minute that close a connection with 1008; 0 never closes (not in the Go aprond)
 policy-violations = 3
 
+# Seconds between the status changes of one user that others are sent, the latest winning; a change made with me goes at once; 0 to 60 (not in the Go aprond)
+status-coalesce-seconds = 60
+
+# Seconds a status change a closed connection caused waits, so a reconnect within them shows others nothing; 0 to 60 (not in the Go aprond)
+offline-grace-seconds = 60
+
 [server]
 
 # Plain name clients show for this server, as server.title, unless an admin's /server title sets one (default: none, so clients show the server's address; not in the Go aprond)
@@ -510,6 +516,12 @@ server-frames-per-minute = 600
 
 # Malformed or invalid requests within a minute that close a connection with 1008; 0 never closes (not in the Go aprond)
 policy-violations = 3
+
+# Seconds between the status changes of one user that others are sent, the latest winning; a change made with me goes at once; 0 to 60 (not in the Go aprond)
+status-coalesce-seconds = 60
+
+# Seconds a status change a closed connection caused waits, so a reconnect within them shows others nothing; 0 to 60 (not in the Go aprond)
+offline-grace-seconds = 60
 
 [server]
 
@@ -775,6 +787,12 @@ server-frames-per-minute = 600
 # Malformed or invalid requests within a minute that close a connection with 1008; 0 never closes (not in the Go aprond)
 policy-violations = 3
 
+# Seconds between the status changes of one user that others are sent, the latest winning; a change made with me goes at once; 0 to 60 (not in the Go aprond)
+status-coalesce-seconds = 60
+
+# Seconds a status change a closed connection caused waits, so a reconnect within them shows others nothing; 0 to 60 (not in the Go aprond)
+offline-grace-seconds = 60
+
 [server]
 
 # Plain name clients show for this server, as server.title, unless an admin's /server title sets one (default: none, so clients show the server's address; not in the Go aprond)
@@ -1037,6 +1055,12 @@ server-frames-per-minute = 600
 
 # Malformed or invalid requests within a minute that close a connection with 1008; 0 never closes (not in the Go aprond)
 policy-violations = 3
+
+# Seconds between the status changes of one user that others are sent, the latest winning; a change made with me goes at once; 0 to 60 (not in the Go aprond)
+status-coalesce-seconds = 60
+
+# Seconds a status change a closed connection caused waits, so a reconnect within them shows others nothing; 0 to 60 (not in the Go aprond)
+offline-grace-seconds = 60
 
 [server]
 

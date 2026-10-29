@@ -14,7 +14,6 @@ use super::persist_test::{start_with, start_with_store};
 use super::status_test::{add_account, check_mute, expect_echo, expect_mute};
 use super::webpush_test::{check_vapid, decode, must_decode, test_subscription};
 use crate::obj;
-use crate::rate::{every, Limiter};
 use crate::server::messages::MessageState;
 use crate::server::persist::{ENTRY_PUSH, ENTRY_USER};
 use crate::server::protocol::*;
@@ -2475,9 +2474,9 @@ fn test_shutdown_stops_timers() {
         );
         st.schedule_room_mute_locked("dora", "general");
         let dora = st.users.get_mut("dora").unwrap();
-        dora.status_limit = Some(Limiter::new(every(time::HOUR), 0));
+        dora.status_hold = time::now().unix_milli() + 3_600_000;
         dora.chosen = STATUS_NONE.into();
-        st.announce_status_locked("dora");
+        st.announce_status_locked("dora", crate::server::status::Cause::Connection);
         let dora = &st.users["dora"];
         let pending = dora.mute_timer.is_some()
             && dora.room_mute_timers.contains_key("general")

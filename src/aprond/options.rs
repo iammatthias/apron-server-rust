@@ -148,6 +148,8 @@ pub struct LimitOptions {
     pub frames_per_ip_minute: i64,
     pub server_frames_per_minute: i64,
     pub policy_violations: i64,
+    pub status_coalesce_seconds: i64,
+    pub offline_grace_seconds: i64,
 }
 
 /// An extension Go lacks (docs/DEVIATIONS.md).
@@ -358,6 +360,8 @@ pub static GROUPS: &[Group] = &[
             spec!("frames-per-ip-minute", Int, limit.frames_per_ip_minute, ["120"], [], "WebSocket messages one client address may send a minute, past which its connection is closed with 1013; 0 is unlimited (not in the Go aprond)"),
             spec!("server-frames-per-minute", Int, limit.server_frames_per_minute, ["600"], [], "WebSocket messages everyone may send a minute, past which requests get retry_after and notifications are dropped; 0 is unlimited (not in the Go aprond)"),
             spec!("policy-violations", Int, limit.policy_violations, ["3"], [], "Malformed or invalid requests within a minute that close a connection with 1008; 0 never closes (not in the Go aprond)"),
+            spec!("status-coalesce-seconds", Int, limit.status_coalesce_seconds, ["60"], [], "Seconds between the status changes of one user that others are sent, the latest winning; a change made with me goes at once; 0 to 60 (not in the Go aprond)"),
+            spec!("offline-grace-seconds", Int, limit.offline_grace_seconds, ["60"], [], "Seconds a status change a closed connection caused waits, so a reconnect within them shows others nothing; 0 to 60 (not in the Go aprond)"),
         ],
     },
     Group {

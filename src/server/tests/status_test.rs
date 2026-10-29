@@ -614,30 +614,67 @@ fn test_invisible_privacy() {
     }
 }
 
-/// A flapping user's changes reach others at once for a few, then coalesced
-/// to the latest at most every STATUS_COALESCE.
+/// A user's changes reach others at most once a status_coalesce, the
+/// latest winning (apron-server-cloudflare's 60 s by default).
 #[test]
 fn test_status_changes_coalesce() {
-    let server = new_test_server(default_config());
+    let server = new_test_server(coalescing(500, 0));
     let mut clients = dial_group(&server, 2);
     let mut b = clients.pop().unwrap();
     let mut a = clients.pop().unwrap();
     a.drain();
     watching(&mut [&mut a]);
-    // b's first status, online when it signed in, took one of the burst.
-    for i in 0..STATUS_BURST - 1 {
-        let idle = i % 2 == 0;
-        b.status(obj! {"idle" => idle_param(idle)});
-        expect_status(&a, &b.user_id, if idle { "idle" } else { "online" });
-    }
-    // Past the burst, changes wait, and only the latest is sent.
-    for idle in [false, true, false] {
+    // b's online, when it signed in, went out just now: changes wait.
+    for idle in [true, false, true] {
         b.status(obj! {"idle" => idle_param(idle)});
     }
     a.expect_quiet();
-    time::sleep(STATUS_COALESCE + time::MILLISECOND * 200);
+    time::sleep(time::MILLISECOND * 700);
+    expect_status(&a, &b.user_id, "idle");
+    a.expect_quiet();
+    // A change after a quiet window goes at once.
+    time::sleep(time::MILLISECOND * 600);
+    b.status(obj! {"idle" => idle_param(false)});
     expect_status(&a, &b.user_id, "online");
+}
+
+/// The test server with status changes coalesced over `coalesce_ms` and
+/// a closed connection's change held for `grace_ms`.
+fn coalescing(coalesce_ms: i64, grace_ms: i64) -> crate::server::Config {
+    let mut config = default_config();
+    config.web_authn = Some(test_web_authn());
+    config.limits.status_coalesce = time::Duration::from_millis(coalesce_ms);
+    config.limits.offline_grace = time::Duration::from_millis(grace_ms);
+    config
+}
+
+/// A change a closed connection caused waits offline_grace, so a reconnect
+/// within it shows others nothing, and an offline that goes out after it
+/// carries the seen of the close (§4.5.2).
+#[test]
+fn test_offline_waits_out_the_grace() {
+    let server = new_test_server(coalescing(0, 500));
+    let mut a = dial_test_client(&server);
+    let (mut b, _) = dial_origin(&server, TEST_PASSKEY_ORIGIN);
+    let token = register_test_passkey(&mut b, &mut new_test_authenticator())["token"].clone();
+    let user_id = b.user_id.clone();
+    expect_registered(&a, &user_id);
+    watching(&mut [&mut a]);
+    a.drain();
+    drop(b);
+    wait_connections(&server, &user_id, 0);
+    let back = resume(&server, &token, &user_id);
+    time::sleep(time::MILLISECOND * 700);
     a.expect_quiet();
+    let closing = time::now().unix_milli();
+    drop(back);
+    wait_connections(&server, &user_id, 0);
+    let closed = time::now().unix_milli();
+    a.expect_quiet();
+    time::sleep(time::MILLISECOND * 700);
+    let seen = expect_status(&a, &user_id, "offline");
+    expect_seen_between("offline after the grace", &seen, closing, closed);
+    expect_listed_seen(&mut a, &user_id, "offline", &seen);
 }
 
 /// mute is cleared or ends (§4.5). Others never see a mute.
@@ -1765,10 +1802,11 @@ fn test_seen_survives_restart() {
     drop((a, b, c, server));
 }
 
-/// became offline, not when it was sent (§4.5.2).
+/// A coalesced offline carries the seen of when the user became offline,
+/// not when it was sent (§4.5.2).
 #[test]
 fn test_coalesced_offline_carries_seen() {
-    let server = passkey_test_server();
+    let server = new_test_server(coalescing(600, 0));
     let mut a = dial_test_client(&server);
     let (mut b, _) = dial_origin(&server, TEST_PASSKEY_ORIGIN);
     register_test_passkey(&mut b, &mut new_test_authenticator());
@@ -1776,18 +1814,12 @@ fn test_coalesced_offline_carries_seen() {
     expect_registered(&a, &user_id);
     watching(&mut [&mut a]);
     a.drain();
-    // b's first status, online when it signed in, took one of the burst.
-    for i in 0..STATUS_BURST - 1 {
-        let idle = i % 2 == 0;
-        b.status(obj! {"idle" => idle_param(idle)});
-        expect_status(&a, &user_id, if idle { "idle" } else { "online" });
-    }
     let closing = time::now().unix_milli();
     drop(b);
     wait_connections(&server, &user_id, 0);
     let closed = time::now().unix_milli();
     a.expect_quiet();
-    time::sleep(STATUS_COALESCE + time::MILLISECOND * 200);
+    time::sleep(time::MILLISECOND * 800);
     let seen = expect_status(&a, &user_id, "offline");
     expect_seen_between("coalesced offline", &seen, closing, closed);
     expect_listed_seen(&mut a, &user_id, "offline", &seen);
@@ -1797,7 +1829,7 @@ fn test_coalesced_offline_carries_seen() {
 /// nobody sees seen change while the shown status stays offline (§4.5.2).
 #[test]
 fn test_hidden_flap_keeps_seen() {
-    let server = passkey_test_server();
+    let server = new_test_server(coalescing(500, 0));
     let mut a = dial_test_client(&server);
     let (mut b, _) = dial_origin(&server, TEST_PASSKEY_ORIGIN);
     let token = register_test_passkey(&mut b, &mut new_test_authenticator())["token"].clone();
@@ -1805,14 +1837,9 @@ fn test_hidden_flap_keeps_seen() {
     expect_registered(&a, &user_id);
     watching(&mut [&mut a]);
     a.drain();
-    // b has one change of its burst left, which refills no more.
-    server
-        .app
-        .lock()
-        .users
-        .get_mut(&user_id)
-        .unwrap()
-        .status_limit = Some(Limiter::new(every(time::HOUR), 1));
+    // b's online went out at its sign-in; a window later, its offline goes
+    // at once, and starts a new window.
+    time::sleep(time::MILLISECOND * 600);
     drop(b);
     let seen = expect_status(&a, &user_id, "offline");
     expect_listed_seen(&mut a, &user_id, "offline", &seen);
@@ -1827,7 +1854,7 @@ fn test_hidden_flap_keeps_seen() {
     wait_connections(&server, &user_id, 0);
     a.expect_quiet();
     expect_listed_seen(&mut a, &user_id, "offline", &seen);
-    time::sleep(STATUS_COALESCE + time::MILLISECOND * 200);
+    time::sleep(time::MILLISECOND * 700);
     a.expect_quiet();
     expect_listed_seen(&mut a, &user_id, "offline", &seen);
     let kept = server.app.lock().users[&user_id].seen;
