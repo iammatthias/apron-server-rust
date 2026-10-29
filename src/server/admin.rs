@@ -38,18 +38,7 @@ impl State {
         c: &Arc<Client>,
         req: &Request,
     ) -> Result<Json, RpcError> {
-        let current = self.client_user(c);
-        if current.as_deref() == Some(ADMIN_USER_ID) {
-            return Ok(self
-                .switch_user_locked(c, req, ADMIN_USER_ID, Object::new(), false, false)
-                .into());
-        }
-        if current.is_some_and(|id| self.users[&id].persists()) {
-            return Err(RpcError::new(
-                CODE_DENIED,
-                "Identity switching requires reconnect",
-            ));
-        }
+        self.check_token_switch(c, ADMIN_USER_ID)?;
         let created = match self.users.get(ADMIN_USER_ID) {
             Some(u) if u.invited && u.has_role(ADMIN_ROLE) => false,
             Some(_) => {
@@ -69,9 +58,7 @@ impl State {
                 true
             }
         };
-        Ok(self
-            .switch_user_locked(c, req, ADMIN_USER_ID, Object::new(), true, created)
-            .into())
+        self.sign_in_keyless_locked(c, req, ADMIN_USER_ID, created)
     }
 }
 

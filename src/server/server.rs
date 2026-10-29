@@ -19,6 +19,7 @@ use super::devices::DeviceTokens;
 use super::email::{EmailSender, EmailState, ProposalId};
 use super::embeds::EmbedState;
 use super::embeds::AVATAR_TYPES;
+use super::invites::InviteTokens;
 use super::messages::MessageState;
 use super::outbound;
 use super::persist::{DirtySet, StoredMeta};
@@ -661,6 +662,8 @@ pub struct State {
     pub devices: DeviceTokens,
     /// `/invite-bot` tokens by the SHA-256 of the token (bots.rs).
     pub bots: BotTokens,
+    /// `/invite-token` tokens by the SHA-256 of the token (invites.rs).
+    pub invites: InviteTokens,
     pub email: EmailState,
     /// The webpush key (§4.9); vapid_stored reports that it is the store's,
     /// rather than Config's, so a flush keeps it there.
@@ -842,6 +845,7 @@ pub fn open(config: Config) -> Result<Arc<Server>, store::StoreError> {
                 sessions: Sessions::default(),
                 devices: DeviceTokens::default(),
                 bots: BotTokens::default(),
+                invites: InviteTokens::default(),
                 email: EmailState::default(),
                 vapid,
                 vapid_stored: false,
