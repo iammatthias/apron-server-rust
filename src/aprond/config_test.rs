@@ -230,10 +230,10 @@ fn test_welcome_and_roles() {
             "admin".to_string(),
             vec!["ada".to_string(), "carol".to_string()],
         ),
-        ("moderator".to_string(), vec!["bob".to_string()]),
+        ("mod".to_string(), vec!["bob".to_string()]),
     ]);
     assert_eq!(config.roles, want, "roles");
-    for grant in ["admin", "=ada", "admin="] {
+    for grant in ["admin", "=ada", "admin=", "9lives=ada", "a b=ada"] {
         let parser = parse(&["--role", grant]);
         assert!(
             server_settings(&parser.options).is_err(),

@@ -98,11 +98,22 @@ pub fn server_settings(options: &Options) -> Result<Settings, String> {
             Some((role, holder)) => (role, holder, true),
             None => (grant.as_str(), "", false),
         };
-        let (role, holder) = (role.trim().to_lowercase(), holder.trim());
+        let (mut role, holder) = (role.trim().to_lowercase(), holder.trim());
         if !ok || role.is_empty() || holder.is_empty() {
             return Err(format!(
                 "invalid --role {}: use role=user_id, such as admin=ada",
                 rust_stdlib::strconv::quote(grant)
+            ));
+        }
+        // Earlier configurations name apron-server-cloudflare's `mod` this way.
+        if role == "moderator" {
+            role = crate::server::users::MOD_ROLE.to_owned();
+        }
+        if !crate::server::users::valid_role(&role) {
+            return Err(format!(
+                "invalid --role {}: {}",
+                rust_stdlib::strconv::quote(grant),
+                crate::server::users::INVALID_ROLE
             ));
         }
         config

@@ -9,7 +9,7 @@ use super::server::{
     Client, Frame, LogRecord, RecordKind, Server, State, DEFAULT_ROOM_ID, MAX_HISTORY_PAGE_SIZE,
     MAX_HISTORY_REPLY_BYTES,
 };
-use super::users::UserState;
+use super::users::{UserState, ADMIN_ROLE, MOD_ROLE};
 use crate::obj;
 
 /// Caps `not_joined` in a room_list result; `joined` is never truncated
@@ -61,9 +61,9 @@ pub struct ReadCursor {
 impl RoomState {
     /// Reports whether u may remove others from r, with /kick or
     /// room_leave's user_id (§4.2.2, §4.1): the room's creator, or a user
-    /// with the admin or moderator role.
+    /// with the admin or mod role.
     pub fn may_remove(&self, u: &UserState) -> bool {
-        self.creator == u.id || u.has_role("admin") || u.has_role("moderator")
+        self.creator == u.id || u.has_role(ADMIN_ROLE) || u.has_role(MOD_ROLE)
     }
 
     /// The inclusive lower bound of the room's retained history (§4.3.3):

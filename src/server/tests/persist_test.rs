@@ -355,11 +355,11 @@ fn test_roles_and_welcome() {
     server.stop();
 
     let welcome = "Chat as a guest, or **sign in** to keep your name.";
-    let server = start_with(kept, &format!("{dir}/after"), |config| {
+    let server = start_with(kept.clone(), &format!("{dir}/after"), |config| {
         config.welcome = welcome.into();
         config.roles = BTreeMap::from([
             ("admin".into(), vec![ada_id.clone(), "Newbie".into()]),
-            ("moderator".into(), vec![ada_id.clone()]),
+            ("mod".into(), vec![ada_id.clone()]),
         ]);
     });
     let (mut ada, frame) = dial_origin(&server, TEST_PASSKEY_ORIGIN);
@@ -375,7 +375,7 @@ fn test_roles_and_welcome() {
         "",
         obj! {"token" => registered["token"].clone()},
     ));
-    let admin_moderator = Json::from(vec!["admin".to_owned(), "moderator".to_owned()]);
+    let admin_moderator = Json::from(vec!["admin".to_owned(), "mod".to_owned()]);
     assert_eq!(
         you_of(&resumed).get("roles"),
         Some(&admin_moderator),
@@ -446,7 +446,7 @@ fn test_roles_and_welcome() {
     let joined = notification_params(&before[0], "room_update");
     assert_eq!(
         roles_of(&joined["users"]),
-        Some(admin_moderator),
+        Some(admin_moderator.clone()),
         "room_update joined users: {before:?}"
     );
     ada.drain();
@@ -463,6 +463,25 @@ fn test_roles_and_welcome() {
         "remove-admin",
         obj! {"room_id" => "general", "user_id" => ada_id.as_str()},
         CODE_DENIED,
+    );
+    drop((ada, guest));
+    let mut server = server;
+    server.stop();
+
+    // The roles are the account's now: they stay with the grants gone.
+    let server = start_with(kept, &format!("{dir}/later"), |_| {});
+    let (mut ada, _) = dial_origin(&server, TEST_PASSKEY_ORIGIN);
+    let resumed = passkey_result(&passkey_call(
+        &mut ada,
+        "resume",
+        "token",
+        "",
+        obj! {"token" => registered["token"].clone()},
+    ));
+    assert_eq!(
+        you_of(&resumed).get("roles"),
+        Some(&admin_moderator),
+        "roles after the grants went: {resumed:?}"
     );
     drop(server);
 }
