@@ -10,7 +10,7 @@ use super::helpers::*;
 use super::webauthn_test::*;
 use crate::obj;
 use crate::server::protocol::*;
-use crate::server::users::{candidate_user_id, user_id_slug, USER_ID_SLUG_ATTEMPTS};
+use crate::server::user_ids::{candidate_user_id, user_id_slug, USER_ID_SLUG_ATTEMPTS};
 use crate::server::Config;
 
 #[test]

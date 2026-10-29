@@ -17,7 +17,7 @@ use super::protocol::*;
 use super::remap::{Fate, Remap};
 use super::server::{Client, Conn, State};
 use super::status::retry_after;
-use super::users::{normalize_name, requestable};
+use super::user_ids::{normalize_name, requestable};
 use crate::rate::{every, Limiter};
 
 /// How long a proposal and its tokens, emailed as it is made, stay valid.

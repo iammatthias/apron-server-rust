@@ -18,7 +18,7 @@ use super::email::web_socket_url;
 use super::protocol::*;
 use super::remap::{Fate, Remap};
 use super::server::{Client, State};
-use super::users::{candidate_user_id, normalize_name};
+use super::user_ids::{candidate_user_id, normalize_name};
 use super::webauthn::SessionKey;
 use crate::obj;
 
