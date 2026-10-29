@@ -592,6 +592,9 @@ impl State {
         if token.starts_with(DEVICE_TOKEN_PREFIX) {
             return self.authenticate_device_locked(c, req, &token);
         }
+        if token.starts_with(super::invites::JOIN_TOKEN_PREFIX) {
+            return self.authenticate_join_locked(c, req, &token);
+        }
         if token.starts_with(super::invites::INVITE_TOKEN_PREFIX) {
             return self.authenticate_invite_locked(c, req, &token);
         }

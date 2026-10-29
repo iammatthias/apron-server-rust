@@ -1,7 +1,8 @@
 //! Accounts an admin makes without a passkey, an extension Go lacks
 //! (docs/DEVIATIONS.md), following apron-server-cloudflare's `/invite-token`
-//! (its SPEC.md, section 5, Admins): the account signs in with a bearer
-//! token through the `token` scheme (§3.2), from any origin.
+//! and `/invite` (its SPEC.md, section 5, Admins): the account signs in with
+//! a bearer token through the `token` scheme (§3.2), from any origin, and a
+//! sign-up invite makes one such account per use (Appendix B).
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -16,9 +17,27 @@ use super::devices::apron_link;
 use super::email::web_socket_url;
 use super::protocol::*;
 use super::server::{Client, State};
+use super::users::{candidate_user_id, normalize_name};
 use super::webauthn::SessionKey;
+use crate::obj;
 
 pub const INVITE_TOKEN_PREFIX: &str = "apron_invite_";
+pub const JOIN_TOKEN_PREFIX: &str = "apron_join_";
+/// Sign-ups one `/invite` may allow, and how long it lasts.
+pub const MAX_JOIN_USES: i64 = 50;
+pub const JOIN_INVITE_TTL: time::Duration = time::Duration::from_hours(7 * 24);
+/// The name of a user who signs up with an invite and asks for none: not
+/// "Guest", which names guests.
+pub const JOIN_DEFAULT_NAME: &str = "Member";
+
+/// The one live sign-up invite (`/invite`): the SHA-256 of its token, the
+/// sign-ups it has left, and when it expires, in Unix milliseconds.
+#[derive(Clone, Debug, PartialEq)]
+pub struct JoinInvite {
+    pub key: SessionKey,
+    pub remaining: i64,
+    pub expires_ms: i64,
+}
 
 /// An account token, kept by the SHA-256 of the token.
 #[derive(Clone, Debug)]
@@ -180,6 +199,120 @@ impl State {
         };
         self.check_token_switch(c, &user_id)?;
         self.sign_in_keyless_locked(c, req, &user_id, false)
+    }
+
+    /// `/invite <uses>`: mints the sign-up invite (Appendix B), a token that
+    /// signs up to `uses` new accounts within a week, and revokes the last
+    /// one; `/invite 0` only revokes. The token goes to this connection only,
+    /// in a ~private notice before the result (§1).
+    pub(super) fn invite_command(
+        &mut self,
+        c: &Arc<Client>,
+        room_id: &str,
+        _body: &Object,
+        args: &str,
+    ) -> Result<Object, RpcError> {
+        let digits = (1..=3).contains(&args.len()) && args.bytes().all(|b| b.is_ascii_digit());
+        let Some(uses) = digits.then(|| args.parse::<i64>().ok()).flatten() else {
+            return Err(invalid_params(format!(
+                "Usage: /invite <uses>, 0 to {MAX_JOIN_USES}"
+            )));
+        };
+        // More uses than the server allows is a count limit (§1.1).
+        if uses > MAX_JOIN_USES {
+            return Err(RpcError::new(
+                CODE_DENIED,
+                format!("An invite signs up at most {MAX_JOIN_USES} users"),
+            ));
+        }
+        if uses == 0 {
+            self.join_invite = None;
+            c.enqueue(&private_notice(
+                &self.rooms[room_id],
+                "The sign-up invite is revoked.",
+            ));
+            return Ok(Object::new());
+        }
+        let (token, key) = new_token(JOIN_TOKEN_PREFIX);
+        let expires = time::now().add(JOIN_INVITE_TTL);
+        self.join_invite = Some(JoinInvite {
+            key,
+            remaining: uses,
+            expires_ms: expires.unix_milli(),
+        });
+        let plural = if uses == 1 { "" } else { "s" };
+        let mut parts = vec![
+            format!(
+                "This invite signs up {uses} new user{plural} until {} UTC, and replaces any earlier one. Each gets their own token to sign in again with, and can add a passkey after.",
+                expires.utc().format("2006-01-02 15:04")
+            ),
+            format!("```\n{token}\n```"),
+        ];
+        let server = web_socket_url(&self.config.public_url);
+        if !server.is_empty() {
+            parts.push(format!(
+                "Or send this link, which signs each of them up with any Apron app: <{}>",
+                apron_link(&server, &token)
+            ));
+        }
+        parts.push(format!("To sign up, authenticate with the token scheme and a name: `{{\"method\": \"auth\", \"params\": {{\"scheme\": \"token\", \"token\": \"{token}\", \"name\": \"Ada\"}}}}`"));
+        c.enqueue(&private_notice(&self.rooms[room_id], &parts.join("\n\n")));
+        Ok(Object::new())
+    }
+
+    /// Signs up a new account with the live sign-up invite (Appendix B),
+    /// named as `auth`'s `name` asks, else "Member", with a user_id picked
+    /// from the name as a passkey registration's is. The result carries the
+    /// account's own `apron_invite_` token, so the shared invite is not
+    /// needed again, and the account joins the default room after it. A
+    /// used-up, expired or revoked invite is denied, and a used-up or
+    /// expired one is dropped.
+    pub(super) fn authenticate_join_locked(
+        &mut self,
+        c: &Arc<Client>,
+        req: &Request,
+        token: &str,
+    ) -> Result<Json, RpcError> {
+        if self
+            .client_user(c)
+            .is_some_and(|id| self.users[&id].persists())
+        {
+            return Err(RpcError::new(
+                CODE_DENIED,
+                "Identity switching requires reconnect",
+            ));
+        }
+        let mut name = normalize_name(&parse_string(&req.params, "name", false)?);
+        if name.is_empty() {
+            name = JOIN_DEFAULT_NAME.to_owned();
+        }
+        let key = sha256::sum256(token.as_bytes());
+        let now = time::now().unix_milli();
+        let live = match &self.join_invite {
+            Some(invite) if invite.key == key => {
+                if invite.remaining > 0 && invite.expires_ms > now {
+                    true
+                } else {
+                    self.join_invite = None;
+                    false
+                }
+            }
+            _ => false,
+        };
+        if !live {
+            return Err(RpcError::new(
+                CODE_DENIED,
+                "This invite is used up or has expired; ask an admin for a new one",
+            ));
+        }
+        if let Some(invite) = &mut self.join_invite {
+            invite.remaining -= 1;
+        }
+        let user_id = candidate_user_id(&name, |id| self.user_id_taken_locked(id));
+        let own = self.create_invited_locked(&user_id, &name);
+        Ok(self
+            .switch_user_locked(c, req, &user_id, obj! {"token" => own}, true, true)
+            .into())
     }
 
     /// Refuses a token sign-in as `user_id` on a connection signed in as

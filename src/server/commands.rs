@@ -138,6 +138,14 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         writes: true,
         run: State::invite_token_command,
     },
+    ServerCommand {
+        name: "invite",
+        usage: "/invite <uses>",
+        help: "get a token that signs up to <uses> new users (at most 50) for a week, replacing the last one; /invite 0 revokes it",
+        audience: Audience::Admins,
+        writes: true,
+        run: State::invite_command,
+    },
 ];
 
 /// Renders a notice for the one connection it is queued on: unlogged,

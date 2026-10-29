@@ -19,7 +19,7 @@ use super::devices::DeviceTokens;
 use super::email::{EmailSender, EmailState, ProposalId};
 use super::embeds::EmbedState;
 use super::embeds::AVATAR_TYPES;
-use super::invites::InviteTokens;
+use super::invites::{InviteTokens, JoinInvite};
 use super::messages::MessageState;
 use super::outbound;
 use super::persist::{DirtySet, StoredMeta};
@@ -664,6 +664,8 @@ pub struct State {
     pub bots: BotTokens,
     /// `/invite-token` tokens by the SHA-256 of the token (invites.rs).
     pub invites: InviteTokens,
+    /// The live `/invite` sign-up invite, if any (invites.rs).
+    pub join_invite: Option<JoinInvite>,
     pub email: EmailState,
     /// The webpush key (§4.9); vapid_stored reports that it is the store's,
     /// rather than Config's, so a flush keeps it there.
@@ -846,6 +848,7 @@ pub fn open(config: Config) -> Result<Arc<Server>, store::StoreError> {
                 devices: DeviceTokens::default(),
                 bots: BotTokens::default(),
                 invites: InviteTokens::default(),
+                join_invite: None,
                 email: EmailState::default(),
                 vapid,
                 vapid_stored: false,
@@ -1606,19 +1609,22 @@ impl State {
 
     /// The `server` frame's params (§3.1) for a connection from `origin`.
     pub fn server_params(&self, origin: &str) -> Object {
-        // signup (§3.2) lists the schemes that can create an account; a
-        // token only signs in to one, and a guest is no account.
-        let mut signup: Vec<String> = Vec::new();
+        // signup (§3.2) lists the schemes that can create an account: a
+        // token does as an admin's sign-up invite (`/invite`); a guest is no
+        // account.
+        let mut schemes: Vec<String> = Vec::new();
         if self.passkeys_offered(origin) {
-            signup.push("webauthn".into());
+            schemes.push("webauthn".into());
         }
         if self.config.email_sender.is_some() {
-            signup.push("email".into());
+            schemes.push("email".into());
         }
-        // Bot and device tokens sign in from anywhere, so token is always
-        // offered.
-        let mut auth_schemes = signup.clone();
-        auth_schemes.extend(["token".into(), "guest".into()]);
+        schemes.push("token".into());
+        let signup = schemes.clone();
+        // Bot, device and account tokens sign in from anywhere, so token is
+        // always offered.
+        let mut auth_schemes = schemes;
+        auth_schemes.push("guest".into());
         let mut capabilities: Vec<String> = [
             "history",
             "edit",
