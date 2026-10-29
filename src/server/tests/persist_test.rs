@@ -53,6 +53,17 @@ impl State {
         all.invites = self.invites.keys().copied().collect();
         all.embeds = self.embeds.keys().cloned().collect();
         all.pushes = self.pushes.keys().cloned().collect();
+        all.dedup = self
+            .users
+            .values()
+            .filter(|u| u.persists())
+            .flat_map(|u| {
+                u.dedup
+                    .iter()
+                    .filter(|(_, e)| e.result().is_some())
+                    .map(|(id, _)| (u.id.clone(), id.clone()))
+            })
+            .collect();
         all.vapid = self.vapid_stored;
         all.server = self.server_meta != Default::default();
         all.emoji = self.stored_emoji() != Default::default();
@@ -560,4 +571,64 @@ fn test_pending_image_writes_are_dropped_on_restore() {
             "{url}"
         );
     }
+}
+
+/// An accepted request's id stays deduplicated across a restart (§1.2): a
+/// retry gets the original result and posts nothing again, and the same id
+/// for another operation is invalid_params.
+#[test]
+fn test_deduplication_survives_restart() {
+    use super::admin_test::{token_auth, ADMIN_TOKEN};
+    let dir = TempDir::new("apron-dedup-");
+    let path = format!("{dir}/aprond.db");
+    let upload_dir = format!("{dir}/uploads");
+    let start = || {
+        start_with(
+            Arc::new(store::SQLite::open(&path).unwrap()),
+            &upload_dir,
+            |config| {
+                config.admin_token =
+                    Some(rust_stdlib_crypto::sha256::sum256(ADMIN_TOKEN.as_bytes()))
+            },
+        )
+    };
+    let params = obj! {"room_id" => "general", "body" => obj! {"text" => "exactly once"}};
+    let mut server = start();
+    let (mut admin, _) = dial_raw(&server);
+    token_auth(&mut admin, ADMIN_TOKEN);
+    let (_, first) = admin.request("message", "once", params.clone());
+    drop(admin);
+    server.stop();
+
+    let server = start();
+    let (mut admin, _) = dial_raw(&server);
+    token_auth(&mut admin, ADMIN_TOKEN);
+    admin.drain();
+    let retry = admin.call("message", "once", params);
+    assert_eq!(
+        retry.get("result"),
+        Some(&Json::from(first.clone())),
+        "{retry:?}"
+    );
+    let other = admin.call(
+        "message",
+        "once",
+        obj! {"room_id" => "general", "body" => obj! {"text" => "something else"}},
+    );
+    assert_eq!(
+        other["error"].as_object().unwrap()["code"],
+        Json::from(CODE_INVALID_PARAMS),
+        "{other:?}"
+    );
+    let page = history_page(&mut admin, "general", Object::new());
+    let texts = records(&page, "messages")
+        .iter()
+        .filter(|m| {
+            m.get("body")
+                .and_then(Json::as_object)
+                .and_then(|b| b.get("text"))
+                == Some(&Json::from("exactly once"))
+        })
+        .count();
+    assert_eq!(texts, 1);
 }

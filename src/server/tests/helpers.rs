@@ -147,10 +147,14 @@ fn second() -> Duration {
 }
 
 impl TestClient {
-    /// A request ID not used before on this client.
+    /// A request ID not used before by this test process, so a client
+    /// signing in again after a restart is not deduplicated against its
+    /// earlier requests (§1.2).
     pub fn next_id(&mut self, prefix: &str) -> String {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         self.requests += 1;
-        format!("{prefix}-{}", self.requests)
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        format!("{prefix}-{n}")
     }
 
     pub fn write(&self, value: &Object) {

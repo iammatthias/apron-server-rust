@@ -158,11 +158,11 @@ fn test_frames_are_bounded() {
 fn test_frame_limits_follow_config() {
     let mut config = default_config();
     config.frame.max_depth = 3;
-    config.frame.max_id_bytes = 8;
+    config.frame.max_id_bytes = 16;
     let server = new_test_server(config);
     let mut c = dial_test_client(&server);
     let deep = reply(&mut c, &history_with("d", "[[]]"));
     assert_eq!(error_of(&deep).1, Json::from(CODE_TOO_LARGE));
-    let long = reply(&mut c, &history_with("123456789", "0"));
+    let long = reply(&mut c, &history_with("12345678901234567", "0"));
     assert_eq!(error_of(&long).1, Json::from(CODE_INVALID_REQUEST));
 }
