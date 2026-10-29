@@ -591,7 +591,16 @@ impl State {
         extra: Object,
         sign_in: bool,
         join_default: bool,
-    ) -> Object {
+    ) -> Result<Object, RpcError> {
+        let max = self.config.limits.connections_per_user;
+        let u = &self.users[user_id];
+        if max > 0 && u.persists() && u.clients.iter().filter(|id| **id != c.id).count() >= max {
+            return Err(RpcError::with_data(
+                CODE_RETRY_AFTER,
+                "Connection limit reached for this account",
+                obj! {"retry_after" => super::server::RETRY_AFTER_SECONDS},
+            ));
+        }
         self.note_bot_active_locked(user_id);
         let mut result = obj! {"you" => self.you_locked(&self.users[user_id])};
         result.extend(extra);
@@ -603,7 +612,7 @@ impl State {
         if sign_in {
             self.send_after_auth_locked(c);
         }
-        result
+        Ok(result)
     }
 
     /// Makes user the connection's identity and announces the status others
@@ -1072,7 +1081,7 @@ impl Server {
         // A new guest joins the default room, so their room list is not
         // empty.
         Ok(st
-            .switch_user_locked(c, req, &id, Object::new(), true, true)
+            .switch_user_locked(c, req, &id, Object::new(), true, true)?
             .into())
     }
 

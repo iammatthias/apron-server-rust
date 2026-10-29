@@ -226,7 +226,7 @@ impl State {
         self.set_conn_token(c, key);
         let sign_in = self.client_user(c).as_deref() != Some(&bot_id);
         Ok(self
-            .switch_user_locked(c, req, &bot_id, Object::new(), sign_in, false)
+            .switch_user_locked(c, req, &bot_id, Object::new(), sign_in, false)?
             .into())
     }
 }

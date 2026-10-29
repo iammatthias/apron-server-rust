@@ -6,6 +6,7 @@ mod account_id_test;
 mod activity_test;
 mod admin_test;
 mod auth_deadline_test;
+mod connection_limits_test;
 mod connection_status_test;
 mod custom_emoji_test;
 mod email_test;

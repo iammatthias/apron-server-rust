@@ -567,7 +567,7 @@ impl State {
                 obj! {"token" => token},
                 sign_in,
                 join_default,
-            )
+            )?
             .into())
     }
 
@@ -659,7 +659,7 @@ impl State {
         // (§4.5), and sends nothing after its result.
         let sign_in = self.client_user(c).as_deref() != Some(&user_id);
         Ok(self
-            .switch_user_locked(c, req, &user_id, obj! {"token" => token}, sign_in, false)
+            .switch_user_locked(c, req, &user_id, obj! {"token" => token}, sign_in, false)?
             .into())
     }
 

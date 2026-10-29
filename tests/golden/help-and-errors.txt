@@ -5,253 +5,280 @@ Usage:
   aprond [OPTIONS]
 
 Application Options:
-      --config=                      Load settings from a TOML file; flags
-                                     given on the command line take precedence
-                                     (use --print-config for an example)
-      --print-config                 Print the current settings as TOML and exit
-      --addr=                        HTTP and WebSocket listen address; :8080
-                                     listens on every interface (default:
-                                     127.0.0.1:8080)
-      --static-dir=                  Directory containing the built frontend
-      --origin=                      Allowed WebSocket origin pattern; repeat
-                                     for more (default: localhost, 127.0.0.1,
-                                     and ::1)
-      --allow-any-origin             Disable WebSocket origin checks
-      --public-url=                  External base URL of upload, file, and
-                                     stream links, such as https://chat.example
-                                     (default: each request's host, or
-                                     https://<tls.domain>)
-      --max-connections=             Maximum concurrent WebSockets; 0 is
-                                     unlimited
-      --max-listener-connections=    Maximum concurrent TCP connections on the
-                                     listener, HTTP included; 0 is unlimited
-      --messages-per-minute=         Burst of new messages, room_set requests,
-                                     and /avatar commands per user, refilled
-                                     over a minute; 0 is unlimited
-      --max-listed-members=          Members listed per room in room_list and
-                                     room_update; a larger room lists its most
-                                     recently active ones and member_count. 0
-                                     is unlimited (default: 1000)
-      --max-private-rooms=           Top-level private rooms one user may be in
-                                     at once, created or added to, such as on a
-                                     public deployment; 0 is unlimited
-                                     (default: 20)
-      --read-receipts                Relay each user's read cursors to everyone
-                                     in the room, and list them after
-                                     room_list; without it they go only to the
-                                     user's own connections (not in the Go
-                                     aprond)
-      --debug-addr=                  Listen address for unauthenticated pprof
-                                     and expvar under /debug/, such as
-                                     127.0.0.1:6060; empty disables
-      --store=                       Where state is kept: sqlite:<path> for a
-                                     SQLite database, or memory to keep nothing
-                                     across restarts (default:
-                                     sqlite:/home/aprond/Library/Application
-                                     Support/aprond/aprond.db)
-      --client-ip-header=            Request header a reverse proxy puts the
-                                     client's address in, such as
-                                     X-Forwarded-For (its last entry) or
-                                     X-Real-IP, for per-client limits; set only
-                                     behind a proxy that sets it, since a
-                                     connection without it is refused. IPv6
-                                     clients are limited by their /56
-      --welcome=                     Markdown clients show on their sign-in
-                                     screen (server.welcome), such as how this
-                                     server's sign-in methods fit together
-                                     (default: general's description, else a
-                                     summary of how guests and sign-in work
-                                     here)
-      --role=                        Grant a role to an account as role=user_id
-                                     or role=email, such as admin=ada, once:
-                                     the account keeps it until an admin takes
-                                     it away; repeat for more. admin and mod
-                                     (or moderator) may create top-level rooms
-      --admin-token-file=            File holding a token that signs in as the
-                                     user admin from any origin, without a
-                                     passkey; at least 16 bytes (default:
-                                     $APRON_ADMIN_TOKEN; unset or empty
-                                     disables it)
+      --config=                         Load settings from a TOML file; flags
+                                        given on the command line take
+                                        precedence (use --print-config for an
+                                        example)
+      --print-config                    Print the current settings as TOML and
+                                        exit
+      --addr=                           HTTP and WebSocket listen address;
+                                        :8080 listens on every interface
+                                        (default: 127.0.0.1:8080)
+      --static-dir=                     Directory containing the built frontend
+      --origin=                         Allowed WebSocket origin pattern;
+                                        repeat for more (default: localhost,
+                                        127.0.0.1, and ::1)
+      --allow-any-origin                Disable WebSocket origin checks
+      --public-url=                     External base URL of upload, file, and
+                                        stream links, such as
+                                        https://chat.example (default: each
+                                        request's host, or https://<tls.domain>)
+      --max-connections=                Maximum concurrent WebSockets; 0 is
+                                        unlimited (default: 100)
+      --max-listener-connections=       Maximum concurrent TCP connections on
+                                        the listener, HTTP included; 0 is
+                                        unlimited
+      --messages-per-minute=            Burst of new messages, room_set
+                                        requests, and /avatar commands per
+                                        user, refilled over a minute; 0 is
+                                        unlimited
+      --max-listed-members=             Members listed per room in room_list
+                                        and room_update; a larger room lists
+                                        its most recently active ones and
+                                        member_count. 0 is unlimited (default:
+                                        1000)
+      --max-private-rooms=              Top-level private rooms one user may be
+                                        in at once, created or added to, such
+                                        as on a public deployment; 0 is
+                                        unlimited (default: 20)
+      --read-receipts                   Relay each user's read cursors to
+                                        everyone in the room, and list them
+                                        after room_list; without it they go
+                                        only to the user's own connections (not
+                                        in the Go aprond)
+      --debug-addr=                     Listen address for unauthenticated
+                                        pprof and expvar under /debug/, such as
+                                        127.0.0.1:6060; empty disables
+      --store=                          Where state is kept: sqlite:<path> for
+                                        a SQLite database, or memory to keep
+                                        nothing across restarts (default:
+                                        sqlite:/home/aprond/Library/Application
+                                        Support/aprond/aprond.db)
+      --client-ip-header=               Request header a reverse proxy puts the
+                                        client's address in, such as
+                                        X-Forwarded-For (its last entry) or
+                                        X-Real-IP, for per-client limits; set
+                                        only behind a proxy that sets it, since
+                                        a connection without it is refused.
+                                        IPv6 clients are limited by their /56
+      --welcome=                        Markdown clients show on their sign-in
+                                        screen (server.welcome), such as how
+                                        this server's sign-in methods fit
+                                        together (default: general's
+                                        description, else a summary of how
+                                        guests and sign-in work here)
+      --role=                           Grant a role to an account as
+                                        role=user_id or role=email, such as
+                                        admin=ada, once: the account keeps it
+                                        until an admin takes it away; repeat
+                                        for more. admin and mod (or moderator)
+                                        may create top-level rooms
+      --admin-token-file=               File holding a token that signs in as
+                                        the user admin from any origin, without
+                                        a passkey; at least 16 bytes (default:
+                                        $APRON_ADMIN_TOKEN; unset or empty
+                                        disables it)
 
 Passkeys:
-      --webauthn.rp-id=              Passkey relying party domain; empty
-                                     disables passkeys (default: localhost)
-      --webauthn.origin=             Exact frontend origin for passkeys; repeat
-                                     for more (default: http://localhost:5173,
-                                     http://localhost:8080)
+      --webauthn.rp-id=                 Passkey relying party domain; empty
+                                        disables passkeys (default: localhost)
+      --webauthn.origin=                Exact frontend origin for passkeys;
+                                        repeat for more (default:
+                                        http://localhost:5173,
+                                        http://localhost:8080)
 
 Uploads:
-      --upload.dir=                  Directory holding uploaded files; upload
-                                     files the store does not refer to are
-                                     removed at start (default:
-                                     /home/aprond/Library/Application
-                                     Support/aprond/uploads)
-      --upload.max-mb=               Maximum size of one upload, in MiB
-                                     (default: 5)
-      --upload.max-avatar-kb=        Maximum size of an /avatar image, in KiB
-                                     (not in the Go aprond) (default: 256)
-      --upload.type=                 Type an upload may be, as a MIME type,
-                                     type/* or */*; repeat for more. A PNG,
-                                     JPEG, GIF, WebP, WebM, Ogg or MP4 file is
-                                     typed from its bytes, any other from its
-                                     declared type (not in the Go aprond)
-                                     (default: image/png, image/jpeg,
-                                     image/gif, image/webp, audio/webm,
-                                     audio/ogg, audio/mp4)
-      --upload.max-message-mb=       Maximum total size of one message's
-                                     uploads, in MiB (default: 20)
-      --upload.max-storage-mb=       Total size of hosted uploads, in MiB,
-                                     beyond which the oldest are removed from
-                                     their messages (default: 1000)
+      --upload.dir=                     Directory holding uploaded files;
+                                        upload files the store does not refer
+                                        to are removed at start (default:
+                                        /home/aprond/Library/Application
+                                        Support/aprond/uploads)
+      --upload.max-mb=                  Maximum size of one upload, in MiB
+                                        (default: 5)
+      --upload.max-avatar-kb=           Maximum size of an /avatar image, in
+                                        KiB (not in the Go aprond) (default:
+                                        256)
+      --upload.type=                    Type an upload may be, as a MIME type,
+                                        type/* or */*; repeat for more. A PNG,
+                                        JPEG, GIF, WebP, WebM, Ogg or MP4 file
+                                        is typed from its bytes, any other from
+                                        its declared type (not in the Go
+                                        aprond) (default: image/png,
+                                        image/jpeg, image/gif, image/webp,
+                                        audio/webm, audio/ogg, audio/mp4)
+      --upload.max-message-mb=          Maximum total size of one message's
+                                        uploads, in MiB (default: 20)
+      --upload.max-storage-mb=          Total size of hosted uploads, in MiB,
+                                        beyond which the oldest are removed
+                                        from their messages (default: 1000)
 
 Email sign-in:
-      --email.enable                 Offer email sign-in (off by default)
-      --email.sender=[smtp|http|log] How email sign-in codes are delivered,
-                                     with --email.enable: smtp sends them, http
-                                     POSTs them to a mail API (not in the Go
-                                     aprond), log writes them to the server log
-                                     (development only; refused with
-                                     --public-url or --tls.domain) (default:
-                                     smtp)
-      --email.link-url=              Page that sign-in links in emails open,
-                                     such as https://chat.example/, with a
-                                     sign-in token in its fragment (default:
-                                     --public-url; empty sends codes without
-                                     links)
-      --email.from=                  Sender address of sign-in emails, for
-                                     --email.sender smtp or http
-      --email.smtp-addr=             SMTP relay as host:port, for
-                                     --email.sender smtp: STARTTLS is required
-                                     (such as :587), or TLS from the start on
-                                     port 465
-      --email.smtp-user=             SMTP user name; empty sends without
-                                     authentication
-      --email.smtp-password=         SMTP password
-      --email.smtp-insecure          Send through a relay that does not offer
-                                     STARTTLS, in cleartext (a relay on the
-                                     same host only)
-      --email.http-url=              Mail API that --email.sender http POSTs
-                                     {"from", "to", "subject", "text"} to as
-                                     JSON, such as
-                                     https://api.cloudflare.com/client/v4/accou-
+      --email.enable                    Offer email sign-in (off by default)
+      --email.sender=[smtp|http|log]    How email sign-in codes are delivered,
+                                        with --email.enable: smtp sends them,
+                                        http POSTs them to a mail API (not in
+                                        the Go aprond), log writes them to the
+                                        server log (development only; refused
+                                        with --public-url or --tls.domain)
+                                        (default: smtp)
+      --email.link-url=                 Page that sign-in links in emails open,
+                                        such as https://chat.example/, with a
+                                        sign-in token in its fragment (default:
+                                        --public-url; empty sends codes without
+                                        links)
+      --email.from=                     Sender address of sign-in emails, for
+                                        --email.sender smtp or http
+      --email.smtp-addr=                SMTP relay as host:port, for
+                                        --email.sender smtp: STARTTLS is
+                                        required (such as :587), or TLS from
+                                        the start on port 465
+      --email.smtp-user=                SMTP user name; empty sends without
+                                        authentication
+      --email.smtp-password=            SMTP password
+      --email.smtp-insecure             Send through a relay that does not
+                                        offer STARTTLS, in cleartext (a relay
+                                        on the same host only)
+      --email.http-url=                 Mail API that --email.sender http POSTs
+                                        {"from", "to", "subject", "text"} to as
+                                        JSON, such as
+                                        https://api.cloudflare.com/client/v4/ac-
 
-                                     nts/<account ID>/email/sending/send (not
-                                     in the Go aprond)
-      --email.http-header=           Header of each --email.sender http
-                                     request, as Name: value, such as
-                                     "Authorization: Bearer <token>"; repeat
-                                     for more (not in the Go aprond)
+                                        counts/<account ID>/email/sending/send
+                                        (not in the Go aprond)
+      --email.http-header=              Header of each --email.sender http
+                                        request, as Name: value, such as
+                                        "Authorization: Bearer <token>"; repeat
+                                        for more (not in the Go aprond)
 
 Push:
-      --push.disable                 Do not offer push registration
-      --push.allow-insecure          Accept http push endpoints and ones on
-                                     internal addresses, so any client can make
-                                     the server POST into its network (tests
-                                     only; refused with --public-url or
-                                     --tls.domain)
-      --push.hosts=                  Push service an endpoint may name, for
-                                     relay and webpush alike: a host name, a
-                                     *.host suffix, or a standalone * for any;
-                                     repeat for more (default:
-                                     fcm.googleapis.com,
-                                     *.push.services.mozilla.com,
-                                     web.push.apple.com, *.push.apple.com and
-                                     *.notify.windows.com; not in the Go aprond)
-      --push.delay=                  How long a message's push waits, so a user
-                                     back at their screen by then is not
-                                     pushed, from 0 (at once) to 60s (not in
-                                     the Go aprond) (default: 30s)
-      --push.vapid-private-key=      Web Push VAPID private key, the P-256
-                                     scalar in base64url as web-push tools
-                                     print it (default: one generated at the
-                                     first start and kept in the store)
-      --push.vapid-subject=          Contact push services may use, a mailto:
-                                     or https: URL, sent with Web Push
-                                     (default: --public-url)
+      --push.disable                    Do not offer push registration
+      --push.allow-insecure             Accept http push endpoints and ones on
+                                        internal addresses, so any client can
+                                        make the server POST into its network
+                                        (tests only; refused with --public-url
+                                        or --tls.domain)
+      --push.hosts=                     Push service an endpoint may name, for
+                                        relay and webpush alike: a host name, a
+                                        *.host suffix, or a standalone * for
+                                        any; repeat for more (default:
+                                        fcm.googleapis.com,
+                                        *.push.services.mozilla.com,
+                                        web.push.apple.com, *.push.apple.com
+                                        and *.notify.windows.com; not in the Go
+                                        aprond)
+      --push.delay=                     How long a message's push waits, so a
+                                        user back at their screen by then is
+                                        not pushed, from 0 (at once) to 60s
+                                        (not in the Go aprond) (default: 30s)
+      --push.vapid-private-key=         Web Push VAPID private key, the P-256
+                                        scalar in base64url as web-push tools
+                                        print it (default: one generated at the
+                                        first start and kept in the store)
+      --push.vapid-subject=             Contact push services may use, a
+                                        mailto: or https: URL, sent with Web
+                                        Push (default: --public-url)
 
 TLS:
-      --tls.domain=                  Serve HTTPS with Let's Encrypt
-                                     certificates for this domain; repeat for
-                                     more. Replaces --addr with --tls.addr
-      --tls.addr=                    HTTPS listen address when --tls.domain is
-                                     set (default: :443)
-      --tls.http-addr=               HTTP listen address for ACME challenges
-                                     and redirects to HTTPS when --tls.domain
-                                     is set (default: :80)
-      --tls.cache-dir=               Directory caching certificates (default:
-                                     aprond/autocert in the user cache
-                                     directory) (default:
-                                     /home/aprond/Library/Caches/aprond/autocer-
+      --tls.domain=                     Serve HTTPS with Let's Encrypt
+                                        certificates for this domain; repeat
+                                        for more. Replaces --addr with
+                                        --tls.addr
+      --tls.addr=                       HTTPS listen address when --tls.domain
+                                        is set (default: :443)
+      --tls.http-addr=                  HTTP listen address for ACME challenges
+                                        and redirects to HTTPS when
+                                        --tls.domain is set (default: :80)
+      --tls.cache-dir=                  Directory caching certificates
+                                        (default: aprond/autocert in the user
+                                        cache directory) (default:
+                                        /home/aprond/Library/Caches/aprond/auto-
 
-                                     t)
-      --tls.email=                   Contact email given to Let's Encrypt
+                                        cert)
+      --tls.email=                      Contact email given to Let's Encrypt
 
 Apple:
-      --apple.app-id=                iOS app allowed to use this server's
-                                     passkeys, as <team ID>.<bundle ID>, listed
-                                     in
-                                     /.well-known/apple-app-site-association;
-                                     repeat for more (not in the Go aprond)
+      --apple.app-id=                   iOS app allowed to use this server's
+                                        passkeys, as <team ID>.<bundle ID>,
+                                        listed in
+                                        /.well-known/apple-app-site-association-
+
+                                        ; repeat for more (not in the Go aprond)
 
 Link previews:
-      --unfurl.enable                Fetch the pages that messages link to and
-                                     attach their OpenGraph previews, with
-                                     images hosted here; the server then
-                                     requests any public http(s) URL a user
-                                     posts (off by default; not in the Go
-                                     aprond)
+      --unfurl.enable                   Fetch the pages that messages link to
+                                        and attach their OpenGraph previews,
+                                        with images hosted here; the server
+                                        then requests any public http(s) URL a
+                                        user posts (off by default; not in the
+                                        Go aprond)
 
 Guests:
-      --guest.posting                Let guests post, react, join, leave, and
-                                     make rooms; without it they only read, and
-                                     server.ext.settings says so (not in the Go
-                                     aprond)
+      --guest.posting                   Let guests post, react, join, leave,
+                                        and make rooms; without it they only
+                                        read, and server.ext.settings says so
+                                        (not in the Go aprond)
 
 History:
-      --history.retention=           Delete messages, reactions, and their
-                                     uploads older than this, such as 168h,
-                                     checking hourly; emptied threads and
-                                     private rooms go, other rooms stay
-                                     (default: keep forever; not in the Go
-                                     aprond)
+      --history.retention=              Delete messages, reactions, and their
+                                        uploads older than this, such as 168h,
+                                        checking hourly; emptied threads and
+                                        private rooms go, other rooms stay
+                                        (default: keep forever; not in the Go
+                                        aprond)
 
 Frames:
-      --frame.max-bytes=             Largest WebSocket message a client may
-                                     send, in bytes; a larger one closes the
-                                     connection with 1009 (not in the Go
-                                     aprond) (default: 16384)
-      --frame.max-text-bytes=        Largest body.text of a message or command,
-                                     in bytes (not in the Go aprond) (default:
-                                     4096)
-      --frame.max-depth=             Deepest nesting of objects and arrays in a
-                                     frame, the frame itself at depth 1 (not in
-                                     the Go aprond) (default: 8)
-      --frame.max-nodes=             Most JSON values in a frame, object keys
-                                     not counted (not in the Go aprond)
-                                     (default: 2048)
-      --frame.max-id-bytes=          Longest request id, in bytes (not in the
-                                     Go aprond) (default: 128)
+      --frame.max-bytes=                Largest WebSocket message a client may
+                                        send, in bytes; a larger one closes the
+                                        connection with 1009 (not in the Go
+                                        aprond) (default: 16384)
+      --frame.max-text-bytes=           Largest body.text of a message or
+                                        command, in bytes (not in the Go
+                                        aprond) (default: 4096)
+      --frame.max-depth=                Deepest nesting of objects and arrays
+                                        in a frame, the frame itself at depth 1
+                                        (not in the Go aprond) (default: 8)
+      --frame.max-nodes=                Most JSON values in a frame, object
+                                        keys not counted (not in the Go aprond)
+                                        (default: 2048)
+      --frame.max-id-bytes=             Longest request id, in bytes (not in
+                                        the Go aprond) (default: 128)
+
+Limits:
+      --limit.connections-per-ip=       Open WebSockets from one client address
+                                        (an IPv4 address or an IPv6 /56); 0 is
+                                        unlimited (not in the Go aprond)
+                                        (default: 10)
+      --limit.guest-connections-per-ip= Open WebSockets from one client address
+                                        that are not signed in to an account,
+                                        guests included; 0 is unlimited (not in
+                                        the Go aprond) (default: 6)
+      --limit.connections-per-user=     Open WebSockets of one account; 0 is
+                                        unlimited (not in the Go aprond)
+                                        (default: 3)
+      --limit.admissions-per-ip-minute= New WebSockets one client address may
+                                        open a minute; 0 is unlimited (not in
+                                        the Go aprond) (default: 12)
 
 Server:
-      --server.title=                Plain name clients show for this server,
-                                     as server.title, unless an admin's /server
-                                     title sets one (default: none, so clients
-                                     show the server's address; not in the Go
-                                     aprond)
-      --server.description=          CommonMark of at most 500 bytes saying
-                                     what this server is about, as
-                                     server.description, unless an admin's
-                                     /server description sets one (default:
-                                     general's description; not in the Go
-                                     aprond)
-      --server.avatar=               Server icon, as server.avatar: an https:
-                                     URL or a small
-                                     data:image/{png,jpeg,gif,webp};base64,
-                                     URL, unless an admin's /server avatar sets
-                                     one (not in the Go aprond)
+      --server.title=                   Plain name clients show for this
+                                        server, as server.title, unless an
+                                        admin's /server title sets one
+                                        (default: none, so clients show the
+                                        server's address; not in the Go aprond)
+      --server.description=             CommonMark of at most 500 bytes saying
+                                        what this server is about, as
+                                        server.description, unless an admin's
+                                        /server description sets one (default:
+                                        general's description; not in the Go
+                                        aprond)
+      --server.avatar=                  Server icon, as server.avatar: an
+                                        https: URL or a small
+                                        data:image/{png,jpeg,gif,webp};base64,
+                                        URL, unless an admin's /server avatar
+                                        sets one (not in the Go aprond)
 
 Help Options:
-  -h, --help                         Show this help message
+  -h, --help                            Show this help message
 
 --- stderr
 
@@ -263,253 +290,280 @@ Usage:
   aprond [OPTIONS]
 
 Application Options:
-      --config=                      Load settings from a TOML file; flags
-                                     given on the command line take precedence
-                                     (use --print-config for an example)
-      --print-config                 Print the current settings as TOML and exit
-      --addr=                        HTTP and WebSocket listen address; :8080
-                                     listens on every interface (default:
-                                     127.0.0.1:8080)
-      --static-dir=                  Directory containing the built frontend
-      --origin=                      Allowed WebSocket origin pattern; repeat
-                                     for more (default: localhost, 127.0.0.1,
-                                     and ::1)
-      --allow-any-origin             Disable WebSocket origin checks
-      --public-url=                  External base URL of upload, file, and
-                                     stream links, such as https://chat.example
-                                     (default: each request's host, or
-                                     https://<tls.domain>)
-      --max-connections=             Maximum concurrent WebSockets; 0 is
-                                     unlimited
-      --max-listener-connections=    Maximum concurrent TCP connections on the
-                                     listener, HTTP included; 0 is unlimited
-      --messages-per-minute=         Burst of new messages, room_set requests,
-                                     and /avatar commands per user, refilled
-                                     over a minute; 0 is unlimited
-      --max-listed-members=          Members listed per room in room_list and
-                                     room_update; a larger room lists its most
-                                     recently active ones and member_count. 0
-                                     is unlimited (default: 1000)
-      --max-private-rooms=           Top-level private rooms one user may be in
-                                     at once, created or added to, such as on a
-                                     public deployment; 0 is unlimited
-                                     (default: 20)
-      --read-receipts                Relay each user's read cursors to everyone
-                                     in the room, and list them after
-                                     room_list; without it they go only to the
-                                     user's own connections (not in the Go
-                                     aprond)
-      --debug-addr=                  Listen address for unauthenticated pprof
-                                     and expvar under /debug/, such as
-                                     127.0.0.1:6060; empty disables
-      --store=                       Where state is kept: sqlite:<path> for a
-                                     SQLite database, or memory to keep nothing
-                                     across restarts (default:
-                                     sqlite:/home/aprond/Library/Application
-                                     Support/aprond/aprond.db)
-      --client-ip-header=            Request header a reverse proxy puts the
-                                     client's address in, such as
-                                     X-Forwarded-For (its last entry) or
-                                     X-Real-IP, for per-client limits; set only
-                                     behind a proxy that sets it, since a
-                                     connection without it is refused. IPv6
-                                     clients are limited by their /56
-      --welcome=                     Markdown clients show on their sign-in
-                                     screen (server.welcome), such as how this
-                                     server's sign-in methods fit together
-                                     (default: general's description, else a
-                                     summary of how guests and sign-in work
-                                     here)
-      --role=                        Grant a role to an account as role=user_id
-                                     or role=email, such as admin=ada, once:
-                                     the account keeps it until an admin takes
-                                     it away; repeat for more. admin and mod
-                                     (or moderator) may create top-level rooms
-      --admin-token-file=            File holding a token that signs in as the
-                                     user admin from any origin, without a
-                                     passkey; at least 16 bytes (default:
-                                     $APRON_ADMIN_TOKEN; unset or empty
-                                     disables it)
+      --config=                         Load settings from a TOML file; flags
+                                        given on the command line take
+                                        precedence (use --print-config for an
+                                        example)
+      --print-config                    Print the current settings as TOML and
+                                        exit
+      --addr=                           HTTP and WebSocket listen address;
+                                        :8080 listens on every interface
+                                        (default: 127.0.0.1:8080)
+      --static-dir=                     Directory containing the built frontend
+      --origin=                         Allowed WebSocket origin pattern;
+                                        repeat for more (default: localhost,
+                                        127.0.0.1, and ::1)
+      --allow-any-origin                Disable WebSocket origin checks
+      --public-url=                     External base URL of upload, file, and
+                                        stream links, such as
+                                        https://chat.example (default: each
+                                        request's host, or https://<tls.domain>)
+      --max-connections=                Maximum concurrent WebSockets; 0 is
+                                        unlimited (default: 100)
+      --max-listener-connections=       Maximum concurrent TCP connections on
+                                        the listener, HTTP included; 0 is
+                                        unlimited
+      --messages-per-minute=            Burst of new messages, room_set
+                                        requests, and /avatar commands per
+                                        user, refilled over a minute; 0 is
+                                        unlimited
+      --max-listed-members=             Members listed per room in room_list
+                                        and room_update; a larger room lists
+                                        its most recently active ones and
+                                        member_count. 0 is unlimited (default:
+                                        1000)
+      --max-private-rooms=              Top-level private rooms one user may be
+                                        in at once, created or added to, such
+                                        as on a public deployment; 0 is
+                                        unlimited (default: 20)
+      --read-receipts                   Relay each user's read cursors to
+                                        everyone in the room, and list them
+                                        after room_list; without it they go
+                                        only to the user's own connections (not
+                                        in the Go aprond)
+      --debug-addr=                     Listen address for unauthenticated
+                                        pprof and expvar under /debug/, such as
+                                        127.0.0.1:6060; empty disables
+      --store=                          Where state is kept: sqlite:<path> for
+                                        a SQLite database, or memory to keep
+                                        nothing across restarts (default:
+                                        sqlite:/home/aprond/Library/Application
+                                        Support/aprond/aprond.db)
+      --client-ip-header=               Request header a reverse proxy puts the
+                                        client's address in, such as
+                                        X-Forwarded-For (its last entry) or
+                                        X-Real-IP, for per-client limits; set
+                                        only behind a proxy that sets it, since
+                                        a connection without it is refused.
+                                        IPv6 clients are limited by their /56
+      --welcome=                        Markdown clients show on their sign-in
+                                        screen (server.welcome), such as how
+                                        this server's sign-in methods fit
+                                        together (default: general's
+                                        description, else a summary of how
+                                        guests and sign-in work here)
+      --role=                           Grant a role to an account as
+                                        role=user_id or role=email, such as
+                                        admin=ada, once: the account keeps it
+                                        until an admin takes it away; repeat
+                                        for more. admin and mod (or moderator)
+                                        may create top-level rooms
+      --admin-token-file=               File holding a token that signs in as
+                                        the user admin from any origin, without
+                                        a passkey; at least 16 bytes (default:
+                                        $APRON_ADMIN_TOKEN; unset or empty
+                                        disables it)
 
 Passkeys:
-      --webauthn.rp-id=              Passkey relying party domain; empty
-                                     disables passkeys (default: localhost)
-      --webauthn.origin=             Exact frontend origin for passkeys; repeat
-                                     for more (default: http://localhost:5173,
-                                     http://localhost:8080)
+      --webauthn.rp-id=                 Passkey relying party domain; empty
+                                        disables passkeys (default: localhost)
+      --webauthn.origin=                Exact frontend origin for passkeys;
+                                        repeat for more (default:
+                                        http://localhost:5173,
+                                        http://localhost:8080)
 
 Uploads:
-      --upload.dir=                  Directory holding uploaded files; upload
-                                     files the store does not refer to are
-                                     removed at start (default:
-                                     /home/aprond/Library/Application
-                                     Support/aprond/uploads)
-      --upload.max-mb=               Maximum size of one upload, in MiB
-                                     (default: 5)
-      --upload.max-avatar-kb=        Maximum size of an /avatar image, in KiB
-                                     (not in the Go aprond) (default: 256)
-      --upload.type=                 Type an upload may be, as a MIME type,
-                                     type/* or */*; repeat for more. A PNG,
-                                     JPEG, GIF, WebP, WebM, Ogg or MP4 file is
-                                     typed from its bytes, any other from its
-                                     declared type (not in the Go aprond)
-                                     (default: image/png, image/jpeg,
-                                     image/gif, image/webp, audio/webm,
-                                     audio/ogg, audio/mp4)
-      --upload.max-message-mb=       Maximum total size of one message's
-                                     uploads, in MiB (default: 20)
-      --upload.max-storage-mb=       Total size of hosted uploads, in MiB,
-                                     beyond which the oldest are removed from
-                                     their messages (default: 1000)
+      --upload.dir=                     Directory holding uploaded files;
+                                        upload files the store does not refer
+                                        to are removed at start (default:
+                                        /home/aprond/Library/Application
+                                        Support/aprond/uploads)
+      --upload.max-mb=                  Maximum size of one upload, in MiB
+                                        (default: 5)
+      --upload.max-avatar-kb=           Maximum size of an /avatar image, in
+                                        KiB (not in the Go aprond) (default:
+                                        256)
+      --upload.type=                    Type an upload may be, as a MIME type,
+                                        type/* or */*; repeat for more. A PNG,
+                                        JPEG, GIF, WebP, WebM, Ogg or MP4 file
+                                        is typed from its bytes, any other from
+                                        its declared type (not in the Go
+                                        aprond) (default: image/png,
+                                        image/jpeg, image/gif, image/webp,
+                                        audio/webm, audio/ogg, audio/mp4)
+      --upload.max-message-mb=          Maximum total size of one message's
+                                        uploads, in MiB (default: 20)
+      --upload.max-storage-mb=          Total size of hosted uploads, in MiB,
+                                        beyond which the oldest are removed
+                                        from their messages (default: 1000)
 
 Email sign-in:
-      --email.enable                 Offer email sign-in (off by default)
-      --email.sender=[smtp|http|log] How email sign-in codes are delivered,
-                                     with --email.enable: smtp sends them, http
-                                     POSTs them to a mail API (not in the Go
-                                     aprond), log writes them to the server log
-                                     (development only; refused with
-                                     --public-url or --tls.domain) (default:
-                                     smtp)
-      --email.link-url=              Page that sign-in links in emails open,
-                                     such as https://chat.example/, with a
-                                     sign-in token in its fragment (default:
-                                     --public-url; empty sends codes without
-                                     links)
-      --email.from=                  Sender address of sign-in emails, for
-                                     --email.sender smtp or http
-      --email.smtp-addr=             SMTP relay as host:port, for
-                                     --email.sender smtp: STARTTLS is required
-                                     (such as :587), or TLS from the start on
-                                     port 465
-      --email.smtp-user=             SMTP user name; empty sends without
-                                     authentication
-      --email.smtp-password=         SMTP password
-      --email.smtp-insecure          Send through a relay that does not offer
-                                     STARTTLS, in cleartext (a relay on the
-                                     same host only)
-      --email.http-url=              Mail API that --email.sender http POSTs
-                                     {"from", "to", "subject", "text"} to as
-                                     JSON, such as
-                                     https://api.cloudflare.com/client/v4/accou-
+      --email.enable                    Offer email sign-in (off by default)
+      --email.sender=[smtp|http|log]    How email sign-in codes are delivered,
+                                        with --email.enable: smtp sends them,
+                                        http POSTs them to a mail API (not in
+                                        the Go aprond), log writes them to the
+                                        server log (development only; refused
+                                        with --public-url or --tls.domain)
+                                        (default: smtp)
+      --email.link-url=                 Page that sign-in links in emails open,
+                                        such as https://chat.example/, with a
+                                        sign-in token in its fragment (default:
+                                        --public-url; empty sends codes without
+                                        links)
+      --email.from=                     Sender address of sign-in emails, for
+                                        --email.sender smtp or http
+      --email.smtp-addr=                SMTP relay as host:port, for
+                                        --email.sender smtp: STARTTLS is
+                                        required (such as :587), or TLS from
+                                        the start on port 465
+      --email.smtp-user=                SMTP user name; empty sends without
+                                        authentication
+      --email.smtp-password=            SMTP password
+      --email.smtp-insecure             Send through a relay that does not
+                                        offer STARTTLS, in cleartext (a relay
+                                        on the same host only)
+      --email.http-url=                 Mail API that --email.sender http POSTs
+                                        {"from", "to", "subject", "text"} to as
+                                        JSON, such as
+                                        https://api.cloudflare.com/client/v4/ac-
 
-                                     nts/<account ID>/email/sending/send (not
-                                     in the Go aprond)
-      --email.http-header=           Header of each --email.sender http
-                                     request, as Name: value, such as
-                                     "Authorization: Bearer <token>"; repeat
-                                     for more (not in the Go aprond)
+                                        counts/<account ID>/email/sending/send
+                                        (not in the Go aprond)
+      --email.http-header=              Header of each --email.sender http
+                                        request, as Name: value, such as
+                                        "Authorization: Bearer <token>"; repeat
+                                        for more (not in the Go aprond)
 
 Push:
-      --push.disable                 Do not offer push registration
-      --push.allow-insecure          Accept http push endpoints and ones on
-                                     internal addresses, so any client can make
-                                     the server POST into its network (tests
-                                     only; refused with --public-url or
-                                     --tls.domain)
-      --push.hosts=                  Push service an endpoint may name, for
-                                     relay and webpush alike: a host name, a
-                                     *.host suffix, or a standalone * for any;
-                                     repeat for more (default:
-                                     fcm.googleapis.com,
-                                     *.push.services.mozilla.com,
-                                     web.push.apple.com, *.push.apple.com and
-                                     *.notify.windows.com; not in the Go aprond)
-      --push.delay=                  How long a message's push waits, so a user
-                                     back at their screen by then is not
-                                     pushed, from 0 (at once) to 60s (not in
-                                     the Go aprond) (default: 30s)
-      --push.vapid-private-key=      Web Push VAPID private key, the P-256
-                                     scalar in base64url as web-push tools
-                                     print it (default: one generated at the
-                                     first start and kept in the store)
-      --push.vapid-subject=          Contact push services may use, a mailto:
-                                     or https: URL, sent with Web Push
-                                     (default: --public-url)
+      --push.disable                    Do not offer push registration
+      --push.allow-insecure             Accept http push endpoints and ones on
+                                        internal addresses, so any client can
+                                        make the server POST into its network
+                                        (tests only; refused with --public-url
+                                        or --tls.domain)
+      --push.hosts=                     Push service an endpoint may name, for
+                                        relay and webpush alike: a host name, a
+                                        *.host suffix, or a standalone * for
+                                        any; repeat for more (default:
+                                        fcm.googleapis.com,
+                                        *.push.services.mozilla.com,
+                                        web.push.apple.com, *.push.apple.com
+                                        and *.notify.windows.com; not in the Go
+                                        aprond)
+      --push.delay=                     How long a message's push waits, so a
+                                        user back at their screen by then is
+                                        not pushed, from 0 (at once) to 60s
+                                        (not in the Go aprond) (default: 30s)
+      --push.vapid-private-key=         Web Push VAPID private key, the P-256
+                                        scalar in base64url as web-push tools
+                                        print it (default: one generated at the
+                                        first start and kept in the store)
+      --push.vapid-subject=             Contact push services may use, a
+                                        mailto: or https: URL, sent with Web
+                                        Push (default: --public-url)
 
 TLS:
-      --tls.domain=                  Serve HTTPS with Let's Encrypt
-                                     certificates for this domain; repeat for
-                                     more. Replaces --addr with --tls.addr
-      --tls.addr=                    HTTPS listen address when --tls.domain is
-                                     set (default: :443)
-      --tls.http-addr=               HTTP listen address for ACME challenges
-                                     and redirects to HTTPS when --tls.domain
-                                     is set (default: :80)
-      --tls.cache-dir=               Directory caching certificates (default:
-                                     aprond/autocert in the user cache
-                                     directory) (default:
-                                     /home/aprond/Library/Caches/aprond/autocer-
+      --tls.domain=                     Serve HTTPS with Let's Encrypt
+                                        certificates for this domain; repeat
+                                        for more. Replaces --addr with
+                                        --tls.addr
+      --tls.addr=                       HTTPS listen address when --tls.domain
+                                        is set (default: :443)
+      --tls.http-addr=                  HTTP listen address for ACME challenges
+                                        and redirects to HTTPS when
+                                        --tls.domain is set (default: :80)
+      --tls.cache-dir=                  Directory caching certificates
+                                        (default: aprond/autocert in the user
+                                        cache directory) (default:
+                                        /home/aprond/Library/Caches/aprond/auto-
 
-                                     t)
-      --tls.email=                   Contact email given to Let's Encrypt
+                                        cert)
+      --tls.email=                      Contact email given to Let's Encrypt
 
 Apple:
-      --apple.app-id=                iOS app allowed to use this server's
-                                     passkeys, as <team ID>.<bundle ID>, listed
-                                     in
-                                     /.well-known/apple-app-site-association;
-                                     repeat for more (not in the Go aprond)
+      --apple.app-id=                   iOS app allowed to use this server's
+                                        passkeys, as <team ID>.<bundle ID>,
+                                        listed in
+                                        /.well-known/apple-app-site-association-
+
+                                        ; repeat for more (not in the Go aprond)
 
 Link previews:
-      --unfurl.enable                Fetch the pages that messages link to and
-                                     attach their OpenGraph previews, with
-                                     images hosted here; the server then
-                                     requests any public http(s) URL a user
-                                     posts (off by default; not in the Go
-                                     aprond)
+      --unfurl.enable                   Fetch the pages that messages link to
+                                        and attach their OpenGraph previews,
+                                        with images hosted here; the server
+                                        then requests any public http(s) URL a
+                                        user posts (off by default; not in the
+                                        Go aprond)
 
 Guests:
-      --guest.posting                Let guests post, react, join, leave, and
-                                     make rooms; without it they only read, and
-                                     server.ext.settings says so (not in the Go
-                                     aprond)
+      --guest.posting                   Let guests post, react, join, leave,
+                                        and make rooms; without it they only
+                                        read, and server.ext.settings says so
+                                        (not in the Go aprond)
 
 History:
-      --history.retention=           Delete messages, reactions, and their
-                                     uploads older than this, such as 168h,
-                                     checking hourly; emptied threads and
-                                     private rooms go, other rooms stay
-                                     (default: keep forever; not in the Go
-                                     aprond)
+      --history.retention=              Delete messages, reactions, and their
+                                        uploads older than this, such as 168h,
+                                        checking hourly; emptied threads and
+                                        private rooms go, other rooms stay
+                                        (default: keep forever; not in the Go
+                                        aprond)
 
 Frames:
-      --frame.max-bytes=             Largest WebSocket message a client may
-                                     send, in bytes; a larger one closes the
-                                     connection with 1009 (not in the Go
-                                     aprond) (default: 16384)
-      --frame.max-text-bytes=        Largest body.text of a message or command,
-                                     in bytes (not in the Go aprond) (default:
-                                     4096)
-      --frame.max-depth=             Deepest nesting of objects and arrays in a
-                                     frame, the frame itself at depth 1 (not in
-                                     the Go aprond) (default: 8)
-      --frame.max-nodes=             Most JSON values in a frame, object keys
-                                     not counted (not in the Go aprond)
-                                     (default: 2048)
-      --frame.max-id-bytes=          Longest request id, in bytes (not in the
-                                     Go aprond) (default: 128)
+      --frame.max-bytes=                Largest WebSocket message a client may
+                                        send, in bytes; a larger one closes the
+                                        connection with 1009 (not in the Go
+                                        aprond) (default: 16384)
+      --frame.max-text-bytes=           Largest body.text of a message or
+                                        command, in bytes (not in the Go
+                                        aprond) (default: 4096)
+      --frame.max-depth=                Deepest nesting of objects and arrays
+                                        in a frame, the frame itself at depth 1
+                                        (not in the Go aprond) (default: 8)
+      --frame.max-nodes=                Most JSON values in a frame, object
+                                        keys not counted (not in the Go aprond)
+                                        (default: 2048)
+      --frame.max-id-bytes=             Longest request id, in bytes (not in
+                                        the Go aprond) (default: 128)
+
+Limits:
+      --limit.connections-per-ip=       Open WebSockets from one client address
+                                        (an IPv4 address or an IPv6 /56); 0 is
+                                        unlimited (not in the Go aprond)
+                                        (default: 10)
+      --limit.guest-connections-per-ip= Open WebSockets from one client address
+                                        that are not signed in to an account,
+                                        guests included; 0 is unlimited (not in
+                                        the Go aprond) (default: 6)
+      --limit.connections-per-user=     Open WebSockets of one account; 0 is
+                                        unlimited (not in the Go aprond)
+                                        (default: 3)
+      --limit.admissions-per-ip-minute= New WebSockets one client address may
+                                        open a minute; 0 is unlimited (not in
+                                        the Go aprond) (default: 12)
 
 Server:
-      --server.title=                Plain name clients show for this server,
-                                     as server.title, unless an admin's /server
-                                     title sets one (default: none, so clients
-                                     show the server's address; not in the Go
-                                     aprond)
-      --server.description=          CommonMark of at most 500 bytes saying
-                                     what this server is about, as
-                                     server.description, unless an admin's
-                                     /server description sets one (default:
-                                     general's description; not in the Go
-                                     aprond)
-      --server.avatar=               Server icon, as server.avatar: an https:
-                                     URL or a small
-                                     data:image/{png,jpeg,gif,webp};base64,
-                                     URL, unless an admin's /server avatar sets
-                                     one (not in the Go aprond)
+      --server.title=                   Plain name clients show for this
+                                        server, as server.title, unless an
+                                        admin's /server title sets one
+                                        (default: none, so clients show the
+                                        server's address; not in the Go aprond)
+      --server.description=             CommonMark of at most 500 bytes saying
+                                        what this server is about, as
+                                        server.description, unless an admin's
+                                        /server description sets one (default:
+                                        general's description; not in the Go
+                                        aprond)
+      --server.avatar=                  Server icon, as server.avatar: an
+                                        https: URL or a small
+                                        data:image/{png,jpeg,gif,webp};base64,
+                                        URL, unless an admin's /server avatar
+                                        sets one (not in the Go aprond)
 
 Help Options:
-  -h, --help                         Show this help message
+  -h, --help                            Show this help message
 
 --- stderr
 
@@ -521,253 +575,280 @@ Usage:
   aprond [OPTIONS]
 
 Application Options:
-      --config=                      Load settings from a TOML file; flags
-                                     given on the command line take precedence
-                                     (use --print-config for an example)
-      --print-config                 Print the current settings as TOML and exit
-      --addr=                        HTTP and WebSocket listen address; :8080
-                                     listens on every interface (default:
-                                     127.0.0.1:8080)
-      --static-dir=                  Directory containing the built frontend
-      --origin=                      Allowed WebSocket origin pattern; repeat
-                                     for more (default: localhost, 127.0.0.1,
-                                     and ::1)
-      --allow-any-origin             Disable WebSocket origin checks
-      --public-url=                  External base URL of upload, file, and
-                                     stream links, such as https://chat.example
-                                     (default: each request's host, or
-                                     https://<tls.domain>)
-      --max-connections=             Maximum concurrent WebSockets; 0 is
-                                     unlimited
-      --max-listener-connections=    Maximum concurrent TCP connections on the
-                                     listener, HTTP included; 0 is unlimited
-      --messages-per-minute=         Burst of new messages, room_set requests,
-                                     and /avatar commands per user, refilled
-                                     over a minute; 0 is unlimited
-      --max-listed-members=          Members listed per room in room_list and
-                                     room_update; a larger room lists its most
-                                     recently active ones and member_count. 0
-                                     is unlimited (default: 1000)
-      --max-private-rooms=           Top-level private rooms one user may be in
-                                     at once, created or added to, such as on a
-                                     public deployment; 0 is unlimited
-                                     (default: 20)
-      --read-receipts                Relay each user's read cursors to everyone
-                                     in the room, and list them after
-                                     room_list; without it they go only to the
-                                     user's own connections (not in the Go
-                                     aprond)
-      --debug-addr=                  Listen address for unauthenticated pprof
-                                     and expvar under /debug/, such as
-                                     127.0.0.1:6060; empty disables
-      --store=                       Where state is kept: sqlite:<path> for a
-                                     SQLite database, or memory to keep nothing
-                                     across restarts (default:
-                                     sqlite:/home/aprond/Library/Application
-                                     Support/aprond/aprond.db)
-      --client-ip-header=            Request header a reverse proxy puts the
-                                     client's address in, such as
-                                     X-Forwarded-For (its last entry) or
-                                     X-Real-IP, for per-client limits; set only
-                                     behind a proxy that sets it, since a
-                                     connection without it is refused. IPv6
-                                     clients are limited by their /56
-      --welcome=                     Markdown clients show on their sign-in
-                                     screen (server.welcome), such as how this
-                                     server's sign-in methods fit together
-                                     (default: general's description, else a
-                                     summary of how guests and sign-in work
-                                     here)
-      --role=                        Grant a role to an account as role=user_id
-                                     or role=email, such as admin=ada, once:
-                                     the account keeps it until an admin takes
-                                     it away; repeat for more. admin and mod
-                                     (or moderator) may create top-level rooms
-      --admin-token-file=            File holding a token that signs in as the
-                                     user admin from any origin, without a
-                                     passkey; at least 16 bytes (default:
-                                     $APRON_ADMIN_TOKEN; unset or empty
-                                     disables it)
+      --config=                         Load settings from a TOML file; flags
+                                        given on the command line take
+                                        precedence (use --print-config for an
+                                        example)
+      --print-config                    Print the current settings as TOML and
+                                        exit
+      --addr=                           HTTP and WebSocket listen address;
+                                        :8080 listens on every interface
+                                        (default: 127.0.0.1:8080)
+      --static-dir=                     Directory containing the built frontend
+      --origin=                         Allowed WebSocket origin pattern;
+                                        repeat for more (default: localhost,
+                                        127.0.0.1, and ::1)
+      --allow-any-origin                Disable WebSocket origin checks
+      --public-url=                     External base URL of upload, file, and
+                                        stream links, such as
+                                        https://chat.example (default: each
+                                        request's host, or https://<tls.domain>)
+      --max-connections=                Maximum concurrent WebSockets; 0 is
+                                        unlimited (default: 100)
+      --max-listener-connections=       Maximum concurrent TCP connections on
+                                        the listener, HTTP included; 0 is
+                                        unlimited
+      --messages-per-minute=            Burst of new messages, room_set
+                                        requests, and /avatar commands per
+                                        user, refilled over a minute; 0 is
+                                        unlimited
+      --max-listed-members=             Members listed per room in room_list
+                                        and room_update; a larger room lists
+                                        its most recently active ones and
+                                        member_count. 0 is unlimited (default:
+                                        1000)
+      --max-private-rooms=              Top-level private rooms one user may be
+                                        in at once, created or added to, such
+                                        as on a public deployment; 0 is
+                                        unlimited (default: 20)
+      --read-receipts                   Relay each user's read cursors to
+                                        everyone in the room, and list them
+                                        after room_list; without it they go
+                                        only to the user's own connections (not
+                                        in the Go aprond)
+      --debug-addr=                     Listen address for unauthenticated
+                                        pprof and expvar under /debug/, such as
+                                        127.0.0.1:6060; empty disables
+      --store=                          Where state is kept: sqlite:<path> for
+                                        a SQLite database, or memory to keep
+                                        nothing across restarts (default:
+                                        sqlite:/home/aprond/Library/Application
+                                        Support/aprond/aprond.db)
+      --client-ip-header=               Request header a reverse proxy puts the
+                                        client's address in, such as
+                                        X-Forwarded-For (its last entry) or
+                                        X-Real-IP, for per-client limits; set
+                                        only behind a proxy that sets it, since
+                                        a connection without it is refused.
+                                        IPv6 clients are limited by their /56
+      --welcome=                        Markdown clients show on their sign-in
+                                        screen (server.welcome), such as how
+                                        this server's sign-in methods fit
+                                        together (default: general's
+                                        description, else a summary of how
+                                        guests and sign-in work here)
+      --role=                           Grant a role to an account as
+                                        role=user_id or role=email, such as
+                                        admin=ada, once: the account keeps it
+                                        until an admin takes it away; repeat
+                                        for more. admin and mod (or moderator)
+                                        may create top-level rooms
+      --admin-token-file=               File holding a token that signs in as
+                                        the user admin from any origin, without
+                                        a passkey; at least 16 bytes (default:
+                                        $APRON_ADMIN_TOKEN; unset or empty
+                                        disables it)
 
 Passkeys:
-      --webauthn.rp-id=              Passkey relying party domain; empty
-                                     disables passkeys (default: localhost)
-      --webauthn.origin=             Exact frontend origin for passkeys; repeat
-                                     for more (default: http://localhost:5173,
-                                     http://localhost:8080)
+      --webauthn.rp-id=                 Passkey relying party domain; empty
+                                        disables passkeys (default: localhost)
+      --webauthn.origin=                Exact frontend origin for passkeys;
+                                        repeat for more (default:
+                                        http://localhost:5173,
+                                        http://localhost:8080)
 
 Uploads:
-      --upload.dir=                  Directory holding uploaded files; upload
-                                     files the store does not refer to are
-                                     removed at start (default:
-                                     /home/aprond/Library/Application
-                                     Support/aprond/uploads)
-      --upload.max-mb=               Maximum size of one upload, in MiB
-                                     (default: 5)
-      --upload.max-avatar-kb=        Maximum size of an /avatar image, in KiB
-                                     (not in the Go aprond) (default: 256)
-      --upload.type=                 Type an upload may be, as a MIME type,
-                                     type/* or */*; repeat for more. A PNG,
-                                     JPEG, GIF, WebP, WebM, Ogg or MP4 file is
-                                     typed from its bytes, any other from its
-                                     declared type (not in the Go aprond)
-                                     (default: image/png, image/jpeg,
-                                     image/gif, image/webp, audio/webm,
-                                     audio/ogg, audio/mp4)
-      --upload.max-message-mb=       Maximum total size of one message's
-                                     uploads, in MiB (default: 20)
-      --upload.max-storage-mb=       Total size of hosted uploads, in MiB,
-                                     beyond which the oldest are removed from
-                                     their messages (default: 1000)
+      --upload.dir=                     Directory holding uploaded files;
+                                        upload files the store does not refer
+                                        to are removed at start (default:
+                                        /home/aprond/Library/Application
+                                        Support/aprond/uploads)
+      --upload.max-mb=                  Maximum size of one upload, in MiB
+                                        (default: 5)
+      --upload.max-avatar-kb=           Maximum size of an /avatar image, in
+                                        KiB (not in the Go aprond) (default:
+                                        256)
+      --upload.type=                    Type an upload may be, as a MIME type,
+                                        type/* or */*; repeat for more. A PNG,
+                                        JPEG, GIF, WebP, WebM, Ogg or MP4 file
+                                        is typed from its bytes, any other from
+                                        its declared type (not in the Go
+                                        aprond) (default: image/png,
+                                        image/jpeg, image/gif, image/webp,
+                                        audio/webm, audio/ogg, audio/mp4)
+      --upload.max-message-mb=          Maximum total size of one message's
+                                        uploads, in MiB (default: 20)
+      --upload.max-storage-mb=          Total size of hosted uploads, in MiB,
+                                        beyond which the oldest are removed
+                                        from their messages (default: 1000)
 
 Email sign-in:
-      --email.enable                 Offer email sign-in (off by default)
-      --email.sender=[smtp|http|log] How email sign-in codes are delivered,
-                                     with --email.enable: smtp sends them, http
-                                     POSTs them to a mail API (not in the Go
-                                     aprond), log writes them to the server log
-                                     (development only; refused with
-                                     --public-url or --tls.domain) (default:
-                                     smtp)
-      --email.link-url=              Page that sign-in links in emails open,
-                                     such as https://chat.example/, with a
-                                     sign-in token in its fragment (default:
-                                     --public-url; empty sends codes without
-                                     links)
-      --email.from=                  Sender address of sign-in emails, for
-                                     --email.sender smtp or http
-      --email.smtp-addr=             SMTP relay as host:port, for
-                                     --email.sender smtp: STARTTLS is required
-                                     (such as :587), or TLS from the start on
-                                     port 465
-      --email.smtp-user=             SMTP user name; empty sends without
-                                     authentication
-      --email.smtp-password=         SMTP password
-      --email.smtp-insecure          Send through a relay that does not offer
-                                     STARTTLS, in cleartext (a relay on the
-                                     same host only)
-      --email.http-url=              Mail API that --email.sender http POSTs
-                                     {"from", "to", "subject", "text"} to as
-                                     JSON, such as
-                                     https://api.cloudflare.com/client/v4/accou-
+      --email.enable                    Offer email sign-in (off by default)
+      --email.sender=[smtp|http|log]    How email sign-in codes are delivered,
+                                        with --email.enable: smtp sends them,
+                                        http POSTs them to a mail API (not in
+                                        the Go aprond), log writes them to the
+                                        server log (development only; refused
+                                        with --public-url or --tls.domain)
+                                        (default: smtp)
+      --email.link-url=                 Page that sign-in links in emails open,
+                                        such as https://chat.example/, with a
+                                        sign-in token in its fragment (default:
+                                        --public-url; empty sends codes without
+                                        links)
+      --email.from=                     Sender address of sign-in emails, for
+                                        --email.sender smtp or http
+      --email.smtp-addr=                SMTP relay as host:port, for
+                                        --email.sender smtp: STARTTLS is
+                                        required (such as :587), or TLS from
+                                        the start on port 465
+      --email.smtp-user=                SMTP user name; empty sends without
+                                        authentication
+      --email.smtp-password=            SMTP password
+      --email.smtp-insecure             Send through a relay that does not
+                                        offer STARTTLS, in cleartext (a relay
+                                        on the same host only)
+      --email.http-url=                 Mail API that --email.sender http POSTs
+                                        {"from", "to", "subject", "text"} to as
+                                        JSON, such as
+                                        https://api.cloudflare.com/client/v4/ac-
 
-                                     nts/<account ID>/email/sending/send (not
-                                     in the Go aprond)
-      --email.http-header=           Header of each --email.sender http
-                                     request, as Name: value, such as
-                                     "Authorization: Bearer <token>"; repeat
-                                     for more (not in the Go aprond)
+                                        counts/<account ID>/email/sending/send
+                                        (not in the Go aprond)
+      --email.http-header=              Header of each --email.sender http
+                                        request, as Name: value, such as
+                                        "Authorization: Bearer <token>"; repeat
+                                        for more (not in the Go aprond)
 
 Push:
-      --push.disable                 Do not offer push registration
-      --push.allow-insecure          Accept http push endpoints and ones on
-                                     internal addresses, so any client can make
-                                     the server POST into its network (tests
-                                     only; refused with --public-url or
-                                     --tls.domain)
-      --push.hosts=                  Push service an endpoint may name, for
-                                     relay and webpush alike: a host name, a
-                                     *.host suffix, or a standalone * for any;
-                                     repeat for more (default:
-                                     fcm.googleapis.com,
-                                     *.push.services.mozilla.com,
-                                     web.push.apple.com, *.push.apple.com and
-                                     *.notify.windows.com; not in the Go aprond)
-      --push.delay=                  How long a message's push waits, so a user
-                                     back at their screen by then is not
-                                     pushed, from 0 (at once) to 60s (not in
-                                     the Go aprond) (default: 30s)
-      --push.vapid-private-key=      Web Push VAPID private key, the P-256
-                                     scalar in base64url as web-push tools
-                                     print it (default: one generated at the
-                                     first start and kept in the store)
-      --push.vapid-subject=          Contact push services may use, a mailto:
-                                     or https: URL, sent with Web Push
-                                     (default: --public-url)
+      --push.disable                    Do not offer push registration
+      --push.allow-insecure             Accept http push endpoints and ones on
+                                        internal addresses, so any client can
+                                        make the server POST into its network
+                                        (tests only; refused with --public-url
+                                        or --tls.domain)
+      --push.hosts=                     Push service an endpoint may name, for
+                                        relay and webpush alike: a host name, a
+                                        *.host suffix, or a standalone * for
+                                        any; repeat for more (default:
+                                        fcm.googleapis.com,
+                                        *.push.services.mozilla.com,
+                                        web.push.apple.com, *.push.apple.com
+                                        and *.notify.windows.com; not in the Go
+                                        aprond)
+      --push.delay=                     How long a message's push waits, so a
+                                        user back at their screen by then is
+                                        not pushed, from 0 (at once) to 60s
+                                        (not in the Go aprond) (default: 30s)
+      --push.vapid-private-key=         Web Push VAPID private key, the P-256
+                                        scalar in base64url as web-push tools
+                                        print it (default: one generated at the
+                                        first start and kept in the store)
+      --push.vapid-subject=             Contact push services may use, a
+                                        mailto: or https: URL, sent with Web
+                                        Push (default: --public-url)
 
 TLS:
-      --tls.domain=                  Serve HTTPS with Let's Encrypt
-                                     certificates for this domain; repeat for
-                                     more. Replaces --addr with --tls.addr
-      --tls.addr=                    HTTPS listen address when --tls.domain is
-                                     set (default: :443)
-      --tls.http-addr=               HTTP listen address for ACME challenges
-                                     and redirects to HTTPS when --tls.domain
-                                     is set (default: :80)
-      --tls.cache-dir=               Directory caching certificates (default:
-                                     aprond/autocert in the user cache
-                                     directory) (default:
-                                     /home/aprond/Library/Caches/aprond/autocer-
+      --tls.domain=                     Serve HTTPS with Let's Encrypt
+                                        certificates for this domain; repeat
+                                        for more. Replaces --addr with
+                                        --tls.addr
+      --tls.addr=                       HTTPS listen address when --tls.domain
+                                        is set (default: :443)
+      --tls.http-addr=                  HTTP listen address for ACME challenges
+                                        and redirects to HTTPS when
+                                        --tls.domain is set (default: :80)
+      --tls.cache-dir=                  Directory caching certificates
+                                        (default: aprond/autocert in the user
+                                        cache directory) (default:
+                                        /home/aprond/Library/Caches/aprond/auto-
 
-                                     t)
-      --tls.email=                   Contact email given to Let's Encrypt
+                                        cert)
+      --tls.email=                      Contact email given to Let's Encrypt
 
 Apple:
-      --apple.app-id=                iOS app allowed to use this server's
-                                     passkeys, as <team ID>.<bundle ID>, listed
-                                     in
-                                     /.well-known/apple-app-site-association;
-                                     repeat for more (not in the Go aprond)
+      --apple.app-id=                   iOS app allowed to use this server's
+                                        passkeys, as <team ID>.<bundle ID>,
+                                        listed in
+                                        /.well-known/apple-app-site-association-
+
+                                        ; repeat for more (not in the Go aprond)
 
 Link previews:
-      --unfurl.enable                Fetch the pages that messages link to and
-                                     attach their OpenGraph previews, with
-                                     images hosted here; the server then
-                                     requests any public http(s) URL a user
-                                     posts (off by default; not in the Go
-                                     aprond)
+      --unfurl.enable                   Fetch the pages that messages link to
+                                        and attach their OpenGraph previews,
+                                        with images hosted here; the server
+                                        then requests any public http(s) URL a
+                                        user posts (off by default; not in the
+                                        Go aprond)
 
 Guests:
-      --guest.posting                Let guests post, react, join, leave, and
-                                     make rooms; without it they only read, and
-                                     server.ext.settings says so (not in the Go
-                                     aprond)
+      --guest.posting                   Let guests post, react, join, leave,
+                                        and make rooms; without it they only
+                                        read, and server.ext.settings says so
+                                        (not in the Go aprond)
 
 History:
-      --history.retention=           Delete messages, reactions, and their
-                                     uploads older than this, such as 168h,
-                                     checking hourly; emptied threads and
-                                     private rooms go, other rooms stay
-                                     (default: keep forever; not in the Go
-                                     aprond)
+      --history.retention=              Delete messages, reactions, and their
+                                        uploads older than this, such as 168h,
+                                        checking hourly; emptied threads and
+                                        private rooms go, other rooms stay
+                                        (default: keep forever; not in the Go
+                                        aprond)
 
 Frames:
-      --frame.max-bytes=             Largest WebSocket message a client may
-                                     send, in bytes; a larger one closes the
-                                     connection with 1009 (not in the Go
-                                     aprond) (default: 16384)
-      --frame.max-text-bytes=        Largest body.text of a message or command,
-                                     in bytes (not in the Go aprond) (default:
-                                     4096)
-      --frame.max-depth=             Deepest nesting of objects and arrays in a
-                                     frame, the frame itself at depth 1 (not in
-                                     the Go aprond) (default: 8)
-      --frame.max-nodes=             Most JSON values in a frame, object keys
-                                     not counted (not in the Go aprond)
-                                     (default: 2048)
-      --frame.max-id-bytes=          Longest request id, in bytes (not in the
-                                     Go aprond) (default: 128)
+      --frame.max-bytes=                Largest WebSocket message a client may
+                                        send, in bytes; a larger one closes the
+                                        connection with 1009 (not in the Go
+                                        aprond) (default: 16384)
+      --frame.max-text-bytes=           Largest body.text of a message or
+                                        command, in bytes (not in the Go
+                                        aprond) (default: 4096)
+      --frame.max-depth=                Deepest nesting of objects and arrays
+                                        in a frame, the frame itself at depth 1
+                                        (not in the Go aprond) (default: 8)
+      --frame.max-nodes=                Most JSON values in a frame, object
+                                        keys not counted (not in the Go aprond)
+                                        (default: 2048)
+      --frame.max-id-bytes=             Longest request id, in bytes (not in
+                                        the Go aprond) (default: 128)
+
+Limits:
+      --limit.connections-per-ip=       Open WebSockets from one client address
+                                        (an IPv4 address or an IPv6 /56); 0 is
+                                        unlimited (not in the Go aprond)
+                                        (default: 10)
+      --limit.guest-connections-per-ip= Open WebSockets from one client address
+                                        that are not signed in to an account,
+                                        guests included; 0 is unlimited (not in
+                                        the Go aprond) (default: 6)
+      --limit.connections-per-user=     Open WebSockets of one account; 0 is
+                                        unlimited (not in the Go aprond)
+                                        (default: 3)
+      --limit.admissions-per-ip-minute= New WebSockets one client address may
+                                        open a minute; 0 is unlimited (not in
+                                        the Go aprond) (default: 12)
 
 Server:
-      --server.title=                Plain name clients show for this server,
-                                     as server.title, unless an admin's /server
-                                     title sets one (default: none, so clients
-                                     show the server's address; not in the Go
-                                     aprond)
-      --server.description=          CommonMark of at most 500 bytes saying
-                                     what this server is about, as
-                                     server.description, unless an admin's
-                                     /server description sets one (default:
-                                     general's description; not in the Go
-                                     aprond)
-      --server.avatar=               Server icon, as server.avatar: an https:
-                                     URL or a small
-                                     data:image/{png,jpeg,gif,webp};base64,
-                                     URL, unless an admin's /server avatar sets
-                                     one (not in the Go aprond)
+      --server.title=                   Plain name clients show for this
+                                        server, as server.title, unless an
+                                        admin's /server title sets one
+                                        (default: none, so clients show the
+                                        server's address; not in the Go aprond)
+      --server.description=             CommonMark of at most 500 bytes saying
+                                        what this server is about, as
+                                        server.description, unless an admin's
+                                        /server description sets one (default:
+                                        general's description; not in the Go
+                                        aprond)
+      --server.avatar=                  Server icon, as server.avatar: an
+                                        https: URL or a small
+                                        data:image/{png,jpeg,gif,webp};base64,
+                                        URL, unless an admin's /server avatar
+                                        sets one (not in the Go aprond)
 
 Help Options:
-  -h, --help                         Show this help message
+  -h, --help                            Show this help message
 
 --- stderr
 

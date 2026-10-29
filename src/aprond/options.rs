@@ -41,6 +41,7 @@ pub struct Options {
     pub server: ServerOptions,
     pub history: HistoryOptions,
     pub frame: FrameOptions,
+    pub limit: LimitOptions,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -124,6 +125,15 @@ pub struct HistoryOptions {
     pub retention: String,
 }
 
+/// apron-server-cloudflare's limits (docs/DEVIATIONS.md); 0 is unlimited.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LimitOptions {
+    pub connections_per_ip: i64,
+    pub guest_connections_per_ip: i64,
+    pub connections_per_user: i64,
+    pub admissions_per_ip_minute: i64,
+}
+
 /// An extension Go lacks (docs/DEVIATIONS.md).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FrameOptions {
@@ -196,7 +206,7 @@ pub static GROUPS: &[Group] = &[
             spec!("origin", List, origins, [], [], "Allowed WebSocket origin pattern; repeat for more (default: localhost, 127.0.0.1, and ::1)"),
             spec!("allow-any-origin", Bool, allow_any_origin, [], [], "Disable WebSocket origin checks"),
             spec!("public-url", Str, public_url, [], [], "External base URL of upload, file, and stream links, such as https://chat.example (default: each request's host, or https://<tls.domain>)"),
-            spec!("max-connections", Int, max_connections, [], [], "Maximum concurrent WebSockets; 0 is unlimited"),
+            spec!("max-connections", Int, max_connections, ["100"], [], "Maximum concurrent WebSockets; 0 is unlimited"),
             spec!("max-listener-connections", Int, max_listener_connections, [], [], "Maximum concurrent TCP connections on the listener, HTTP included; 0 is unlimited"),
             spec!("messages-per-minute", Int, messages_per_minute, [], [], "Burst of new messages, room_set requests, and /avatar commands per user, refilled over a minute; 0 is unlimited"),
             spec!("max-listed-members", Int, max_listed_members, ["1000"], [], "Members listed per room in room_list and room_update; a larger room lists its most recently active ones and member_count. 0 is unlimited"),
@@ -306,6 +316,16 @@ pub static GROUPS: &[Group] = &[
             spec!("max-depth", Int, frame.max_depth, ["8"], [], "Deepest nesting of objects and arrays in a frame, the frame itself at depth 1 (not in the Go aprond)"),
             spec!("max-nodes", Int, frame.max_nodes, ["2048"], [], "Most JSON values in a frame, object keys not counted (not in the Go aprond)"),
             spec!("max-id-bytes", Int, frame.max_id_bytes, ["128"], [], "Longest request id, in bytes (not in the Go aprond)"),
+        ],
+    },
+    Group {
+        name: "Limits",
+        namespace: "limit",
+        options: &[
+            spec!("connections-per-ip", Int, limit.connections_per_ip, ["10"], [], "Open WebSockets from one client address (an IPv4 address or an IPv6 /56); 0 is unlimited (not in the Go aprond)"),
+            spec!("guest-connections-per-ip", Int, limit.guest_connections_per_ip, ["6"], [], "Open WebSockets from one client address that are not signed in to an account, guests included; 0 is unlimited (not in the Go aprond)"),
+            spec!("connections-per-user", Int, limit.connections_per_user, ["3"], [], "Open WebSockets of one account; 0 is unlimited (not in the Go aprond)"),
+            spec!("admissions-per-ip-minute", Int, limit.admissions_per_ip_minute, ["12"], [], "New WebSockets one client address may open a minute; 0 is unlimited (not in the Go aprond)"),
         ],
     },
     Group {
