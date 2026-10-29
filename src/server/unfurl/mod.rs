@@ -12,9 +12,11 @@ use std::thread;
 use rust_stdlib::os;
 use rust_stdlib::time::{self, Duration, Time};
 
-use super::embeds::{new_upload_file, MAX_EMBEDS_PER_MESSAGE};
+use super::embeds::MAX_EMBEDS_PER_MESSAGE;
+
 use super::protocol::*;
 use super::server::{Server, State};
+use super::uploads::new_upload_file;
 use crate::rate::{every, Limiter};
 
 mod cache;

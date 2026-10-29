@@ -335,7 +335,7 @@ fn test_upload_types_are_sniffed() {
 /// The sniffer reads each type from its signature, never from a sender.
 #[test]
 fn test_sniff_upload() {
-    use crate::server::embeds::sniff_upload;
+    use crate::server::media_types::sniff_upload;
     let mut webm = vec![0x1a, 0x45, 0xdf, 0xa3, 0x9f, 0x42, 0x86, 0x81, 0x01];
     webm.extend_from_slice(&[0x42, 0x82, 0x84]);
     webm.extend_from_slice(b"webm");
@@ -361,7 +361,7 @@ fn test_sniff_upload() {
     ogg.extend_from_slice(b"OpusHead");
     assert_eq!(sniff_upload(&ogg), Some("audio/ogg"));
 
-    use crate::server::embeds::type_matches;
+    use crate::server::media_types::type_matches;
     let patterns = vec!["image/*".to_owned(), "Audio/Ogg".to_owned()];
     assert!(type_matches(&patterns, "image/png") && type_matches(&patterns, "audio/ogg"));
     assert!(!type_matches(&patterns, "audio/mp4") && !type_matches(&patterns, "imagex/png"));

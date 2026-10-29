@@ -13,7 +13,7 @@ use rust_stdlib::time::Duration;
 
 use super::page::{parse_page, Meta};
 use crate::obj;
-use crate::server::embeds::image_config;
+use crate::server::media_types::image_config;
 use crate::server::outbound::{self, DialCheck};
 use crate::server::protocol::*;
 
