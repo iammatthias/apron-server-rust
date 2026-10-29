@@ -36,7 +36,7 @@ pub const ROOM_CREATOR_ROLES: &[&str] = &[ADMIN_ROLE, MOD_ROLE];
 /// (apron-server-cloudflare's MODERATOR_ROLES).
 pub const MODERATOR_ROLES: &[&str] = &[ADMIN_ROLE, MOD_ROLE, THREADER_ROLE];
 /// The key of `you`'s ext that lists what the user may do to others'
-/// messages and memberships (apron-web EXT.md §7, `ext:permissions`).
+/// messages and memberships (EXTENSIONS.md, `ext:permissions`).
 pub const PERMISSIONS_KEY: &str = "permissions";
 pub const INVALID_ROLE: &str =
     "A role is 1 to 24 lowercase letters, digits, _ or -, starting with a letter";
@@ -825,7 +825,7 @@ impl State {
         let name = parse_string(&req.params, "name", false)?;
         let avatar = parse_string(&req.params, "avatar", false)?;
         let (mut ext_write, has_ext) = parse_ext(&req.params, "ext")?;
-        // The server owns the permissions it sends in `you` (EXT.md §7).
+        // The server owns the permissions it sends in `you` (EXTENSIONS.md).
         ext_write.remove(PERMISSIONS_KEY);
         let mut status = parse_string(&req.params, "status", false)?;
         let has_name = req.params.contains_key("name");

@@ -281,34 +281,28 @@ fn test_server_frame_media() {
 /// is kept (apron-server-cloudflare's "a PDF write is 415").
 #[test]
 fn test_upload_types_are_sniffed() {
-    let upload =
-        |server: &TestServer, c: &mut TestClient, id: &str, body: &[u8], declared: &str| {
-            c.drain();
-            let result = post_embeds(
-                c,
-                id,
-                obj! {"body" => obj! {"embeds" => vec![Json::from(obj! {"kind" => "upload"})]}},
-            );
-            let write_url = result["embeds"].as_list()[0].as_object().unwrap()["write_url"]
-                .as_str()
-                .unwrap()
-                .to_owned();
-            let status = http_do("PUT", &write_url, Some(body), declared).0;
-            let _ = server;
-            status
-        };
+    let upload = |c: &mut TestClient, id: &str, body: &[u8], declared: &str| {
+        c.drain();
+        let result = post_embeds(
+            c,
+            id,
+            obj! {"body" => obj! {"embeds" => vec![Json::from(obj! {"kind" => "upload"})]}},
+        );
+        let write_url = result["embeds"].as_list()[0].as_object().unwrap()["write_url"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        http_do("PUT", &write_url, Some(body), declared).0
+    };
     let server = new_test_server(default_config());
     let mut c = dial_test_client(&server);
     let pdf = b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\n1 0 obj\n";
-    assert_eq!(upload(&server, &mut c, "pdf", pdf, "application/pdf"), 415);
-    assert_eq!(upload(&server, &mut c, "disguised", pdf, "image/png"), 415);
-    assert_eq!(upload(&server, &mut c, "text", b"hello", ""), 415);
+    assert_eq!(upload(&mut c, "pdf", pdf, "application/pdf"), 415);
+    assert_eq!(upload(&mut c, "disguised", pdf, "image/png"), 415);
+    assert_eq!(upload(&mut c, "text", b"hello", ""), 415);
+    assert_eq!(upload(&mut c, "png", &test_png(), "image/png"), 201);
     assert_eq!(
-        upload(&server, &mut c, "png", &test_png(), "image/png"),
-        201
-    );
-    assert_eq!(
-        upload(&server, &mut c, "png-as-text", &test_png(), "text/plain"),
+        upload(&mut c, "png-as-text", &test_png(), "text/plain"),
         415
     );
     let ogg = {
@@ -320,15 +314,15 @@ fn test_upload_types_are_sniffed() {
         page.resize(64, 0);
         page
     };
-    assert_eq!(upload(&server, &mut c, "ogg", &ogg, "audio/ogg"), 201);
+    assert_eq!(upload(&mut c, "ogg", &ogg, "audio/ogg"), 201);
     let large = png_of_size(5 * 1024 * 1024 + 1);
-    assert_eq!(upload(&server, &mut c, "large", &large, "image/png"), 413);
+    assert_eq!(upload(&mut c, "large", &large, "image/png"), 413);
 
     let mut config = default_config();
     config.upload_types = vec!["*/*".into()];
     let server = new_test_server(config);
     let mut c = dial_test_client(&server);
-    assert_eq!(upload(&server, &mut c, "any", pdf, "application/pdf"), 201);
+    assert_eq!(upload(&mut c, "any", pdf, "application/pdf"), 201);
 }
 
 /// The sniffer reads each type from its signature, never from a sender.

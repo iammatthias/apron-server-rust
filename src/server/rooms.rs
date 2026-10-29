@@ -939,8 +939,9 @@ impl State {
 
     /// Answers room_list (§4.2.1): the rooms matching its filters, joined
     /// ones in `joined` and visible unjoined ones in `not_joined`, each most
-    /// recently active first; MAX_THREADS and MAX_CREATED_ROOMS bound both. The result is followed by the read cursors kept
-    /// for the listed rooms (§4.6).
+    /// recently active first; MAX_THREADS and MAX_CREATED_ROOMS bound both.
+    /// The result is followed by the read cursors kept for the listed rooms
+    /// (§4.6).
     pub fn list_rooms_locked(
         &self,
         c: &Arc<Client>,
