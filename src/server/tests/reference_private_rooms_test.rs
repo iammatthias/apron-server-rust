@@ -602,3 +602,65 @@ fn test_moves_and_replies_out_of_private_rooms() {
         obj! {"room_id" => room.as_str(), "body" => obj! {"text" => "re"}, "reply_to" => obj! {"message_id" => inner.as_str()}},
     );
 }
+
+/// The denial of a room_set, its message.
+fn denial(c: &mut TestClient, id: &str, params: Object) -> Json {
+    let frame = c.call("room_set", id, params);
+    let error = frame["error"].as_object().expect("error");
+    assert_eq!(error["code"], Json::from(CODE_DENIED), "{frame:?}");
+    error["message"].clone()
+}
+
+/// An account may have started at most 5 private rooms still live, as on
+/// Cloudflare, even after leaving them to others; one stops counting when
+/// everyone has left it.
+#[test]
+fn test_private_rooms_started_per_user_bound() {
+    let server = new_test_server(default_config());
+    let mut clients = dial_group(&server, 2);
+    for c in &clients {
+        make_account(&server, &c.user_id);
+    }
+    let (mut a, mut b) = (clients.remove(0), clients.remove(0));
+    let mut started = Vec::new();
+    for i in 0..5 {
+        let (room, _) = save_room(&mut a, &format!("p{i}"), obj! {"private" => true});
+        a.request(
+            "room_join",
+            &format!("add{i}"),
+            obj! {"room_id" => room.as_str(), "user_id" => b.user_id.as_str()},
+        );
+        leave_room(&mut a, &room);
+        started.push(room);
+    }
+    a.drain();
+    b.drain();
+    assert_eq!(
+        denial(&mut a, "sixth", obj! {"private" => true}),
+        Json::from("You can have started at most 5 private rooms at once; one stops counting when everyone has left it or its history expires")
+    );
+    leave_room(&mut b, &started[0]);
+    a.drain();
+    save_room(&mut a, "again", obj! {"private" => true});
+}
+
+/// The server holds at most 100 private rooms, as Cloudflare's demo does.
+#[test]
+fn test_private_rooms_server_bound() {
+    let server = new_test_server(default_config());
+    let mut clients = dial_group(&server, 21);
+    for c in &clients {
+        make_account(&server, &c.user_id);
+    }
+    let mut last = clients.pop().unwrap();
+    for (n, c) in clients.iter_mut().enumerate() {
+        for i in 0..5 {
+            save_room(c, &format!("p{n}-{i}"), obj! {"private" => true});
+        }
+    }
+    last.drain();
+    assert_eq!(
+        denial(&mut last, "full", obj! {"private" => true}),
+        Json::from("The server holds as many private rooms as it can; one frees up when everyone has left it or its history expires")
+    );
+}
