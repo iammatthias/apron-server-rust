@@ -173,6 +173,14 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         writes: true,
         run: State::toggle_command,
     },
+    ServerCommand {
+        name: "purge",
+        usage: "/purge <user_id>",
+        help: "disconnect a user and delete their account, bot, and everything they posted or uploaded",
+        audience: Audience::Admins,
+        writes: true,
+        run: State::purge_command,
+    },
 ];
 
 /// Renders a notice for the one connection it is queued on: unlogged,

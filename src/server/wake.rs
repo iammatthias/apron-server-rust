@@ -373,6 +373,15 @@ impl State {
         }
     }
 
+    /// The users the waiting wakes would wake, for tests.
+    #[cfg(test)]
+    pub fn waking_users(&self) -> Vec<String> {
+        self.pending_wakes
+            .values()
+            .flat_map(|wake| wake.reasons.iter().map(|(id, _)| id.clone()))
+            .collect()
+    }
+
     /// Stops every waiting wake, at shutdown: a wake lost with the server
     /// is not pushed.
     pub fn stop_wakes_locked(&mut self) {

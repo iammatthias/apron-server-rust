@@ -547,7 +547,7 @@ impl State {
     /// removeIfEmpty does; their records stay in the log until they expire.
     /// Everyone has left it, so nobody is told; a room_list delta from
     /// before the removal is answered with a full listing.
-    fn remove_if_empty_locked(&mut self, room_id: &str) {
+    pub(super) fn remove_if_empty_locked(&mut self, room_id: &str) {
         if !self
             .rooms
             .get(room_id)

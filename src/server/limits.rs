@@ -442,6 +442,40 @@ impl LimitTable {
         }
         Ok(())
     }
+
+    /// The user_ids with rows, for tests that check none is left behind.
+    #[cfg(test)]
+    pub fn users(&self) -> Vec<String> {
+        self.rows
+            .keys()
+            .filter_map(|(_, principal)| match principal {
+                Principal::User(id) => Some(id.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Forgets the rows of a user.
+    pub fn forget_user(&mut self, user_id: &str) {
+        self.rows
+            .retain(|(_, principal), _| *principal != Principal::User(user_id.to_owned()));
+    }
+
+    /// Moves a user's rows to a new user_id, so a rename spends nothing.
+    pub fn move_user(&mut self, from: &str, to: &str) {
+        let from = Principal::User(from.to_owned());
+        let moved: Vec<_> = self
+            .rows
+            .keys()
+            .filter(|(_, principal)| *principal == from)
+            .cloned()
+            .collect();
+        for key in moved {
+            let row = self.rows.remove(&key).expect("listed above");
+            self.rows
+                .insert((key.0, Principal::User(to.to_owned())), row);
+        }
+    }
 }
 
 /// The principal a client's per-IP limits count: an IPv4 address, with an

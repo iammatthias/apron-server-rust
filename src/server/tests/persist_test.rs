@@ -41,6 +41,7 @@ impl State {
             used_ids: self.used_ids.iter().cloned().collect(),
             ..DirtySet::default()
         };
+        all.records = self.records.keys().copied().collect();
         for r in self.rooms.values() {
             all.rooms.insert(r.id.clone());
             all.records.extend(r.log.iter().copied());

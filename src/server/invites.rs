@@ -78,6 +78,17 @@ impl InviteTokens {
         }
         Some(token)
     }
+
+    /// Moves an account's token, if any, to a new user_id and returns its
+    /// key.
+    pub fn move_user(&mut self, from: &str, to: &str) -> Option<SessionKey> {
+        let key = self.by_user.remove(from)?;
+        if let Some(token) = self.by_key.get_mut(&key) {
+            token.user = to.to_owned();
+        }
+        self.by_user.insert(to.to_owned(), key);
+        Some(key)
+    }
 }
 
 /// Reports whether an admin may give out `user_id`: 1 to 64 letters,
