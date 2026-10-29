@@ -10,7 +10,7 @@ use rust_stdlib::context::Context;
 use rust_stdlib::encoding::json::v2::MarshalTo;
 use rust_stdlib::log::slog;
 use rust_stdlib::net::http::{self, Handler, Request as HttpRequest, ResponseWriter, ServeMux};
-use rust_stdlib::time::{self, Duration};
+use rust_stdlib::time::{self, Duration, Time};
 use rust_stdlib_crypto::sha256;
 
 use super::bots::BotTokens;
@@ -112,6 +112,9 @@ pub struct Config {
     /// The push services endpoints may name (`--push.hosts`), checked when
     /// registering and again before each push.
     pub push_hosts: PushHosts,
+    /// How long a message's wake waits before it pushes (`--push.delay`);
+    /// zero pushes at once.
+    pub push_delay: Duration,
     /// The server's VAPID key for webpush (§4.9), the P-256 scalar in
     /// base64url; empty uses the one kept in the store, or generates one.
     pub vapid_private_key: String,
@@ -216,6 +219,7 @@ pub fn default_config() -> Config {
         disable_push: false,
         allow_insecure_push: false,
         push_hosts: PushHosts::default(),
+        push_delay: super::wake::PUSH_DELAY,
         vapid_private_key: String::new(),
         vapid_subject: String::new(),
         max_connections: 0,
@@ -454,9 +458,10 @@ pub struct Conn {
     pub client: Arc<Client>,
     /// The connection's identity, `None` before authentication.
     pub user: Option<String>,
-    /// Reports that nobody is attending the connection (§4.5): false until
-    /// the connection says otherwise.
-    pub idle: bool,
+    /// When nobody has attended the connection since (§4.5.3), as its
+    /// `idle` dated it; `None` while attended, which it is until it says
+    /// otherwise.
+    pub idle_since: Option<Time>,
     /// The pending passkey ceremony, if any (§4.10).
     pub ceremony: Option<PasskeyCeremony>,
     /// The SHA-256 of the session or bot token the connection last signed
@@ -717,6 +722,14 @@ pub struct State {
     /// unread count; badges counts the waits in progress.
     pub badge_delay: Duration,
     pub badges: WaitGroup,
+    /// The wakes waiting `--push.delay`, by a counter (wake.rs).
+    pub pending_wakes: BTreeMap<u64, super::wake::PendingWake>,
+    pub next_wake: u64,
+    /// When each user was last woken for each room, for coalescing, and
+    /// the windows (wake.rs).
+    pub push_woken: BTreeMap<(String, String), Time>,
+    pub push_coalesce: Duration,
+    pub joined_coalesce: Duration,
     pub push: Arc<PushDeliverer>,
     /// Set with `Config.unfurl`.
     pub unfurler: Option<Arc<Unfurler>>,
@@ -899,6 +912,11 @@ pub fn open(config: Config) -> Result<Arc<Server>, store::StoreError> {
                 vapid,
                 vapid_stored: false,
                 badge_delay: super::unread::BADGE_DELAY,
+                pending_wakes: BTreeMap::new(),
+                next_wake: 0,
+                push_woken: BTreeMap::new(),
+                push_coalesce: super::wake::PUSH_COALESCE,
+                joined_coalesce: super::wake::JOINED_COALESCE,
                 badges: badges.clone(),
                 push: push.clone(),
                 unfurler: unfurler.clone(),
@@ -1131,6 +1149,7 @@ impl Server {
                 for id in ids {
                     st.stop_timers_locked(&id);
                 }
+                st.stop_wakes_locked();
                 if st.temp_upload_dir {
                     let _ = rust_stdlib::os::remove_all(&st.upload_dir);
                 }
@@ -1247,7 +1266,7 @@ impl Server {
                 Conn {
                     client: client.clone(),
                     user: None,
-                    idle: false,
+                    idle_since: None,
                     ceremony: None,
                     token: [0; 32],
                     device: [0; 32],

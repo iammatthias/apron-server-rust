@@ -48,6 +48,8 @@ pub struct Settings {
     pub allow_insecure_push: bool,
     /// `--push.hosts`, an extension Go lacks.
     pub push_hosts: crate::server::push::PushHosts,
+    /// `--push.delay`, an extension Go lacks.
+    pub push_delay: Duration,
     pub vapid_private_key: String,
     pub vapid_subject: String,
     pub upload_dir: String,
@@ -141,6 +143,7 @@ pub fn server_settings(options: &Options) -> Result<Settings, String> {
     }
     config.allow_insecure_push = options.push.allow_insecure;
     config.push_hosts = crate::server::push::PushHosts::parse(&options.push.hosts)?;
+    config.push_delay = parse_push_delay(&options.push.delay)?;
     config.vapid_private_key = options.push.vapid_private_key.clone();
     config.vapid_subject = options.push.vapid_subject.clone();
     let subject = &config.vapid_subject;
@@ -274,6 +277,21 @@ fn parse_retention(value: &str) -> Result<Option<Duration>, String> {
         0 => Ok(None),
         n if n < 0 => Err(invalid()),
         _ => Ok(Some(retention)),
+    }
+}
+
+/// `--push.delay`: a duration from 0 to MAX_PUSH_DELAY; empty is 0.
+fn parse_push_delay(value: &str) -> Result<Duration, String> {
+    if value.is_empty() {
+        return Ok(Duration::from_secs(0));
+    }
+    let max = crate::server::wake::MAX_PUSH_DELAY;
+    match value.parse::<Duration>() {
+        Ok(delay) if delay.as_nanos() >= 0 && delay <= max => Ok(delay),
+        _ => Err(format!(
+            "invalid --push.delay {}: use a duration from 0 to 60s, such as 30s",
+            rust_stdlib::strconv::quote(value)
+        )),
     }
 }
 

@@ -32,6 +32,7 @@ mod server_test;
 mod status_test;
 mod toggle_test;
 mod unfurl_test;
+mod wake_test;
 mod webauthn_test;
 mod webpush_test;
 mod welcome_test;
