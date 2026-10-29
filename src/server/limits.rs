@@ -46,6 +46,17 @@ pub struct Limits {
     /// add` and `/server avatar`) of one user, and of everyone, a UTC day.
     pub uploads_per_user_day: u32,
     pub uploads_per_day: u32,
+    /// Frames one connection may send in a rolling minute, past which it is
+    /// closed with 1008; of one IP, past which the connection is closed
+    /// with 1013; and of everyone, past which a request is refused for a
+    /// while and a notification dropped. Pings are not frames.
+    pub frames_per_connection_minute: usize,
+    pub frames_per_ip_minute: u32,
+    pub server_frames_per_minute: u32,
+    /// Malformed or invalid requests (parse_error, invalid_request,
+    /// invalid_params, too_large) within a minute that close a connection
+    /// with 1008.
+    pub policy_violations: usize,
 }
 
 /// Posts a minute and a day; zero is no limit.
@@ -68,6 +79,23 @@ impl Posts {
             minute: self.minute.max(other.minute),
             day: self.day.max(other.day),
         }
+    }
+}
+
+/// The times of the events within the last minute, for a limit kept as a
+/// rolling window by one connection.
+#[derive(Debug, Default)]
+pub struct Window(std::collections::VecDeque<i64>);
+
+impl Window {
+    /// Notes an event at `now` (Unix ms) and returns the events within the
+    /// last minute, it included.
+    pub fn note(&mut self, now: i64) -> usize {
+        while self.0.front().is_some_and(|&at| at <= now - 60_000) {
+            self.0.pop_front();
+        }
+        self.0.push_back(now);
+        self.0.len()
     }
 }
 
@@ -128,6 +156,10 @@ impl Default for Limits {
             room_lists_per_user_minute: 6,
             uploads_per_user_day: 20,
             uploads_per_day: 500,
+            frames_per_connection_minute: 60,
+            frames_per_ip_minute: 120,
+            server_frames_per_minute: 600,
+            policy_violations: 3,
         }
     }
 }
@@ -149,6 +181,10 @@ impl Limits {
             room_lists_per_user_minute: 0,
             uploads_per_user_day: 0,
             uploads_per_day: 0,
+            frames_per_connection_minute: 0,
+            frames_per_ip_minute: 0,
+            server_frames_per_minute: 0,
+            policy_violations: 0,
         }
     }
 }
@@ -212,6 +248,7 @@ pub enum Scope {
     Post,
     RoomList,
     Upload,
+    Frame,
 }
 
 /// What a client holds back after a refusal (EXTENSIONS.md `ext:limits`):

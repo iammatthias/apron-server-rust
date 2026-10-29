@@ -29,6 +29,7 @@ pub const STATUS_INVALID_FRAME_PAYLOAD_DATA: u16 = 1007;
 pub const STATUS_POLICY_VIOLATION: u16 = 1008;
 pub const STATUS_MESSAGE_TOO_BIG: u16 = 1009;
 pub const STATUS_INTERNAL_ERROR: u16 = 1011;
+pub const STATUS_TRY_AGAIN_LATER: u16 = 1013;
 
 const DEFAULT_READ_LIMIT: i64 = 32768;
 /// Bounds the write of a pong or a close frame, as coder/websocket's
@@ -469,7 +470,9 @@ fn parse_close(payload: &[u8]) -> Result<(u16, String), String> {
 }
 
 fn valid_close_code(code: u16) -> bool {
-    matches!(code, 1000..=1003 | 1007..=1011 | 3000..=4999)
+    // 1012 to 1014 are IANA-registered since RFC 6455; a server closes
+    // with 1013 (try again later) at a rate limit.
+    matches!(code, 1000..=1003 | 1007..=1014 | 3000..=4999)
 }
 
 fn accept_key(key: &str) -> String {

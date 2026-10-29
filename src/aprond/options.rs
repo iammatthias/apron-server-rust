@@ -144,6 +144,10 @@ pub struct LimitOptions {
     pub room_lists_per_minute: i64,
     pub uploads_per_user_day: i64,
     pub uploads_per_day: i64,
+    pub frames_per_connection_minute: i64,
+    pub frames_per_ip_minute: i64,
+    pub server_frames_per_minute: i64,
+    pub policy_violations: i64,
 }
 
 /// An extension Go lacks (docs/DEVIATIONS.md).
@@ -350,6 +354,10 @@ pub static GROUPS: &[Group] = &[
             spec!("room-lists-per-minute", Int, limit.room_lists_per_minute, ["6"], [], "room_list requests of one user a minute, besides the first joined listing after each sign-in; 0 is unlimited (not in the Go aprond)"),
             spec!("uploads-per-user-day", Int, limit.uploads_per_user_day, ["20"], [], "New uploads of one user a UTC day: a message's upload embeds, /avatar, /emoji add and /server avatar; 0 is unlimited (not in the Go aprond)"),
             spec!("uploads-per-day", Int, limit.uploads_per_day, ["500"], [], "New uploads of everyone on the server a UTC day; 0 is unlimited (not in the Go aprond)"),
+            spec!("frames-per-connection-minute", Int, limit.frames_per_connection_minute, ["60"], [], "WebSocket messages one connection may send in a rolling minute, past which it is closed with 1008; pings do not count; 0 is unlimited (not in the Go aprond)"),
+            spec!("frames-per-ip-minute", Int, limit.frames_per_ip_minute, ["120"], [], "WebSocket messages one client address may send a minute, past which its connection is closed with 1013; 0 is unlimited (not in the Go aprond)"),
+            spec!("server-frames-per-minute", Int, limit.server_frames_per_minute, ["600"], [], "WebSocket messages everyone may send a minute, past which requests get retry_after and notifications are dropped; 0 is unlimited (not in the Go aprond)"),
+            spec!("policy-violations", Int, limit.policy_violations, ["3"], [], "Malformed or invalid requests within a minute that close a connection with 1008; 0 never closes (not in the Go aprond)"),
         ],
     },
     Group {

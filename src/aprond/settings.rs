@@ -279,6 +279,16 @@ pub fn server_settings(options: &Options) -> Result<Settings, String> {
         room_lists_per_user_minute: rate("limit.room-lists-per-minute", l.room_lists_per_minute)?,
         uploads_per_user_day: rate("limit.uploads-per-user-day", l.uploads_per_user_day)?,
         uploads_per_day: rate("limit.uploads-per-day", l.uploads_per_day)?,
+        frames_per_connection_minute: nonnegative(
+            "limit.frames-per-connection-minute",
+            l.frames_per_connection_minute,
+        )?,
+        frames_per_ip_minute: rate("limit.frames-per-ip-minute", l.frames_per_ip_minute)?,
+        server_frames_per_minute: rate(
+            "limit.server-frames-per-minute",
+            l.server_frames_per_minute,
+        )?,
+        policy_violations: nonnegative("limit.policy-violations", l.policy_violations)?,
     };
     Ok(config)
 }

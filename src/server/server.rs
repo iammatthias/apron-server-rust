@@ -21,7 +21,9 @@ use super::email::{EmailSender, EmailState, ProposalId};
 use super::embeds::EmbedState;
 use super::embeds::{AVATAR_TYPES, UPLOAD_TYPES};
 use super::invites::{InviteTokens, JoinInvite};
-use super::limits::{Allowance, Charge, IpKey, LimitTable, Limits, Principal, Scope};
+use super::limits::{
+    refused, Allowance, Charge, IpKey, LimitTable, Limits, Principal, Scope, Window,
+};
 use super::messages::MessageState;
 use super::metadata::{ServerMetadata, StoredServer};
 use super::outbound;
@@ -457,6 +459,10 @@ pub struct Client {
     /// frame arrived, in Unix nanoseconds.
     pinged: AtomicBool,
     last_frame: AtomicI64,
+    /// The connection's recent policy violations, and how many in a minute
+    /// close it (Limits.policy_violations).
+    violations: Mutex<Window>,
+    max_violations: usize,
 }
 
 /// The lock-guarded half of a connection.
@@ -644,7 +650,30 @@ impl Client {
     }
 
     pub fn send_error(&self, req: &Request, err: RpcError) {
+        let code = err.code;
         self.enqueue(&error_response(Some(&req.id), err));
+        self.note_violation(code);
+    }
+
+    /// Counts an error of `code` against the connection when it is a
+    /// policy violation, closing the connection with 1008 when there were
+    /// too many in a minute. A denial is not one.
+    pub fn note_violation(&self, code: i64) {
+        if !matches!(
+            code,
+            CODE_PARSE_ERROR | CODE_INVALID_REQUEST | CODE_INVALID_PARAMS | CODE_TOO_LARGE
+        ) {
+            return;
+        }
+        let now = time::now().unix_milli();
+        let recent = self
+            .violations
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .note(now);
+        if self.max_violations > 0 && recent >= self.max_violations {
+            self.close_with_code(ws::STATUS_POLICY_VIOLATION, "Repeated policy violations");
+        }
     }
 }
 
@@ -1244,6 +1273,8 @@ impl Server {
             closing: AtomicBool::new(false),
             pinged: AtomicBool::new(false),
             last_frame: AtomicI64::new(time::now().unix_nano()),
+            violations: Mutex::default(),
+            max_violations: self.config.limits.policy_violations,
         });
         thread::spawn({
             let client = client.clone();
@@ -1308,6 +1339,7 @@ impl Server {
             })
         };
 
+        let mut frames = Window::default();
         while let Ok((message_type, payload)) = client.ws.read() {
             if message_type != ws::MessageType::Text {
                 let _ = client
@@ -1322,6 +1354,11 @@ impl Server {
             if payload == PING_FRAME {
                 client.pong();
                 continue;
+            }
+            let max = self.config.limits.frames_per_connection_minute;
+            if max > 0 && frames.note(time::now().unix_milli()) > max {
+                client.close_with_code(ws::STATUS_POLICY_VIOLATION, "Frame rate limit reached");
+                break;
             }
             // Frames are processed in order, each to completion before the
             // next is read, which makes auth a barrier (§3.2).
@@ -1445,7 +1482,32 @@ impl Server {
             return;
         }
         let (req, parse_err) = parse_request(payload, &self.config.frame);
+        // The server's and the address's frames are charged before any
+        // other work, malformed frames included. A busy server refuses a
+        // request and drops a notification; the connection stays open.
+        if let Err(refusal) = self.lock().charge_frame_locked(c) {
+            if refusal.row == 0 {
+                if parse_err.is_none() && req.has_id && !notification_only(&req.method) {
+                    c.enqueue(&error_response(
+                        Some(&req.id),
+                        refused(
+                            "Server is busy with too many requests",
+                            refusal.retry_after(),
+                            None,
+                        ),
+                    ));
+                }
+            } else {
+                c.close_with_code(ws::STATUS_TRY_AGAIN_LATER, "Frame rate limit reached");
+            }
+            return;
+        }
         if let Some(parse_err) = parse_err {
+            // A request's error counts as it is sent; an unanswered fault
+            // counts here.
+            if !req.has_id || notification_only(&req.method) {
+                c.note_violation(parse_err.code);
+            }
             if notification_only(&req.method) {
                 // The id of a notification method may be ignored, and the
                 // frame handled as a notification (§1.1): it is never
@@ -1664,6 +1726,25 @@ impl Drop for ConnectionDone<'_> {
 impl State {
     pub fn client_user(&self, c: &Client) -> Option<String> {
         self.clients.get(&c.id).and_then(|conn| conn.user.clone())
+    }
+
+    /// Charges one frame of `c`'s to the server's minute and its address's.
+    pub fn charge_frame_locked(&mut self, c: &Client) -> Result<(), super::limits::Refusal> {
+        let ip = Principal::Ip(c.ip_key.clone());
+        let limits = &self.config.limits;
+        let charges = [
+            Charge {
+                scope: Scope::Frame,
+                principal: &Principal::Server,
+                allowance: Allowance::minute(limits.server_frames_per_minute),
+            },
+            Charge {
+                scope: Scope::Frame,
+                principal: &ip,
+                allowance: Allowance::minute(limits.frames_per_ip_minute),
+            },
+        ];
+        self.limits.charge(&charges, 1)
     }
 
     /// Why a new connection from `ip` would be refused now, with the

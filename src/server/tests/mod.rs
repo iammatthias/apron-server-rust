@@ -12,6 +12,7 @@ mod custom_emoji_test;
 mod email_test;
 mod ext_limits_test;
 mod ext_test;
+mod flood_test;
 mod frame_limits_test;
 mod guest_posting_test;
 mod helpers;
