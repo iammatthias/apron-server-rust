@@ -7,6 +7,7 @@ use rust_stdlib::path::filepath;
 use super::helpers::*;
 use crate::obj;
 use crate::server::embeds::{MAX_EMBEDS_PER_MESSAGE, UPLOAD_SUFFIX};
+use crate::server::limits::Posts;
 use crate::server::messages::MAX_MENTIONS;
 use crate::server::protocol::*;
 use crate::server::push::MAX_PUSH_URL_BYTES;
@@ -158,9 +159,9 @@ fn test_messages_are_limited_to_max_embeds() {
 }
 
 #[test]
-fn test_room_set_counts_toward_messages_per_minute() {
+fn test_room_set_counts_toward_posts_per_minute() {
     let mut config = default_config();
-    config.messages_per_minute = 1;
+    config.limits.guest_posts = Posts { minute: 1, day: 0 };
     let server = new_test_server(config);
     let mut a = dial_test_client(&server);
     grant_role(&server, &a.user_id, "mod");
@@ -275,7 +276,7 @@ fn test_profile_and_push_size_limits() {
 fn test_connection_and_rate_limits() {
     let mut config = default_config();
     config.max_connections = 1;
-    config.messages_per_minute = 2;
+    config.limits.guest_posts = Posts { minute: 2, day: 0 };
     let server = new_test_server(config);
     let mut a = dial_test_client(&server);
 

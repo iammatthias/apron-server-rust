@@ -28,7 +28,6 @@ services:
       # Cloudflare sets Cf-Connecting-IP to the visitor alone, and the host's
       # Caddy and the router pass it through.
       - --client-ip-header=Cf-Connecting-IP
-      - --messages-per-minute=30
       - --max-connections=300
       - --max-listener-connections=600
       - --max-private-rooms=20

@@ -2,15 +2,14 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use rust_stdlib::encoding::json::jsontext::Value;
-use rust_stdlib::time;
 
 use super::embeds::MAX_EMBEDS_PER_MESSAGE;
 use super::emoji::{is_emoji_key, normalize_entries, same_entries};
+use super::limits::{Charge, Poster, Principal, Scope};
 use super::protocol::*;
 use super::server::{Client, Frame, LogRecord, RecordKind, Server, State, DEFAULT_ROOM_ID};
 use super::users::{json_equal, MODERATOR_ROLES};
 use crate::obj;
-use crate::rate::{every, Limiter};
 
 #[derive(Clone, Debug, Default)]
 pub struct ReactionSet {
@@ -419,8 +418,8 @@ impl State {
                 c.send_result(req, result.clone().into());
                 return Ok((result.into(), true));
             }
-            self.admit_post_locked(&user_id)?;
         }
+        self.charge_post_locked(c, &user_id)?;
 
         let log_id = self.next_id_locked();
         if !replacing {
@@ -600,39 +599,56 @@ impl State {
         }
     }
 
-    /// Applies messages_per_minute to new messages, room_set, and /avatar:
-    /// each user may send a burst of messages_per_minute, refilled evenly
-    /// over a minute.
-    pub fn admit_post_locked(&mut self, user_id: &str) -> Result<(), RpcError> {
+    /// Charges one post of the user's (apron-server-cloudflare's posting
+    /// limits) to their own, their IP's and the server's minute and day, or
+    /// to none, refusing it with retry_after naming the limit. Every
+    /// accepted change is one: a message saved, a reaction set changed, a
+    /// room saved, a join or leave, a profile change.
+    pub fn charge_post_locked(&mut self, c: &Client, user_id: &str) -> Result<(), RpcError> {
         self.note_bot_active_locked(user_id);
-        let limit = self.config.messages_per_minute;
-        if limit <= 0 {
-            return Ok(());
-        }
-        let Some(u) = self.users.get_mut(user_id) else {
-            return Ok(());
+        let poster = match self.users.get(user_id) {
+            Some(u) if u.persists() && !u.bot() && !u.roles.is_empty() => Poster::Trusted,
+            Some(u) if u.persists() => Poster::Account,
+            _ => Poster::Guest,
         };
-        let limiter = u.posts.get_or_insert_with(|| {
-            Limiter::new(
-                every(rust_stdlib::time::Duration::from_nanos(
-                    time::MINUTE.as_nanos() / limit,
-                )),
-                limit,
-            )
-        });
-        let now = time::now();
-        let reservation = limiter.reserve_n(&now, 1);
-        let delay = reservation.delay_from(&now);
-        if delay.as_nanos() > 0 {
-            limiter.cancel_at(&reservation, &now);
-            let wait = (delay.as_nanos() + time::SECOND.as_nanos() - 1) / time::SECOND.as_nanos();
-            return Err(RpcError::with_data(
+        let own = if poster == Poster::Guest {
+            Principal::Guests(c.ip_key.clone())
+        } else {
+            Principal::User(user_id.to_owned())
+        };
+        let ip = Principal::Ip(c.ip_key.clone());
+        let [own_allowance, ip_allowance, server_allowance] =
+            self.config.limits.post_allowances(poster);
+        let charges = [
+            Charge {
+                scope: Scope::Post,
+                principal: &own,
+                allowance: own_allowance,
+            },
+            Charge {
+                scope: Scope::Post,
+                principal: &ip,
+                allowance: ip_allowance,
+            },
+            Charge {
+                scope: Scope::Post,
+                principal: &Principal::Server,
+                allowance: server_allowance,
+            },
+        ];
+        self.limits.charge(&charges, 1).map_err(|refusal| {
+            let message = match (refusal.row, refusal.daily) {
+                (0, false) if poster == Poster::Guest => "Guest posting limit reached",
+                (_, false) => "Posting limit reached",
+                (2, true) => "Daily posting limit reached for the server",
+                (_, true) => "Daily posting limit reached",
+            };
+            RpcError::with_data(
                 CODE_RETRY_AFTER,
-                "Too many messages; slow down",
-                obj! {"retry_after" => wait},
-            ));
-        }
-        Ok(())
+                message,
+                obj! {"retry_after" => refusal.retry_after()},
+            )
+        })
     }
 
     /// Replaces the caller's complete reaction set on one message (§4.7).
@@ -691,6 +707,7 @@ impl State {
             return Err(invalid_params(format!("{key} is not a custom emoji here")));
         }
         if !same_entries(&current, &emojis) {
+            self.charge_post_locked(c, &user_id)?;
             self.touch_message(&message_id);
             let from = self.users[&user_id].from();
             let log_id = self.commit_reactions_locked(

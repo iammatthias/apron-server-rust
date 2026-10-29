@@ -324,7 +324,7 @@ impl State {
             ));
         }
         let user_id = self.client_user(c).unwrap_or_default();
-        self.admit_post_locked(&user_id)?;
+        self.charge_post_locked(c, &user_id)?;
         Ok(self.new_image_write_locked(c, EmbedPurpose::Avatar(user_id)))
     }
 

@@ -71,7 +71,6 @@ fn server_config(settings: Settings) -> Result<server::Config, String> {
     config.allow_any_origin = settings.allow_any_origin;
     config.public_url = settings.public_url;
     config.max_connections = count(settings.max_connections);
-    config.messages_per_minute = settings.messages_per_minute;
     config.max_listed_members = count(settings.max_listed_members);
     config.max_private_rooms = count(settings.max_private_rooms);
     config.read_receipts = settings.read_receipts;

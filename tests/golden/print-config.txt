@@ -22,9 +22,6 @@ max-connections = 100
 # Maximum concurrent TCP connections on the listener, HTTP included; 0 is unlimited
 max-listener-connections = 0
 
-# Burst of new messages, room_set requests, and /avatar commands per user, refilled over a minute; 0 is unlimited
-messages-per-minute = 0
-
 # Members listed per room in room_list and room_update; a larger room lists its most recently active ones and member_count. 0 is unlimited
 max-listed-members = 1000
 
@@ -200,6 +197,36 @@ connections-per-user = 3
 # New WebSockets one client address may open a minute; 0 is unlimited (not in the Go aprond)
 admissions-per-ip-minute = 12
 
+# Posts of one client address's guests together a minute, as a burst refilled over the minute. A post is any message saved, reaction set changed, room saved, join, leave or profile change; 0 is unlimited (not in the Go aprond)
+guest-posts-per-minute = 5
+
+# Posts of one client address's guests together a UTC day; 0 is unlimited (not in the Go aprond)
+guest-posts-per-day = 200
+
+# Posts of one account a minute; 0 is unlimited (not in the Go aprond)
+posts-per-minute = 20
+
+# Posts of one account a UTC day; 0 is unlimited (not in the Go aprond)
+posts-per-day = 1000
+
+# Posts a minute of an account holding any role, in place of --limit.posts-per-minute, and of its client address when larger; 0 is unlimited (not in the Go aprond)
+trusted-posts-per-minute = 50
+
+# Posts a UTC day of an account holding any role, in place of --limit.posts-per-day, and of its client address when larger; 0 is unlimited (not in the Go aprond)
+trusted-posts-per-day = 4000
+
+# Posts of everyone at one client address together a minute; 0 is unlimited (not in the Go aprond)
+ip-posts-per-minute = 30
+
+# Posts of everyone at one client address together a UTC day; 0 is unlimited (not in the Go aprond)
+ip-posts-per-day = 2000
+
+# Posts of everyone on the server a minute; 0 is unlimited (not in the Go aprond)
+server-posts-per-minute = 120
+
+# Posts of everyone on the server a UTC day; 0 is unlimited (not in the Go aprond)
+server-posts-per-day = 10000
+
 [server]
 
 # Plain name clients show for this server, as server.title, unless an admin's /server title sets one (default: none, so clients show the server's address; not in the Go aprond)
@@ -236,9 +263,6 @@ max-connections = 100
 
 # Maximum concurrent TCP connections on the listener, HTTP included; 0 is unlimited
 max-listener-connections = 0
-
-# Burst of new messages, room_set requests, and /avatar commands per user, refilled over a minute; 0 is unlimited
-messages-per-minute = 0
 
 # Members listed per room in room_list and room_update; a larger room lists its most recently active ones and member_count. 0 is unlimited
 max-listed-members = 1000
@@ -415,6 +439,36 @@ connections-per-user = 3
 # New WebSockets one client address may open a minute; 0 is unlimited (not in the Go aprond)
 admissions-per-ip-minute = 12
 
+# Posts of one client address's guests together a minute, as a burst refilled over the minute. A post is any message saved, reaction set changed, room saved, join, leave or profile change; 0 is unlimited (not in the Go aprond)
+guest-posts-per-minute = 5
+
+# Posts of one client address's guests together a UTC day; 0 is unlimited (not in the Go aprond)
+guest-posts-per-day = 200
+
+# Posts of one account a minute; 0 is unlimited (not in the Go aprond)
+posts-per-minute = 20
+
+# Posts of one account a UTC day; 0 is unlimited (not in the Go aprond)
+posts-per-day = 1000
+
+# Posts a minute of an account holding any role, in place of --limit.posts-per-minute, and of its client address when larger; 0 is unlimited (not in the Go aprond)
+trusted-posts-per-minute = 50
+
+# Posts a UTC day of an account holding any role, in place of --limit.posts-per-day, and of its client address when larger; 0 is unlimited (not in the Go aprond)
+trusted-posts-per-day = 4000
+
+# Posts of everyone at one client address together a minute; 0 is unlimited (not in the Go aprond)
+ip-posts-per-minute = 30
+
+# Posts of everyone at one client address together a UTC day; 0 is unlimited (not in the Go aprond)
+ip-posts-per-day = 2000
+
+# Posts of everyone on the server a minute; 0 is unlimited (not in the Go aprond)
+server-posts-per-minute = 120
+
+# Posts of everyone on the server a UTC day; 0 is unlimited (not in the Go aprond)
+server-posts-per-day = 10000
+
 [server]
 
 # Plain name clients show for this server, as server.title, unless an admin's /server title sets one (default: none, so clients show the server's address; not in the Go aprond)
@@ -452,9 +506,6 @@ max-connections = 16
 
 # Maximum concurrent TCP connections on the listener, HTTP included; 0 is unlimited
 max-listener-connections = 0
-
-# Burst of new messages, room_set requests, and /avatar commands per user, refilled over a minute; 0 is unlimited
-messages-per-minute = 0
 
 # Members listed per room in room_list and room_update; a larger room lists its most recently active ones and member_count. 0 is unlimited
 max-listed-members = 1000
@@ -631,6 +682,36 @@ connections-per-user = 3
 # New WebSockets one client address may open a minute; 0 is unlimited (not in the Go aprond)
 admissions-per-ip-minute = 12
 
+# Posts of one client address's guests together a minute, as a burst refilled over the minute. A post is any message saved, reaction set changed, room saved, join, leave or profile change; 0 is unlimited (not in the Go aprond)
+guest-posts-per-minute = 5
+
+# Posts of one client address's guests together a UTC day; 0 is unlimited (not in the Go aprond)
+guest-posts-per-day = 200
+
+# Posts of one account a minute; 0 is unlimited (not in the Go aprond)
+posts-per-minute = 20
+
+# Posts of one account a UTC day; 0 is unlimited (not in the Go aprond)
+posts-per-day = 1000
+
+# Posts a minute of an account holding any role, in place of --limit.posts-per-minute, and of its client address when larger; 0 is unlimited (not in the Go aprond)
+trusted-posts-per-minute = 50
+
+# Posts a UTC day of an account holding any role, in place of --limit.posts-per-day, and of its client address when larger; 0 is unlimited (not in the Go aprond)
+trusted-posts-per-day = 4000
+
+# Posts of everyone at one client address together a minute; 0 is unlimited (not in the Go aprond)
+ip-posts-per-minute = 30
+
+# Posts of everyone at one client address together a UTC day; 0 is unlimited (not in the Go aprond)
+ip-posts-per-day = 2000
+
+# Posts of everyone on the server a minute; 0 is unlimited (not in the Go aprond)
+server-posts-per-minute = 120
+
+# Posts of everyone on the server a UTC day; 0 is unlimited (not in the Go aprond)
+server-posts-per-day = 10000
+
 [server]
 
 # Plain name clients show for this server, as server.title, unless an admin's /server title sets one (default: none, so clients show the server's address; not in the Go aprond)
@@ -667,9 +748,6 @@ max-connections = 100
 
 # Maximum concurrent TCP connections on the listener, HTTP included; 0 is unlimited
 max-listener-connections = 0
-
-# Burst of new messages, room_set requests, and /avatar commands per user, refilled over a minute; 0 is unlimited
-messages-per-minute = 0
 
 # Members listed per room in room_list and room_update; a larger room lists its most recently active ones and member_count. 0 is unlimited
 max-listed-members = 1000
@@ -845,6 +923,36 @@ connections-per-user = 3
 
 # New WebSockets one client address may open a minute; 0 is unlimited (not in the Go aprond)
 admissions-per-ip-minute = 12
+
+# Posts of one client address's guests together a minute, as a burst refilled over the minute. A post is any message saved, reaction set changed, room saved, join, leave or profile change; 0 is unlimited (not in the Go aprond)
+guest-posts-per-minute = 5
+
+# Posts of one client address's guests together a UTC day; 0 is unlimited (not in the Go aprond)
+guest-posts-per-day = 200
+
+# Posts of one account a minute; 0 is unlimited (not in the Go aprond)
+posts-per-minute = 20
+
+# Posts of one account a UTC day; 0 is unlimited (not in the Go aprond)
+posts-per-day = 1000
+
+# Posts a minute of an account holding any role, in place of --limit.posts-per-minute, and of its client address when larger; 0 is unlimited (not in the Go aprond)
+trusted-posts-per-minute = 50
+
+# Posts a UTC day of an account holding any role, in place of --limit.posts-per-day, and of its client address when larger; 0 is unlimited (not in the Go aprond)
+trusted-posts-per-day = 4000
+
+# Posts of everyone at one client address together a minute; 0 is unlimited (not in the Go aprond)
+ip-posts-per-minute = 30
+
+# Posts of everyone at one client address together a UTC day; 0 is unlimited (not in the Go aprond)
+ip-posts-per-day = 2000
+
+# Posts of everyone on the server a minute; 0 is unlimited (not in the Go aprond)
+server-posts-per-minute = 120
+
+# Posts of everyone on the server a UTC day; 0 is unlimited (not in the Go aprond)
+server-posts-per-day = 10000
 
 [server]
 
