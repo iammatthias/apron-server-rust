@@ -181,11 +181,16 @@ impl State {
     }
 
     /// Pushes a message's wake for `reasons` once `--push.delay` is over,
-    /// with the message as it is then, or at once without a delay, while
-    /// shutting down, or past MAX_PENDING_WAKES.
+    /// with the message as it is then, or at once without a delay or past
+    /// MAX_PENDING_WAKES. Nothing is pushed once the server is shutting
+    /// down.
     fn schedule_wake_locked(&mut self, message_id: &str, reasons: Reasons, others: Vec<String>) {
+        // A wake lost with the server is not pushed.
+        if self.closed {
+            return;
+        }
         let delay = self.config.push_delay;
-        if delay.as_nanos() <= 0 || self.closed || self.pending_wakes.len() >= MAX_PENDING_WAKES {
+        if delay.as_nanos() <= 0 || self.pending_wakes.len() >= MAX_PENDING_WAKES {
             self.send_wake_locked(message_id, &reasons, others);
             return;
         }
