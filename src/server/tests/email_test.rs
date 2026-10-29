@@ -1349,3 +1349,59 @@ fn test_missing_client_address_is_refused() {
     assert_eq!(frame["method"].as_str(), Some("server"));
     drop(c);
 }
+
+/// The admin user signs in with the admin token only, so it can neither
+/// propose an address nor approve the addition of one, which would let it
+/// sign in by email.
+#[test]
+fn test_email_refused_to_the_admin_user() {
+    let (server, mailbox) = email_test_server(|config| {
+        config.admin_token = Some(rust_stdlib_crypto::sha256::sum256(
+            super::admin_test::ADMIN_TOKEN.as_bytes(),
+        ));
+    });
+    let mut admin = super::admin_test::admin(&server);
+    let denied = Json::from(obj! {
+        "code" => CODE_DENIED,
+        "message" => crate::server::admin::ADMIN_SIGNS_IN_WITH_TOKEN,
+    });
+    let frame = admin.call(
+        "auth",
+        "propose",
+        obj! {"scheme" => "email", "email" => "admin@example.com"},
+    );
+    assert_eq!(
+        frame.get("error"),
+        Some(&denied),
+        "admin's proposal: {frame:?}"
+    );
+    assert!(
+        server.app.lock().email.proposals.is_empty(),
+        "the admin's proposal was kept"
+    );
+
+    // An addition proposed for the admin user, however it came to be, is
+    // refused on approval.
+    let mut guest = dial_test_client(&server);
+    propose(&mut guest, "admin@example.com");
+    let link = link_token(&mailbox.receive());
+    for p in server.app.lock().email.proposals.values_mut() {
+        p.account_id = "admin".into();
+    }
+    admin.drain();
+    let frame = admin.call(
+        "auth",
+        "approve",
+        obj! {"scheme" => "email", "token" => link.as_str()},
+    );
+    assert_eq!(
+        frame.get("error"),
+        Some(&denied),
+        "admin's approval: {frame:?}"
+    );
+    let st = server.app.lock();
+    assert!(
+        st.emails.is_empty() && st.users["admin"].email.is_empty(),
+        "the admin user got an address"
+    );
+}

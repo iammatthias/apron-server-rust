@@ -11,6 +11,7 @@ use rust_stdlib::time::{self, Duration, Time};
 use rust_stdlib_crypto::bigint::Int;
 use rust_stdlib_crypto::{rand, subtle};
 
+use super::admin::{ADMIN_SIGNS_IN_WITH_TOKEN, ADMIN_USER_ID};
 use super::bots::BOT_SIGNS_IN_WITH_TOKEN;
 use super::protocol::*;
 use super::server::{Client, Conn, State};
@@ -538,6 +539,10 @@ impl State {
         {
             return Err(denied(BOT_SIGNS_IN_WITH_TOKEN));
         }
+        // An address would outlive the admin token (admin.rs).
+        if self.client_user(c).as_deref() == Some(ADMIN_USER_ID) {
+            return Err(denied(ADMIN_SIGNS_IN_WITH_TOKEN));
+        }
         let now = time::now();
         let busy = || {
             retry_after(
@@ -743,6 +748,9 @@ impl State {
                 ));
             };
             self.drop_proposal_locked(id);
+            if account == ADMIN_USER_ID {
+                return Err(denied(ADMIN_SIGNS_IN_WITH_TOKEN));
+            }
             if self.emails.contains_key(&p.email) {
                 return Err(denied("This address belongs to an account"));
             }
