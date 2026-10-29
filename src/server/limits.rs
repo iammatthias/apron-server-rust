@@ -12,8 +12,12 @@ use std::fmt;
 use rust_stdlib::net;
 use rust_stdlib::time;
 
-use super::protocol::{RpcError, CODE_RETRY_AFTER};
+use super::client::{Client, Conn};
+use super::config::RETRY_AFTER_SECONDS;
+use super::protocol::*;
 use super::remap::{Fate, Remap};
+use super::server::State;
+use super::users::Identity;
 use crate::obj;
 
 const MINUTE_MS: f64 = 60_000.0;
@@ -343,27 +347,56 @@ impl Allowance {
     }
 }
 
-/// One charge of a [`LimitTable::charge`]: a scope, its principal and the
-/// allowance that applies to it.
+/// One row of a [`LimitTable::charge`]: its principal, the allowance that
+/// applies to it, and what a refusal says when its minute, or its day, is
+/// full.
 pub struct Charge<'a> {
-    pub scope: Scope,
     pub principal: &'a Principal,
     pub allowance: Allowance,
+    pub minute_message: &'static str,
+    pub day_message: &'static str,
 }
 
-/// Why a charge was refused: the one of its rows that waits longest, and
-/// whether that row's day was full rather than its minute.
+impl<'a> Charge<'a> {
+    /// A row whose refusals say `message`, minute or day.
+    pub fn new(principal: &'a Principal, allowance: Allowance, message: &'static str) -> Self {
+        Charge {
+            principal,
+            allowance,
+            minute_message: message,
+            day_message: message,
+        }
+    }
+
+    /// The row with its own message for a full day.
+    pub fn daily(self, message: &'static str) -> Self {
+        Charge {
+            day_message: message,
+            ..self
+        }
+    }
+}
+
+/// Why a charge was refused: the one of its rows that waits longest,
+/// whether that row's day was full rather than its minute, and the row's
+/// message for that.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Refusal {
     pub row: usize,
     pub daily: bool,
     pub retry_after_ms: i64,
+    pub message: &'static str,
 }
 
 impl Refusal {
     /// The wait in whole seconds, rounded up, at least one.
     pub fn retry_after(&self) -> i64 {
         ((self.retry_after_ms + 999) / 1000).max(1)
+    }
+
+    /// The retry_after error (`refused`) of the refusal.
+    pub fn error(&self, category: Option<Category>) -> RpcError {
+        refused(self.message, self.retry_after(), category)
     }
 }
 
@@ -382,15 +415,21 @@ pub struct LimitTable {
 }
 
 impl LimitTable {
-    /// Charges `weight` events to every row of `charges` at once, or to none
-    /// when any of them lacks room for them.
-    pub fn charge(&mut self, charges: &[Charge<'_>], weight: u32) -> Result<(), Refusal> {
-        self.charge_at(time::now().unix_milli(), charges, weight)
+    /// Charges `weight` events of `scope` to every row of `charges` at
+    /// once, or to none when any of them lacks room for them.
+    pub fn charge(
+        &mut self,
+        scope: Scope,
+        charges: &[Charge<'_>],
+        weight: u32,
+    ) -> Result<(), Refusal> {
+        self.charge_at(time::now().unix_milli(), scope, charges, weight)
     }
 
     pub fn charge_at(
         &mut self,
         now: i64,
+        scope: Scope,
         charges: &[Charge<'_>],
         weight: u32,
     ) -> Result<(), Refusal> {
@@ -400,7 +439,7 @@ impl LimitTable {
         for (i, charge) in charges.iter().enumerate() {
             let mut row = self
                 .rows
-                .get(&(charge.scope, charge.principal.clone()))
+                .get(&(scope, charge.principal.clone()))
                 .copied()
                 .unwrap_or_default();
             let mut refuse = |retry_after_ms: i64, daily: bool| {
@@ -410,6 +449,11 @@ impl LimitTable {
                         row: i,
                         daily,
                         retry_after_ms,
+                        message: if daily {
+                            charge.day_message
+                        } else {
+                            charge.minute_message
+                        },
                     });
                 }
             };
@@ -432,8 +476,7 @@ impl LimitTable {
             return Err(refusal);
         }
         for (charge, row) in charges.iter().zip(updated) {
-            self.rows
-                .insert((charge.scope, charge.principal.clone()), row);
+            self.rows.insert((scope, charge.principal.clone()), row);
         }
         if self.rows.len() > self.prune_at {
             // Yesterday's rows have only their last few minutes left to
@@ -505,6 +548,213 @@ impl IpKey {
 impl fmt::Display for IpKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0)
+    }
+}
+
+/// The charges and caps each request and connection is held to.
+impl State {
+    /// Charges one frame of `c`'s to the server's minute and its address's.
+    pub fn charge_frame_locked(&mut self, c: &Client) -> Result<(), Refusal> {
+        let ip = Principal::Ip(c.ip_key.clone());
+        let limits = &self.config.limits;
+        let charges = [
+            Charge::new(
+                &Principal::Server,
+                Allowance::minute(limits.server_frames_per_minute),
+                "Server is busy with too many requests",
+            ),
+            Charge::new(
+                &ip,
+                Allowance::minute(limits.frames_per_ip_minute),
+                "Frame rate limit reached",
+            ),
+        ];
+        self.limits.charge(Scope::Frame, &charges, 1)
+    }
+
+    /// Why a new connection from `ip` would be refused now, with the
+    /// seconds to wait: the server's connection cap, then the IP's caps.
+    /// A connection not signed in to an account counts as a guest's.
+    pub fn capacity_locked(&self, ip: &IpKey) -> Option<(&'static str, i64)> {
+        let limits = &self.config.limits;
+        let full = |max: usize, n: usize| max > 0 && n >= max;
+        if full(self.config.max_connections, self.clients.len()) {
+            return Some(("Server at capacity", RETRY_AFTER_SECONDS));
+        }
+        let from_ip: Vec<&Conn> = self
+            .clients
+            .values()
+            .filter(|conn| conn.client.ip_key == *ip)
+            .collect();
+        let guests = from_ip
+            .iter()
+            .filter(|conn| {
+                conn.user
+                    .as_ref()
+                    .and_then(|id| self.users.get(id))
+                    .is_none_or(|u| !u.persists())
+            })
+            .count();
+        if full(limits.connections_per_ip, from_ip.len())
+            || full(limits.guest_connections_per_ip, guests)
+        {
+            return Some((
+                "Connection limit reached for this network",
+                RETRY_AFTER_SECONDS,
+            ));
+        }
+        None
+    }
+
+    /// Admits a new connection from `ip`, or the retry_after error that
+    /// refuses it: the caps of `capacity_locked`, then the IP's admissions
+    /// a minute.
+    pub fn admit_locked(&mut self, ip: &IpKey) -> Result<(), RpcError> {
+        if let Some((message, retry_after)) = self.capacity_locked(ip) {
+            return Err(refused(message, retry_after, None));
+        }
+        let principal = Principal::Ip(ip.clone());
+        let allowance = Allowance::minute(self.config.limits.admissions_per_ip_minute);
+        let charge = Charge::new(&principal, allowance, "Connection admission limit reached");
+        self.limits
+            .charge(Scope::Admission, &[charge], 1)
+            .map_err(|refusal| refusal.error(None))
+    }
+
+    /// Charges one post of the user's (apron-server-cloudflare's posting
+    /// limits) to their own, their IP's and the server's minute and day, or
+    /// to none, refusing it with retry_after naming the limit. Every
+    /// accepted change is one: a message saved, a reaction set changed, a
+    /// room saved, a join or leave, a profile change.
+    /// `category` is `Write` for the requests ext:limits' write row lists,
+    /// and `None` for `me` and commands.
+    pub fn charge_post_locked(
+        &mut self,
+        c: &Client,
+        user_id: &str,
+        category: Option<Category>,
+    ) -> Result<(), RpcError> {
+        self.note_bot_active_locked(user_id);
+        let poster = match self.users.get(user_id).map(|u| (u.kind(), u)) {
+            Some((Identity::Account, u)) if !u.roles.is_empty() => Poster::Trusted,
+            Some((Identity::Account | Identity::Bot, _)) => Poster::Account,
+            _ => Poster::Guest,
+        };
+        let own = if poster == Poster::Guest {
+            Principal::Guests(c.ip_key.clone())
+        } else {
+            Principal::User(user_id.to_owned())
+        };
+        let ip = Principal::Ip(c.ip_key.clone());
+        let [own_allowance, ip_allowance, server_allowance] =
+            self.config.limits.post_allowances(poster);
+        let own_message = if poster == Poster::Guest {
+            "Guest posting limit reached"
+        } else {
+            "Posting limit reached"
+        };
+        let daily = "Daily posting limit reached";
+        let charges = [
+            Charge::new(&own, own_allowance, own_message).daily(daily),
+            Charge::new(&ip, ip_allowance, "Posting limit reached").daily(daily),
+            Charge::new(
+                &Principal::Server,
+                server_allowance,
+                "Posting limit reached",
+            )
+            .daily("Daily posting limit reached for the server"),
+        ];
+        self.limits
+            .charge(Scope::Post, &charges, 1)
+            .map_err(|refusal| refusal.error(category))
+    }
+
+    /// Charges `n` new uploads of the user's to their day and the server's,
+    /// or none.
+    pub fn charge_uploads_locked(&mut self, user_id: &str, n: u32) -> Result<(), RpcError> {
+        let limits = &self.config.limits;
+        let user = Principal::User(user_id.to_owned());
+        let daily = |day| Allowance { minute: None, day };
+        let charges = [
+            Charge::new(
+                &user,
+                daily(limits.uploads_per_user_day),
+                "Daily upload limit reached",
+            ),
+            Charge::new(
+                &Principal::Server,
+                daily(limits.uploads_per_day),
+                "Daily upload limit reached for the server",
+            ),
+        ];
+        self.limits
+            .charge(Scope::Upload, &charges, n)
+            .map_err(|refusal| refusal.error(Some(Category::Upload)))
+    }
+
+    /// Charges a history page to the user's and the IP's minute and day, and
+    /// the server's day, or to none.
+    pub(super) fn charge_history_locked(
+        &mut self,
+        c: &Client,
+        user_id: &str,
+    ) -> Result<(), RpcError> {
+        let limits = &self.config.limits;
+        let (user, ip) = (
+            Principal::User(user_id.to_owned()),
+            Principal::Ip(c.ip_key.clone()),
+        );
+        let minute = "History request limit reached";
+        let charges = [
+            Charge::new(
+                &user,
+                Allowance::rate(limits.user_history, limits.user_history_day),
+                minute,
+            )
+            .daily("Daily history limit reached"),
+            Charge::new(
+                &ip,
+                Allowance::rate(limits.ip_history, limits.ip_history_day),
+                minute,
+            )
+            .daily("Daily history limit reached for this network"),
+            Charge::new(
+                &Principal::Server,
+                Allowance::rate(Rate::per_minute(0), limits.server_history_day),
+                minute,
+            )
+            .daily("Daily history limit reached for the server"),
+        ];
+        self.limits
+            .charge(Scope::History, &charges, 1)
+            .map_err(|refusal| refusal.error(Some(Category::Read)))
+    }
+
+    /// Charges a `room_list` to the user's minute, except the first
+    /// `joined` listing after a sign-in, which is how a client learns its
+    /// rooms.
+    pub(super) fn charge_room_list_locked(
+        &mut self,
+        c: &Client,
+        req: &Request,
+    ) -> Result<(), RpcError> {
+        let Some(conn) = self.clients.get_mut(&c.id) else {
+            return Ok(());
+        };
+        let Some(user_id) = conn.user.clone() else {
+            return Ok(());
+        };
+        let joined = parse_string(&req.params, "filter", false).is_ok_and(|f| f == "joined");
+        if joined && !conn.listed_joined {
+            conn.listed_joined = true;
+            return Ok(());
+        }
+        let user = Principal::User(user_id);
+        let allowance = Allowance::minute(self.config.limits.room_lists_per_user_minute);
+        let charge = Charge::new(&user, allowance, "Room listing limited");
+        self.limits
+            .charge(Scope::RoomList, &[charge], 1)
+            .map_err(|refusal| refusal.error(Some(Category::Read)))
     }
 }
 
@@ -607,41 +857,51 @@ mod tests {
     #[test]
     fn table_charges_all_rows_or_none() {
         let (a, b) = (Principal::User("a".into()), Principal::Server);
-        let row = |principal, minute, day| Charge {
-            scope: Scope::Admission,
-            principal,
-            allowance: Allowance {
+        let row = |principal, minute, day| {
+            let allowance = Allowance {
                 minute: Some(Rate::per_minute(minute)),
                 day,
-            },
+            };
+            Charge::new(principal, allowance, "minute").daily("day")
         };
         let mut table = LimitTable::default();
         let now = 5 * DAY_MS + 1_000;
         table
-            .charge_at(now, &[row(&a, 2, 0), row(&b, 60, 3)], 1)
+            .charge_at(now, Scope::Admission, &[row(&a, 2, 0), row(&b, 60, 3)], 1)
             .unwrap();
         table
-            .charge_at(now, &[row(&a, 2, 0), row(&b, 60, 3)], 1)
+            .charge_at(now, Scope::Admission, &[row(&a, 2, 0), row(&b, 60, 3)], 1)
             .unwrap();
         assert_eq!(
-            table.charge_at(now, &[row(&a, 2, 0), row(&b, 60, 3)], 1),
+            table.charge_at(now, Scope::Admission, &[row(&a, 2, 0), row(&b, 60, 3)], 1),
             Err(Refusal {
                 row: 0,
                 daily: false,
-                retry_after_ms: 30_000
+                retry_after_ms: 30_000,
+                message: "minute",
             })
         );
         // The refused charge spent nothing on the server's row.
-        table.charge_at(now, &[row(&b, 60, 3)], 1).unwrap();
+        table
+            .charge_at(now, Scope::Admission, &[row(&b, 60, 3)], 1)
+            .unwrap();
         assert_eq!(
-            table.charge_at(now + 60_000, &[row(&a, 2, 0), row(&b, 60, 3)], 1),
+            table.charge_at(
+                now + 60_000,
+                Scope::Admission,
+                &[row(&a, 2, 0), row(&b, 60, 3)],
+                1
+            ),
             Err(Refusal {
                 row: 1,
                 daily: true,
-                retry_after_ms: DAY_MS - 61_000
+                retry_after_ms: DAY_MS - 61_000,
+                message: "day",
             })
         );
-        table.charge_at(6 * DAY_MS, &[row(&b, 60, 3)], 1).unwrap();
+        table
+            .charge_at(6 * DAY_MS, Scope::Admission, &[row(&b, 60, 3)], 1)
+            .unwrap();
     }
 
     #[test]

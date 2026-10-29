@@ -7,7 +7,6 @@ use rust_stdlib::encoding::json::jsontext::Value;
 
 use super::client::{Client, Frame};
 use super::config::{MAX_HISTORY_PAGE_SIZE, MAX_HISTORY_REPLY_BYTES};
-use super::limits::{refused, Allowance, Category, Charge, Principal, Rate, Scope};
 use super::protocol::*;
 use super::rooms::{parse_bound, RoomState};
 use super::server::{LogRecord, RecordKind, Server, State, DEFAULT_ROOM_ID};
@@ -40,44 +39,6 @@ fn window(log: &[i64], after: Option<i64>, before: Option<i64>) -> &[i64] {
         log = &log[..end];
     }
     log
-}
-
-impl State {
-    /// Charges a history page to the user's and the IP's minute and day, and
-    /// the server's day, or to none.
-    fn charge_history_locked(&mut self, c: &Client, user_id: &str) -> Result<(), RpcError> {
-        let limits = &self.config.limits;
-        let (user, ip) = (
-            Principal::User(user_id.to_owned()),
-            Principal::Ip(c.ip_key.clone()),
-        );
-        let charges = [
-            Charge {
-                scope: Scope::History,
-                principal: &user,
-                allowance: Allowance::rate(limits.user_history, limits.user_history_day),
-            },
-            Charge {
-                scope: Scope::History,
-                principal: &ip,
-                allowance: Allowance::rate(limits.ip_history, limits.ip_history_day),
-            },
-            Charge {
-                scope: Scope::History,
-                principal: &Principal::Server,
-                allowance: Allowance::rate(Rate::per_minute(0), limits.server_history_day),
-            },
-        ];
-        self.limits.charge(&charges, 1).map_err(|refusal| {
-            let message = match (refusal.row, refusal.daily) {
-                (_, false) => "History request limit reached",
-                (0, true) => "Daily history limit reached",
-                (1, true) => "Daily history limit reached for this network",
-                (_, true) => "Daily history limit reached for the server",
-            };
-            refused(message, refusal.retry_after(), Some(Category::Read))
-        })
-    }
 }
 
 impl State {

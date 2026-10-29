@@ -9,7 +9,6 @@ use rust_stdlib_crypto::sha256;
 use super::client::Client;
 use super::config::Config;
 use super::dedup::DedupEntry;
-use super::limits::refused;
 use super::protocol::*;
 use super::server::{Server, State};
 use super::toggles::Feature;
@@ -160,17 +159,10 @@ impl Server {
         if let Err(refusal) = self.lock().charge_frame_locked(c) {
             if refusal.row == 0 {
                 if parse_err.is_none() && req.has_id && !notification_only(&req.method) {
-                    c.enqueue(&error_response(
-                        Some(&req.id),
-                        refused(
-                            "Server is busy with too many requests",
-                            refusal.retry_after(),
-                            None,
-                        ),
-                    ));
+                    c.enqueue(&error_response(Some(&req.id), refusal.error(None)));
                 }
             } else {
-                c.close_with_code(ws::STATUS_TRY_AGAIN_LATER, "Frame rate limit reached");
+                c.close_with_code(ws::STATUS_TRY_AGAIN_LATER, refusal.message);
             }
             return;
         }
