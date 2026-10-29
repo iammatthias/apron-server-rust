@@ -52,10 +52,14 @@ pub const MAX_ROOM_MUTES: usize = 1000;
 /// retry_after (§4.5).
 pub const STATUS_REQUEST_BURST: i64 = 20;
 pub const STATUS_REQUEST_REFILL: Duration = time::SECOND;
-/// A user's shown status changes go to others at once up to STATUS_BURST
-/// times, then at most once per STATUS_COALESCE, the latest status winning.
-pub const STATUS_BURST: i64 = 10;
-pub const STATUS_COALESCE: Duration = Duration::from_secs(2);
+/// What changed a user's status, which decides when others hear of it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Cause {
+    /// A connection signed in, or said it is idle or back.
+    Connection,
+    /// A connection closed or signed in as someone else.
+    Closed,
+}
 
 /// The optional statuses the server accepts, which the server frame lists as
 /// server.status (§3.1, §4.5).
@@ -262,6 +266,7 @@ impl State {
         }
         let was_offline = u.status == STATUS_OFFLINE;
         u.status = u.shown.clone();
+        u.announced_at = time::now().unix_milli();
         if u.status == STATUS_OFFLINE {
             u.seen = u.offline_at;
             if u.seen == 0 {
@@ -276,51 +281,70 @@ impl State {
 
     /// Notes u's shown status, then publishes it and sends it to the
     /// connections of those who share a room with u, as `user` `new`, when
-    /// it differs from the one last published: at once within the user's
-    /// burst, else once STATUS_COALESCE has passed, with whatever the status
-    /// is then. A shutdown sends nothing, but still publishes.
-    pub fn announce_status_locked(&mut self, user_id: &str) {
+    /// it differs from the one last published: once `status_coalesce` has
+    /// passed since the last change went out, with whatever the status is
+    /// then, and, for a change a closed connection caused, once
+    /// `offline_grace` has passed too, so a reconnect within it shows
+    /// nothing. A shutdown sends nothing, but still publishes.
+    pub fn announce_status_locked(&mut self, user_id: &str, cause: Cause) {
         self.note_shown_locked(user_id);
         if self.closed {
             self.publish_locked(user_id);
             return;
         }
+        let (coalesce, grace) = (
+            self.config.limits.status_coalesce.as_nanos() / 1_000_000,
+            self.config.limits.offline_grace.as_nanos() / 1_000_000,
+        );
         let Some(u) = self.users.get_mut(user_id) else {
             return;
         };
-        if u.shown == u.status || u.status_timer.is_some() {
+        if u.shown == u.status {
+            // Back to what others were told: nothing waits.
+            u.status_hold = 0;
+            if let Some(timer) = u.status_timer.take() {
+                timer.stop();
+            }
             return;
         }
-        let limiter = u
-            .status_limit
-            .get_or_insert_with(|| Limiter::new(every(STATUS_COALESCE), STATUS_BURST));
-        if !limiter.allow() {
-            let generation = u.generation;
-            let server = self.server.clone();
-            let id = user_id.to_owned();
-            u.status_timer = Some(time::after_func(STATUS_COALESCE, move || {
-                let Some(server) = server.upgrade() else {
-                    return;
-                };
-                let mut st = server.lock();
-                let closed = st.closed;
-                let Some(u) = st.users.get_mut(&id) else {
-                    return;
-                };
-                u.status_timer = None;
-                if closed || u.generation != generation {
-                    return;
-                }
-                if st.publish_locked(&id) {
-                    let sharers = st.sharers_locked(&id);
-                    st.send_status_locked(&id, &sharers);
-                }
-            }));
+        let now = time::now().unix_milli();
+        if cause == Cause::Closed {
+            u.status_hold = u.status_hold.max(now + grace);
+        }
+        let last = if u.announced_at == 0 {
+            0
+        } else {
+            u.announced_at + coalesce
+        };
+        let due = last.max(u.status_hold);
+        if due > now {
+            if u.status_timer.is_none() {
+                let generation = u.generation;
+                let server = self.server.clone();
+                let id = user_id.to_owned();
+                let wait = Duration::from_millis(due - now);
+                u.status_timer = Some(time::after_func(wait, move || {
+                    let Some(server) = server.upgrade() else {
+                        return;
+                    };
+                    let mut st = server.lock();
+                    let Some(u) = st.users.get_mut(&id) else {
+                        return;
+                    };
+                    if u.generation != generation {
+                        return;
+                    }
+                    u.status_timer = None;
+                    st.announce_status_locked(&id, Cause::Connection);
+                }));
+            }
             return;
         }
-        self.publish_locked(user_id);
-        let sharers = self.sharers_locked(user_id);
-        self.send_status_locked(user_id, &sharers);
+        u.status_hold = 0;
+        if self.publish_locked(user_id) {
+            let sharers = self.sharers_locked(user_id);
+            self.send_status_locked(user_id, &sharers);
+        }
     }
 
     /// Tells the connections of `users` u's published shown status.
@@ -685,7 +709,7 @@ impl State {
                     Idle::Back => self.drop_wakes_locked(user_id, None),
                     Idle::For(_) => self.release_held_locked(user_id, &now),
                 }
-                self.announce_status_locked(user_id);
+                self.announce_status_locked(user_id, Cause::Connection);
             }
         }
         if !update.has_mute {

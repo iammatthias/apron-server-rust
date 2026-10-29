@@ -10,6 +10,7 @@ use rust_stdlib_crypto::rand;
 
 use super::protocol::*;
 use super::server::{Client, ClientId, Frame, Server, State, DEFAULT_ROOM_ID};
+use super::status::Cause;
 use super::status::*;
 use super::webauthn::PasskeyUser;
 use crate::obj;
@@ -118,7 +119,11 @@ pub struct UserState {
     pub offline_at: i64,
     pub seen: i64,
     pub status: String,
-    pub status_limit: Option<Limiter>,
+    /// When a change of the user's status last went to others, and until
+    /// when one a closed connection caused waits, in Unix milliseconds; 0
+    /// for none. `status_timer` sends a change that waits.
+    pub announced_at: i64,
+    pub status_hold: i64,
     pub status_timer: Option<Timer>,
     pub status_requests: Option<Limiter>,
     /// The rooms the user has not joined where a message mentioned or
@@ -165,7 +170,8 @@ impl UserState {
             offline_at: 0,
             seen: 0,
             status: STATUS_OFFLINE.into(),
-            status_limit: None,
+            announced_at: 0,
+            status_hold: 0,
             status_timer: None,
             status_requests: None,
             typing_relays: None,
@@ -695,10 +701,10 @@ impl State {
             if retire {
                 self.retire_locked(&previous);
             } else {
-                self.announce_status_locked(&previous);
+                self.announce_status_locked(&previous, Cause::Closed);
             }
         }
-        self.announce_status_locked(user_id);
+        self.announce_status_locked(user_id, Cause::Connection);
         self.sync_server_locked(c);
     }
 
@@ -714,7 +720,7 @@ impl State {
             self.retire_locked(&user_id);
             return;
         }
-        self.announce_status_locked(&user_id);
+        self.announce_status_locked(&user_id, Cause::Closed);
     }
 
     /// Closes a connection whose sign-in was revoked, with a connection-level
@@ -743,7 +749,7 @@ impl State {
             self.retire_locked(&user_id);
             return;
         }
-        self.announce_status_locked(&user_id);
+        self.announce_status_locked(&user_id, Cause::Closed);
     }
 
     /// Removes a guest identity for good. It leaves every room it joined,

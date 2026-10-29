@@ -57,6 +57,11 @@ pub struct Limits {
     /// invalid_params, too_large) within a minute that close a connection
     /// with 1008.
     pub policy_violations: usize,
+    /// How often a user's status changes their connections cause go to
+    /// others, the latest winning; and how long a change a closed
+    /// connection caused waits, so a reconnect within it shows nothing.
+    pub status_coalesce: time::Duration,
+    pub offline_grace: time::Duration,
 }
 
 /// Posts a minute and a day; zero is no limit.
@@ -160,6 +165,8 @@ impl Default for Limits {
             frames_per_ip_minute: 120,
             server_frames_per_minute: 600,
             policy_violations: 3,
+            status_coalesce: time::Duration::from_secs(60),
+            offline_grace: time::Duration::from_secs(60),
         }
     }
 }
@@ -185,6 +192,8 @@ impl Limits {
             frames_per_ip_minute: 0,
             server_frames_per_minute: 0,
             policy_violations: 0,
+            status_coalesce: time::Duration::from_secs(0),
+            offline_grace: time::Duration::from_secs(0),
         }
     }
 }
