@@ -16,7 +16,7 @@ use super::protocol::*;
 use super::remap::{Fate, Remap};
 use super::rooms::room_update;
 use super::server::{Client, State};
-use super::users::{candidate_user_id, normalize_name};
+use super::user_ids::{candidate_user_id, normalize_name};
 use crate::obj;
 use crate::webauthn::protocol::{
     self as wa, AuthenticatorSelection, ResidentKeyRequirement, UserVerificationRequirement,

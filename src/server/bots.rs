@@ -19,11 +19,12 @@ use super::email::web_socket_url;
 use super::protocol::*;
 use super::remap::{Fate, Remap};
 use super::server::{Client, ClientId, State};
-use super::users::{normalize_name, UserState};
+use super::user_ids::normalize_name;
+use super::users::UserState;
 use super::webauthn::SessionKey;
 
 /// Starts every bot's user_id, followed by its owner's. No other user may
-/// have one (`users::requestable`).
+/// have one (`user_ids::requestable`).
 pub const BOT_ID_PREFIX: &str = "bot_";
 pub const BOT_TOKEN_PREFIX: &str = "apron_bot_";
 /// The one server role (§3.3) a bot holds.

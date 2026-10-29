@@ -1157,13 +1157,13 @@ impl Server {
             let mut result = Json::Null;
             let decoded = json::unmarshal(&stored.result.0, &mut result, &[]).is_ok();
             let entry = fingerprint.filter(|_| decoded).map(|fingerprint| {
-                Arc::new(super::users::DedupEntry::finished(
+                Arc::new(super::dedup::DedupEntry::finished(
                     fingerprint,
                     stored.at,
                     result,
                 ))
             });
-            let fresh = time::now().unix_milli() - stored.at < super::users::DEDUP_WINDOW_MS;
+            let fresh = time::now().unix_milli() - stored.at < super::dedup::DEDUP_WINDOW_MS;
             match (entry, st.users.get_mut(&user_id)) {
                 (Some(entry), Some(u)) if fresh && u.persists() => {
                     for dropped in u.dedup.put(&request_id, entry) {
