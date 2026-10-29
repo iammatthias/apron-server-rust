@@ -4,7 +4,7 @@ use rust_stdlib::time::{self};
 
 use super::client::Client;
 use super::commands::{PRIVATE_NOTICE_ID, PRIVATE_NOTICE_NAME};
-use super::embeds::AVATAR_TYPES;
+use super::media_types::AVATAR_TYPES;
 use super::protocol::*;
 use super::server::{State, DEFAULT_ROOM_ID};
 use super::status::optional_statuses;

@@ -7,8 +7,8 @@ use rust_stdlib::time::Duration;
 
 use super::custom_emoji::{DEFAULT_MAX_EMOJI, DEFAULT_MAX_EMOJI_BYTES};
 use super::email::EmailSender;
-use super::embeds::UPLOAD_TYPES;
 use super::limits::Limits;
+use super::media_types::UPLOAD_TYPES;
 use super::metadata::ServerMetadata;
 use super::protocol::*;
 use super::push::PushHosts;
