@@ -17,10 +17,13 @@ Go server.
 
 ## Status
 
-The port matches apron-server-go at commit
+The port started from apron-server-go at commit
 [`f137c64`](https://github.com/apron-chat/apron-server-go/commit/f137c64c3f2fe1b3fbc6464619e9d9e5c4a76127),
-protocol version 9. The `UPSTREAM` file pins that commit, and
-`tools/upstream/check.sh` lists the upstream commits not yet ported.
+protocol version 9. Its reference is now
+[apron-server-cloudflare](https://github.com/apron-chat/apron-server-cloudflare):
+the `REFERENCE` file pins the Cloudflare and protocol commits last reviewed,
+and `tools/reference/check.sh` lists the commits since that change the
+behavior contract.
 
 These checks pass at the current commit:
 
@@ -34,8 +37,8 @@ These checks pass at the current commit:
 
 `docs/PORT.md` records two more results from earlier in the port:
 
-- `tools/crossopen/run.sh` registered a passkey on one server's SQLite
-  database and signed in with it on the other, in both directions.
+- A cross-open check, since retired, registered a passkey on one server's
+  SQLite database and signed in with it on the other, in both directions.
 - `tools/interop/run.sh` runs the Go repository's Playwright suites, with
   the real web client, against this binary. The last recorded run passed 43
   of 44 tests.

@@ -5,10 +5,10 @@ Source: apron-server-go at `f137c64`, protocol v9 (`testdata/apron` at
 
 ## Definition of done
 
-`aprond` built from this repository passes the Go repository's browser
-interop suites (`desktop`, `mobile`, `push`) through `tools/interop/run.sh`.
-The behavior tests ported from the Go `*_test.go` files pass under
-`cargo test`. Every remaining difference is listed in `docs/DEVIATIONS.md`.
+`aprond` matches apron-server-cloudflare's `SPEC.md` and its ported tests,
+except the rows in `docs/DEVIATIONS.md`. `REFERENCE` pins the Cloudflare and
+protocol commits that were last reviewed, and `tools/reference/check.sh`
+lists what changed since.
 
 ## Phases
 
@@ -81,6 +81,7 @@ Phases 2a, 2b, and 2c run in parallel once phase 1 lands.
 | 2026-10-29 | Reaction records are logged with their entries qualified: `parse_emojis` normalizes a `reactions` request before `commit_reactions_locked` logs it, and a move re-logs the stored sets, which load qualified (d74f625); `reactions_test` checks the record `history` serves. Records logged before d74f625 keep the form they were sent in, and no migration rewrites them. A logged record is what was broadcast under its `log_id`, which clients may already hold, so the log stays append-only; the current sets were already rewritten qualified when they loaded, so `room_list` and every new record agree, and a client reading an old record compares entries without U+FE0F (§4.7). |
 | 2026-10-29 | `/purge` (`src/server/purge.rs`) erases users in one pass under the lock, `erase_users_locked`, and is the first code that deletes a record from the middle of the log (`remove_record_locked`, which also drops it from every room log that holds it). Its test, `purge_test::test_purge_leaves_nothing_behind`, builds a user holding one of everything and checks that the user_id appears nowhere in the state's store entries (`dump_locked`, now over every record rather than the room logs' only) or the maps kept in memory, and `test_purge_persists` checks the store itself after a restart. Each erase step was mutation-checked against those tests: removing any one of them fails a test. | A purge touches some 25 places that key or name a user. A test that searches every place for the user_id finds a missed one without a test per place, and the same search checks `/rename`. `dump_locked` read records only through the room logs, so a record dropped from a log but left in `State.records` was invisible to it. |
 | 2026-10-29 | `/rename` (`src/server/rename.rs`) moves a user in one pass under the lock, `move_user_locked`, re-keying `State.users` and every map that names the user, and rewriting the user objects of logged records in place, as Cloudflare's `renameIdentity` does. The user's timers are stopped and set again under the new id. `rename_test::test_rename_moves_everything` checks that every place `purge_test::traces` found under the old user_id before the rename holds the new one after it, but the sessions, and that only `used_ids` and the bot's entries keep the old one. | PROTOCOL.md §3.3.3 has logged records keep a user_id, and Cloudflare rewrites them for `/rename` as its one exception; this server follows Cloudflare, so the user's past messages stay editable. Comparing the places before and after catches a move that leaves anything behind without a test per field. |
+| 2026-10-29 | `UPSTREAM` and `tools/upstream/check.sh` give way to `REFERENCE`, which pins apron-chat/apron-server-cloudflare and shazow/apron at the commits last reviewed, and `tools/reference/check.sh`, which lists each repository's commits since its pin that touch `SPEC.md`, `src/`, `docs/`, `PROTOCOL.md` or `EXTENSIONS.md`. `tools/crossopen` is deleted. `tools/smoke/frame-diff.mjs` compares the `server` frame's shape with the live reference at wss://server.apron.chat/. | Cloudflare is the reference and Go a fallback, so drift is measured against Cloudflare and the protocol, as a review queue rather than a rule to port every commit. Store compatibility with a Go `aprond` is no longer a goal, so a check of it guards nothing. |
 
 ## Migrating a guest_<n> account
 
@@ -229,7 +230,8 @@ from the clone), each with a temp `--store` and `--upload.dir`:
 
 ## Passkey cross-open
 
-`tools/crossopen/run.sh` builds both `aprond`s and a Go client with the
+Retired on 2026-10-29 with Go store compatibility as a goal; the tool is in
+the history before that date. `tools/crossopen/run.sh` built both `aprond`s and a Go client with the
 software authenticator of `webauthn_test.go`. In each direction one server
 registers a guest's passkey on a SQLite database and stops; the other opens
 the database, resumes the bearer token, and signs in with the passkey. After

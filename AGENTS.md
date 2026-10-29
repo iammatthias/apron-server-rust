@@ -81,39 +81,31 @@ The Go files map one to one onto Rust modules:
 - Nothing in this repository gets pushed or published without the owner's
   go-ahead.
 
-## Upstream parity
+## Reference parity
 
-This section predates the switch to the Cloudflare reference: porting new
-Go commits is no longer required, and `UPSTREAM` and `check.sh` are due to
-be re-pointed at apron-server-cloudflare. Until then, treat the script as a
-report of Go changes worth a look. This port tracked apron-server-go's
-`main`. `UPSTREAM` pins the Go commit the
-port matches. Check it at the start of every session and before every pull
-request:
+`REFERENCE` pins apron-chat/apron-server-cloudflare and shazow/apron (the
+protocol) at the commits last reviewed. Check it at the start of every
+session and before every pull request:
 
 ```sh
-tools/upstream/check.sh
+tools/reference/check.sh
 ```
 
-It fetches the Go clone's remote refs (the checkout stays unmodified), exits 0
-when the pin is upstream `main`, and otherwise exits 1 and lists the new
-commits with the Rust file each changed Go path maps to. When upstream is
-ahead:
+It keeps a blobless clone of each repository under `$APRON_REFERENCE_DIR`
+(default `~/.cache/apron-reference`), fetches it, and lists the commits
+since each pin that touch `SPEC.md`, `src/`, `docs/`, `PROTOCOL.md` or
+`EXTENSIONS.md`. It exits 0 when there are none, 1 when there are, and 2
+when a pin is no longer an ancestor of `main`. The list is a review queue,
+not a rule to port every commit: for each commit, port the behavior with
+its tests, record a difference you keep in `docs/DEVIATIONS.md`, or skip a
+commit that changes nothing a client sees (a Cloudflare budget, say). Then
+move the pin in the same change. If the script reports rewritten history,
+stop and compare by hand.
 
-1. Port each new commit in order, as its own commit here, with tests: port
-   the Go test changes, and rerun the gates the paths point at (fixtures for a
-   `testdata/apron` move, `tools/interop/run.sh` for `.apron-web` or
-   `tests/interop` changes).
-2. Update the clone's checkout to the ported commit
-   (`git -C "$APRON_GO_DIR" checkout <sha>` and
-   `git -C "$APRON_GO_DIR" submodule update --init`), so
-   tests read the matching fixtures and suites.
-3. Move `UPSTREAM` to that commit in the same change, and note it in
-   `docs/PORT.md`.
-
-Parity work comes before new features. A difference you decide not to port
-goes in `docs/DEVIATIONS.md`, never just skipped. If the script reports
-rewritten history (exit 2), stop and compare by hand.
+`tools/smoke/frame-diff.mjs` compares the shape of this server's `server`
+frame (its keys and capabilities, not their values) with the live
+reference at wss://server.apron.chat/, as one read-only guest connection
+from the web client's origin.
 
 ## Third-party allowlist
 
@@ -230,7 +222,8 @@ mounts at `/run/secrets/apron_admin_token` for `--admin-token-file`. The
 script never prints the token and never replaces an existing one. Fetch it
 for `tools/deploy/live-check.mjs` with `ssh host 'cat ~/apron-secrets/admin_token'`
 into a 0600 file named by `APRON_ADMIN_TOKEN_FILE`. The live check makes
-`livecheck_` accounts, which stay until `/purge` exists to remove them.
+`livecheck_` accounts and purges them, and those earlier runs left, at the
+end of each run.
 
 The web client is [apron-web](https://github.com/apron-chat/apron-web), not
 code in this repository. `APRON_WEB_BUILD` names a finished build to ship as
