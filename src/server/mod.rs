@@ -26,6 +26,7 @@ pub mod persist;
 pub mod protocol;
 pub mod purge;
 pub mod push;
+pub mod push_delivery;
 pub mod remap;
 pub mod rename;
 pub mod restore;

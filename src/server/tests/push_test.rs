@@ -20,6 +20,7 @@ use crate::server::open;
 use crate::server::persist::{ENTRY_PUSH, ENTRY_USER};
 use crate::server::protocol::*;
 use crate::server::push::*;
+use crate::server::push_delivery::PushDeliverer;
 use crate::server::status::{
     MuteState, StatusUpdate, STATUS_DND, STATUS_INVISIBLE, STATUS_NONE, STATUS_ONLINE,
 };
