@@ -69,11 +69,34 @@ impl State {
     }
 }
 
+/// The largest id a read cursor may name: JavaScript's
+/// Number.MAX_SAFE_INTEGER, as Cloudflare's asDecimalId allows.
+const MAX_READ_ID: i64 = (1 << 53) - 1;
+
+/// Reads read_message_id as Cloudflare's asDecimalId does: a decimal string
+/// of a positive safe integer, returned in its canonical spelling with its
+/// value. It need not name a message: a cursor only marks how far its user
+/// read.
+fn parse_read_id(params: &Params) -> Result<Option<(String, i64)>, RpcError> {
+    if !params.contains_key("read_message_id") {
+        return Ok(None);
+    }
+    let text = parse_string(params, "read_message_id", false)
+        .ok()
+        .filter(|text| !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit()))
+        .ok_or_else(|| invalid_params("read_message_id must be a decimal string"))?;
+    match text.parse::<i64>() {
+        Ok(id) if (1..=MAX_READ_ID).contains(&id) => Ok(Some((id.to_string(), id))),
+        _ => Err(invalid_params(
+            "read_message_id is outside the supported range",
+        )),
+    }
+}
+
 impl State {
     /// Applies a connection's activity (§4.6). typing is relayed to the
     /// room's other connections, at most MAX_TYPING_SECONDS and within
-    /// ACTIVITY_RELAYS_PER_MINUTE. A read cursor must name a message and only
-    /// advances; an account's is kept, sent after the room is listed, and
+    /// ACTIVITY_RELAYS_PER_MINUTE. A read cursor only advances; an account's is kept, sent after the room is listed, and
     /// relayed to its other connections, or with Config.read_receipts to the
     /// room's members; a guest's is dropped.
     pub fn activity_locked(
@@ -99,8 +122,9 @@ impl State {
             // Fractional seconds round down, as on Cloudflare.
             typing = Some(value.min(MAX_TYPING_SECONDS as f64).floor() as i64);
         }
-        let read_id = parse_string(&req.params, "read_message_id", false)?;
-        let has_read = req.params.contains_key("read_message_id");
+        let read = parse_read_id(&req.params)?;
+        let has_read = read.is_some();
+        let (read_id, id) = read.unwrap_or_default();
         let user_id = self.user_of(c)?;
         let result = Object::new();
         // A read-only guest's typing and read cursors would reach others.
@@ -111,12 +135,6 @@ impl State {
         let visible = self.visible_room_locked(&user_id, &room_id).is_some();
         if in_room && !visible {
             return Err(invalid_params(format!("Unknown room {}", quote(&room_id))));
-        }
-        if has_read && self.visible_message_locked(&user_id, &read_id).is_none() {
-            return Err(invalid_params(format!(
-                "Unknown read_message_id {}",
-                quote(&read_id)
-            )));
         }
         // The relays this request causes are queued before process_frame
         // sends its result (§1).
@@ -129,7 +147,6 @@ impl State {
         let mut read = false;
         // A guest's read cursor is dropped: guests keep nothing.
         if has_read && self.users[&user_id].persists() {
-            let id: i64 = read_id.parse().unwrap_or(0);
             let joined = self.users[&user_id].joined.contains(&room_id);
             let r = self.rooms.get_mut(&room_id).expect("room exists");
             let advances = r.reads.get(&user_id).is_none_or(|cursor| id > cursor.id);
