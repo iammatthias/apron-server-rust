@@ -754,7 +754,8 @@ impl State {
 
     /// Removes a guest identity for good. It leaves every room it joined,
     /// logging each leave as a membership for the remaining members
-    /// (§4.2.2). Its user_id is never reissued (§3.3).
+    /// (§4.2.2), and removes no thread it leaves empty: a closed connection
+    /// is not a leave. Its user_id is never reissued (§3.3).
     pub fn retire_locked(&mut self, user_id: &str) {
         let Some(u) = self.users.get(user_id) else {
             return;
@@ -771,7 +772,7 @@ impl State {
             self.remove_push_locked(&key);
         }
         for (_, room_id) in rooms {
-            self.leave_locked(user_id, &room_id);
+            self.depart_locked(user_id, &room_id);
             if let Some(r) = self.rooms.get_mut(&room_id) {
                 r.reads.remove(user_id);
             }

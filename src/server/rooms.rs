@@ -500,8 +500,21 @@ impl State {
 
     /// Removes u from r (§4.2.2): the room's other members receive the
     /// logged membership, and u's connections one room_update with left and
-    /// the membership. Reports whether u was a member.
+    /// the membership. A thread or private room left empty is removed.
+    /// Reports whether u was a member.
     pub fn leave_locked(&mut self, user_id: &str, room_id: &str) -> bool {
+        if !self.depart_locked(user_id, room_id) {
+            return false;
+        }
+        self.remove_if_empty_locked(room_id);
+        true
+    }
+
+    /// The leave itself, without removing a room it leaves empty: for a
+    /// retired guest, whose connection closed rather than left. Cloudflare's
+    /// connectionGone removes nothing, so the guest's thread stays listed
+    /// until someone leaves it or its log expires.
+    pub fn depart_locked(&mut self, user_id: &str, room_id: &str) -> bool {
         if !self
             .users
             .get(user_id)
@@ -538,7 +551,6 @@ impl State {
         } else {
             self.unread_changed_locked(user_id, room_id);
         }
-        self.remove_if_empty_locked(room_id);
         true
     }
 

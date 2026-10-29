@@ -378,6 +378,28 @@ fn test_emptied_rooms_are_removed() {
     leave(&mut guest, &guests);
     assert!(!exists(&server, &guests), "an emptied thread stayed");
 
+    // A guest whose connection closes is retired, not a leaver: the thread
+    // it was alone in stays, listed for the next guest, as Cloudflare's
+    // connectionGone removes nothing. Only a leave empties it.
+    let closed = thread(&mut bob, "closed");
+    guest.drain();
+    join_room(&mut guest, &closed);
+    bob.drain();
+    leave(&mut bob, &closed);
+    let guest_id = guest.user_id.clone();
+    drop(guest);
+    wait_for(|| !server.app.lock().users.contains_key(&guest_id));
+    assert!(
+        exists(&server, &closed),
+        "a closed connection removed a thread"
+    );
+    let mut next = dial_test_client(&server);
+    let listed = list_rooms(&mut next, obj! {"parent_room_id" => "general"});
+    assert_eq!(room_ids(listed.get("not_joined")), vec![closed.clone()]);
+    join_room(&mut next, &closed);
+    leave(&mut next, &closed);
+    assert!(!exists(&server, &closed), "an emptied thread stayed");
+
     // A private room goes too; general and an admin's room stay.
     bob.drain();
     let (private, _) = save_room(&mut bob, "private", obj! {"private" => true});
