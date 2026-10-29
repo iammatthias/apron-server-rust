@@ -93,8 +93,8 @@ it uses the matching rust-stdlib module.
   `charge_*_locked` function. Five per-user limiters (push registrations,
   status, typing, read relays and unfurls) use `crate::rate::Limiter` on
   `UserState` instead.
-- **Tests.** `tests/` holds the server's integration tests, one file per
-  area, with shared helpers and fixtures in `tests/helpers/` (server,
+- **Tests.** `tests/` holds the server's integration tests, split by
+  area and topic (`push_*_test.rs`, `status_*_test.rs` and so on), with shared helpers and fixtures in `tests/helpers/` (server,
   client, frames, rooms, uploads and accounts).
 
 `docs/PORT.md` holds the port's history: the phase plan, gate results and

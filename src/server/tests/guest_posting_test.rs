@@ -1,5 +1,5 @@
-//! Read-only guests (`Config.guest_posting` false), an extension Go lacks
-//! that matches apron-server-cloudflare's `GUEST_POSTING` (docs/DEVIATIONS.md).
+//! Read-only guests (`Config.guest_posting` false), as in
+//! apron-server-cloudflare's `GUEST_POSTING` (docs/DEVIATIONS.md).
 
 use super::helpers::*;
 use super::invite_bot_test::account;

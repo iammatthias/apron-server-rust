@@ -1,7 +1,7 @@
-//! History retention (`Config.retention`), an extension Go lacks that
-//! follows apron-server-cloudflare's rolling history (docs/DEVIATIONS.md).
-//! The tests move the clock by calling `expire_history_locked` with a time
-//! past the window.
+//! History retention (`Config.retention`), which follows
+//! apron-server-cloudflare's rolling history (docs/DEVIATIONS.md). The tests
+//! move the clock by calling `expire_history_locked` with a time past the
+//! window.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

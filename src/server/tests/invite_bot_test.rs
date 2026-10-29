@@ -1,6 +1,6 @@
-//! /invite-bot, an extension Go lacks (docs/DEVIATIONS.md): an account gets
-//! a bot of its own, named after it, and a bearer token that signs in as the
-//! bot from any origin, as apron-server-cloudflare's does (§3.2, §4.1).
+//! /invite-bot: an account gets a bot of its own, named after it, and a
+//! bearer token that signs in as the bot from any origin, as
+//! apron-server-cloudflare's does (§3.2, §4.1).
 
 use std::sync::Arc;
 
