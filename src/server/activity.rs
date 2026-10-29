@@ -87,13 +87,17 @@ impl State {
         }
         let mut typing: Option<i64> = None;
         if let Some(raw) = req.params.get("typing") {
-            let mut value: i64 = 0;
+            let mut value: f64 = 0.0;
             if rust_stdlib::encoding::json::v2::unmarshal(&raw.0, &mut value, &[]).is_err()
-                || value < 0
+                || !value.is_finite()
+                || value < 0.0
             {
-                return Err(invalid_params("typing must be a non-negative integer"));
+                return Err(invalid_params(
+                    "typing must be a non-negative number of seconds",
+                ));
             }
-            typing = Some(value);
+            // Fractional seconds round down, as on Cloudflare.
+            typing = Some(value.min(MAX_TYPING_SECONDS as f64).floor() as i64);
         }
         let read_id = parse_string(&req.params, "read_message_id", false)?;
         let has_read = req.params.contains_key("read_message_id");
@@ -174,7 +178,7 @@ impl State {
         let mut typed = false;
         if let Some(typing) = typing {
             if self.admit_typing_locked(c, &user_id, &room_id) {
-                params.insert("typing".into(), typing.min(MAX_TYPING_SECONDS).into());
+                params.insert("typing".into(), typing.into());
                 typed = true;
             }
         }
