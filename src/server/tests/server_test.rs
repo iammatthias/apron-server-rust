@@ -598,13 +598,15 @@ fn test_unimplemented_and_unknown_methods_are_unsupported() {
 fn test_message_snapshots_replace_editable_state() {
     let server = new_test_server(default_config());
     let mut owner = dial_test_client(&server);
+    make_account(&server, &owner.user_id);
     let observer = dial_test_client(&server);
+    make_account(&server, &observer.user_id);
     expect_membership(&owner, "general", &observer.user_id, true);
     owner.result("me", "name", obj! {"name" => "Alice"});
     let renamed = observer.notification("user");
     assert_eq!(
         renamed,
-        obj! {"new" => obj! {"user_id" => "guest_1", "name" => "Alice", "status" => "online"}},
+        obj! {"new" => obj! {"user_id" => "guest_1", "name" => "Alice", "status" => "online", "roles" => strings(&[])}},
         "rename notification"
     );
     let ext = obj! {"irc" => obj! {"nick" => "ada_"}};
@@ -1278,6 +1280,7 @@ fn test_reactions() {
 fn test_history_paginates_across_record_kinds() {
     let server = new_test_server(default_config());
     let mut c = dial_test_client(&server);
+    make_account(&server, &c.user_id);
     let listed = list_rooms(&mut c, obj! {"filter" => "joined"})["joined"].as_list()[0]
         .as_object()
         .unwrap()
@@ -1626,6 +1629,7 @@ fn test_default_room_and_empty_messages() {
 fn test_request_deduplication() {
     let server = new_test_server(default_config());
     let mut c = dial_test_client(&server);
+    make_account(&server, &c.user_id);
     let (thread, _) = save_room(
         &mut c,
         "thread",

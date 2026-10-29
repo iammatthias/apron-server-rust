@@ -271,6 +271,7 @@ fn test_room_set_merges_ext() {
 fn test_profile_ext_limit_applies_to_the_merged_ext() {
     let server = new_test_server(default_config());
     let mut a = dial_test_client(&server);
+    make_account(&server, &a.user_id);
     let half = "x".repeat(MAX_PROFILE_EXT_BYTES / 2);
     a.result(
         "me",
@@ -289,7 +290,10 @@ fn test_profile_ext_limit_applies_to_the_merged_ext() {
         .unwrap();
     let ext = you["ext"].as_object().unwrap();
     assert!(
-        ext.len() == 2 && you["name"] == Json::from("Guest 1"),
+        ext.contains_key("a")
+            && ext.contains_key("big")
+            && !ext.contains_key("b")
+            && you["name"] == Json::from("Guest 1"),
         "a refused me changed the profile: {you:?}"
     );
     let raw = {
