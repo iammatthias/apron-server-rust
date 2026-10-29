@@ -7,6 +7,7 @@ pub mod commands;
 pub mod devices;
 pub mod email;
 pub mod embeds;
+pub mod emoji;
 pub mod invites;
 pub mod messages;
 pub mod metadata;

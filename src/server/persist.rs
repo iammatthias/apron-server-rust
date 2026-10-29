@@ -44,6 +44,7 @@ use rust_stdlib_derive::{MarshalTo, UnmarshalFrom};
 use super::bots::{BotToken, BOT_ROLE};
 use super::devices::DeviceToken;
 use super::embeds::{EmbedPurpose, EmbedState, StreamBuffer};
+use super::emoji::normalize_entries;
 use super::invites::{InviteToken, JoinInvite};
 use super::messages::{MessageState, ReactionSet};
 use super::metadata::StoredServer;
@@ -859,6 +860,7 @@ impl Server {
             }
         }
 
+        let mut migrated: Vec<String> = Vec::new();
         for (id, raw) in of(ENTRY_MESSAGE) {
             let stored = decode::<StoredMessage>(ENTRY_MESSAGE, id, raw)?;
             let mut m = MessageState {
@@ -870,11 +872,17 @@ impl Server {
                 ..MessageState::default()
             };
             for (user_id, set) in stored.reactions {
+                // Sets stored before entries were qualified (§4.7) are
+                // qualified as they load, and kept so at the next save.
+                let emojis = normalize_entries(set.emojis.iter().cloned());
+                if emojis != set.emojis {
+                    migrated.push(id.clone());
+                }
                 m.reactions.insert(
                     user_id,
                     ReactionSet {
                         from: set.from,
-                        emojis: set.emojis,
+                        emojis,
                         // A set stored without its record lives as long as
                         // the message's latest snapshot.
                         log_id: if set.log_id == 0 {
@@ -898,6 +906,9 @@ impl Server {
                 continue;
             }
             st.messages.insert(id.clone(), m);
+        }
+        for id in migrated {
+            st.touch_message(&id);
         }
         st.records = records;
 
