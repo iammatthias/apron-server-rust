@@ -3,12 +3,14 @@
 //! the check that a rename moves everything kept under the old user_id.
 
 use std::collections::BTreeSet;
+use std::io::Write;
 use std::sync::Arc;
 
 use super::admin_test::*;
 use super::helpers::*;
 use super::persist_test::start_with;
 use super::purge_test::{account_config, entangle, named_account, stored_traces, traces};
+use super::reference_test::{put_from_pipe, writer_status};
 use super::webauthn_test::*;
 use crate::obj;
 use crate::server::protocol::*;
@@ -631,5 +633,49 @@ fn test_rename_then_invite_bot_rotates_the_bot() {
         "room_leave",
         "remove-bot",
         obj! {"room_id" => "general", "user_id" => bot.as_str()},
+    );
+}
+
+/// An avatar whose upload is under way when its user is renamed becomes the
+/// renamed user's.
+#[test]
+fn test_rename_during_an_avatar_upload() {
+    let server = new_test_server(account_config());
+    let mut admin = admin(&server);
+    let (mut dave, _) = named_account(&server, "Dave");
+    let from = dave.user_id.clone();
+    let reply = reply_to(
+        &mut dave,
+        "command",
+        "avatar",
+        obj! {"body" => obj! {"text" => "/avatar", "embeds" => vec![Json::from(obj! {"kind" => "upload"})]}},
+    );
+    let write_url = reply["result"].as_object().unwrap()["embeds"].as_list()[0]
+        .as_object()
+        .unwrap()["write_url"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let png = test_png();
+    let (mut pipe, writer) = put_from_pipe(&write_url);
+    let _ = pipe.write_all(&png[..8]);
+    let token = write_url[write_url.rfind('/').unwrap() + 1..].to_owned();
+    wait_for(|| !server.app.lock().writes.contains_key(&token));
+    // The write has taken its purpose and is reading the body.
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    admin.drain();
+    private_reply(&mut admin, &format!("/rename {from} david"));
+    let _ = pipe.write_all(&png[8..]);
+    pipe.close();
+    assert_eq!(writer_status(&writer), 201, "writer status");
+    let st = server.app.lock();
+    let david = &st.users["david"];
+    assert!(
+        !david.avatar.is_empty() && david.avatar_embed.is_some(),
+        "the renamed user has no avatar"
+    );
+    assert!(
+        st.embeds.contains_key(david.avatar_embed.as_ref().unwrap()),
+        "the avatar's upload is gone"
     );
 }

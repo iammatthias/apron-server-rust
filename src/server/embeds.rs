@@ -1034,6 +1034,9 @@ impl Server {
             );
             return;
         }
+        // A /rename while the body arrived moved an avatar to the new
+        // user_id.
+        let purpose = st.embeds[id].purpose.clone();
         match err {
             Some(UploadError::TooLarge) => {
                 fail(
