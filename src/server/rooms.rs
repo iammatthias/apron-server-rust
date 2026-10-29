@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use rust_stdlib::encoding::json::jsontext::Value;
 
-use super::client::{Client, Frame};
+use super::client::{Client, ClientId, Frame};
 use super::limits::Category;
 use super::messages::MessageState;
 use super::protocol::*;
@@ -277,17 +277,32 @@ impl State {
     /// Sends a frame to every connection of every member of the given
     /// rooms, once per connection.
     pub fn deliver_locked(&self, frame: &Frame, rooms: &[String]) {
-        self.deliver_except_locked(frame, rooms, "");
+        self.deliver_except_locked(frame, rooms, None);
     }
 
-    /// `deliver_locked` to every member but `except`.
-    pub(super) fn deliver_except_locked(&self, frame: &Frame, rooms: &[String], except: &str) {
+    /// `deliver_locked` to every connection but `except`, which leaves the
+    /// sender's other connections in, as Cloudflare's deliver does.
+    pub(super) fn deliver_except_locked(
+        &self,
+        frame: &Frame,
+        rooms: &[String],
+        except: Option<ClientId>,
+    ) {
         let mut seen = BTreeSet::new();
         for room_id in rooms {
-            if let Some(r) = self.rooms.get(room_id) {
-                for id in &r.members {
-                    if id != except && seen.insert(id.clone()) {
-                        self.send_to_user(id, frame);
+            let Some(r) = self.rooms.get(room_id) else {
+                continue;
+            };
+            for user_id in &r.members {
+                if !seen.insert(user_id.as_str()) {
+                    continue;
+                }
+                let Some(u) = self.users.get(user_id) else {
+                    continue;
+                };
+                for id in u.clients.iter().filter(|id| Some(**id) != except) {
+                    if let Some(conn) = self.clients.get(id) {
+                        conn.client.enqueue_frame(frame.clone());
                     }
                 }
             }

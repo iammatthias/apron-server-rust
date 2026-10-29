@@ -130,3 +130,33 @@ fn test_typing_is_capped_and_throttled() {
         vec!["Typing updates are limited to 10 per minute, so others may not see you typing for a moment."]
     );
 }
+
+/// Typing goes to every connection in the room but the sending one: the
+/// typist's other devices see it too, as Cloudflare's deliver does.
+#[test]
+fn test_typing_reaches_the_typists_other_connections() {
+    let server = super::helpers::admin_test_server();
+    let mut other = dial_test_client(&server);
+    let mut first = super::helpers::admin(&server);
+    let mut second = super::helpers::admin(&server);
+    for c in [&mut other, &mut first, &mut second] {
+        c.drain();
+    }
+    first.write(
+        &obj! {"method" => "activity", "params" => obj! {"room_id" => "general", "typing" => 5i64}},
+    );
+    let want = vec![
+        obj! {"room_id" => "general", "from" => obj! {"user_id" => "admin", "name" => "Admin"}, "typing" => 5i64},
+    ];
+    assert_eq!(
+        activities(&first.drain()),
+        Vec::<Object>::new(),
+        "echoed to the sender"
+    );
+    assert_eq!(
+        activities(&second.drain()),
+        want,
+        "the typist's other device"
+    );
+    assert_eq!(activities(&other.drain()), want, "another member");
+}
