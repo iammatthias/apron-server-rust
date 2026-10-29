@@ -188,6 +188,33 @@ fn test_vapid_settings() {
 }
 
 #[test]
+fn test_push_hosts_settings() {
+    use crate::server::push::PushHosts;
+    let hosts = |args: &[&str]| server_settings(&parse(args).options).map(|s| s.push_hosts);
+    assert_eq!(hosts(&[]), Ok(PushHosts::default()), "no --push.hosts");
+    assert_eq!(
+        hosts(&[
+            "--push.hosts",
+            "relay.example",
+            "--push.hosts",
+            "*.push.example.net"
+        ]),
+        Ok(PushHosts::Listed(vec![
+            "relay.example".into(),
+            "*.push.example.net".into()
+        ]))
+    );
+    assert_eq!(hosts(&["--push.hosts", "*"]), Ok(PushHosts::Any));
+    assert_eq!(
+        hosts(&["--push.hosts", "relay"]),
+        Err(
+            "invalid --push.hosts \"relay\": list host names, *.host suffixes, or a standalone *"
+                .into()
+        )
+    );
+}
+
+#[test]
 fn test_insecure_push_is_for_tests_only() {
     let parser = parse(&["--push.allow-insecure"]);
     match server_settings(&parser.options) {

@@ -135,6 +135,7 @@ fn paths(requests: &[RelayRequest]) -> Vec<String> {
 fn push_test_server() -> TestServer {
     let mut config = default_config();
     config.allow_insecure_push = true;
+    config.push_hosts = PushHosts::Any;
     let server = new_test_server(config);
     server.app.lock().badge_delay = Duration::from_secs(0);
     server
@@ -167,6 +168,22 @@ fn has_push(server: &TestServer, user_id: &str, url: &str) -> bool {
         .contains_key(&push_key(user_id, url))
 }
 
+/// Signs in n guests and makes each an account, as only accounts register
+/// and wake anyone.
+fn push_group(server: &TestServer, n: usize) -> Vec<TestClient> {
+    let clients = dial_group(server, n);
+    for c in &clients {
+        make_account(server, &c.user_id);
+    }
+    clients
+}
+
+fn push_client(server: &TestServer) -> TestClient {
+    let c = dial_test_client(server);
+    make_account(server, &c.user_id);
+    c
+}
+
 /// Tells the server nobody attends c, which tells c nothing.
 fn go_idle(c: &mut TestClient) {
     let frames = c.status(obj! {"idle" => 300i64});
@@ -185,7 +202,7 @@ fn list(items: &[&str]) -> Json {
 fn test_push_wakes_mentions_and_replies_of_idle_users() {
     let relay = new_test_relay();
     let server = push_test_server();
-    let mut clients = dial_group(&server, 2);
+    let mut clients = push_group(&server, 2);
     for c in &clients {
         make_account(&server, &c.user_id);
     }
@@ -385,9 +402,10 @@ fn test_push_wakes_mentions_and_replies_of_idle_users() {
 #[test]
 fn test_push_registration() {
     let server = push_test_server();
-    let mut clients = dial_group(&server, 2);
+    let mut clients = push_group(&server, 2);
     let mut b = clients.pop().unwrap();
     let mut a = clients.pop().unwrap();
+    unlimit_push_registers(&server, &a.user_id);
     let (_, keys) = test_subscription();
     let endpoint = "https://push.example.net/s/abc";
     let cases: Vec<Object> = vec![
@@ -567,7 +585,7 @@ fn test_push_registration() {
 fn test_push_wake_scopes() {
     let relay = new_test_relay();
     let server = push_test_server();
-    let mut a = dial_test_client(&server);
+    let mut a = push_client(&server);
     make_account(&server, &a.user_id);
     add_account(&server, "carol", &[&a]);
     for (name, wake) in [
@@ -677,7 +695,7 @@ fn test_push_wake_scopes() {
 fn test_push_respects_mutes() {
     let relay = new_test_relay();
     let server = push_test_server();
-    let mut clients = dial_group(&server, 2);
+    let mut clients = push_group(&server, 2);
     let mut b = clients.pop().unwrap();
     let mut a = clients.pop().unwrap();
     b.result(
@@ -832,7 +850,7 @@ fn test_badge_pushes_coalesce() {
     let relay = new_test_relay();
     let server = push_test_server();
     server.app.lock().badge_delay = Duration::from_millis(300);
-    let mut clients = dial_group(&server, 2);
+    let mut clients = push_group(&server, 2);
     let mut b = clients.pop().unwrap();
     make_account(&server, &b.user_id);
     let mut a = clients.pop().unwrap();
@@ -865,29 +883,48 @@ fn test_badge_pushes_coalesce() {
     );
 }
 
-/// A guest that leaves takes its registrations with it: its leaves send
-/// nothing.
+/// Guests cannot register, so they are never woken; nor do their messages
+/// wake anyone (apron-server-cloudflare).
 #[test]
-fn test_guest_retirement_sends_no_badge() {
+fn test_guests_neither_register_nor_wake() {
     let relay = new_test_relay();
     let server = push_test_server();
-    server.app.lock().badge_delay = Duration::from_millis(300);
     let mut clients = dial_group(&server, 2);
+    let mut guest = clients.pop().unwrap();
     let mut b = clients.pop().unwrap();
-    let mut a = clients.pop().unwrap();
-    b.result(
+    let frame = reply(
+        &mut guest,
         "push_register",
         "phone",
-        obj! {"kind" => "relay", "url" => format!("{}/phone", relay.url), "wake" => list(&["badge"])},
+        obj! {"kind" => "relay", "url" => format!("{}/phone", relay.url)},
     );
-    save(&mut a, "more", obj! {"body" => obj! {"text" => "more"}});
+    assert_eq!(
+        frame["error"],
+        Json::from(
+            obj! {"code" => CODE_DENIED, "message" => "Sign in to receive push notifications"}
+        ),
+        "a guest's push_register"
+    );
+    guest.expect_error(
+        "push_unregister",
+        "off",
+        obj! {"url" => format!("{}/phone", relay.url)},
+        CODE_DENIED,
+    );
+    make_account(&server, &b.user_id);
+    b.result(
+        "push_register",
+        "b",
+        obj! {"kind" => "relay", "url" => format!("{}/b", relay.url)},
+    );
+    go_idle(&mut b);
+    let mention =
+        obj! {"body" => obj! {"text" => "hey", "mentions" => list(&[b.user_id.as_str()])}};
+    save(&mut guest, "guest-mention", mention);
     b.notification("message");
-    let b_id = b.user_id.clone();
-    let _ = b.ws.close(ws::STATUS_NORMAL_CLOSURE, "bye");
-    expect_membership(&a, "general", &b_id, false);
     assert!(
-        relay.pushes(&server, &mut a).is_empty(),
-        "pushes after a guest left"
+        relay.pushes(&server, &mut guest).is_empty(),
+        "a guest's mention pushed"
     );
 }
 
@@ -898,7 +935,7 @@ fn test_shutdown_cancels_pending_badges() {
     let relay = new_test_relay();
     let server = push_test_server();
     server.app.lock().badge_delay = time::HOUR;
-    let mut a = dial_test_client(&server);
+    let mut a = push_client(&server);
     add_account(&server, "dora", &[&a]);
     add_push(
         &server,
@@ -923,10 +960,12 @@ fn test_web_push_delivery() {
     let relay = new_test_relay();
     let mut config = default_config();
     config.allow_insecure_push = true;
+    config.push_hosts = PushHosts::Any;
     config.public_url = "https://chat.example".into();
     let server = new_test_server(config);
     let (mut c, frame) = dial_raw(&server);
     guest_auth(&mut c);
+    make_account(&server, &c.user_id);
     let key = frame["params"].as_object().unwrap()["push"]
         .as_object()
         .unwrap()["webpush"]
@@ -948,7 +987,7 @@ fn test_web_push_delivery() {
         obj! {"kind" => "relay", "url" => format!("{}/relay", relay.url), "keys" => keys.clone(), "token" => "tok", "push_id" => "relay-1"},
     );
     go_idle(&mut c);
-    let mut poster = dial_test_client(&server);
+    let mut poster = push_client(&server);
     expect_membership(&c, "general", &poster.user_id, true);
     save(
         &mut poster,
@@ -1136,7 +1175,7 @@ fn test_push_payload_fits_in_limit() {
 fn test_push_registrations_expire() {
     let relay = new_test_relay();
     let server = push_test_server();
-    let mut a = dial_test_client(&server);
+    let mut a = push_client(&server);
     add_account(&server, "dora", &[&a]);
     let stale = add_push(
         &server,
@@ -1178,7 +1217,7 @@ fn test_push_registrations_expire() {
 fn test_push_unread_and_badge() {
     let relay = new_test_relay();
     let server = push_test_server();
-    let mut clients = dial_group(&server, 2);
+    let mut clients = push_group(&server, 2);
     let mut b = clients.pop().unwrap();
     make_account(&server, &b.user_id);
     let mut a = clients.pop().unwrap();
@@ -1622,7 +1661,7 @@ fn test_push_and_status_survive_restart() {
 fn test_pushes_per_user_day() {
     let relay = new_test_relay();
     let server = push_test_server();
-    let mut a = dial_test_client(&server);
+    let mut a = push_client(&server);
     add_account(&server, "dora", &[&a]);
     add_push(
         &server,
@@ -1698,7 +1737,7 @@ fn test_push_refuses_internal_addresses() {
         called.load(Ordering::SeqCst)
     );
     assert!(
-        check_push_url("http://relay.example/p", false).is_err(),
+        check_push_url("http://relay.example/p", false, &PushHosts::Any).is_err(),
         "http push URL accepted without allow_insecure_push"
     );
     // Internal address literals, localhost, and hosts ending in a dot are
@@ -1715,7 +1754,7 @@ fn test_push_refuses_internal_addresses() {
         "mailto:a@b.example",
     ] {
         assert!(
-            check_push_url(endpoint, false).is_err(),
+            check_push_url(endpoint, false, &PushHosts::Any).is_err(),
             "{endpoint} accepted"
         );
     }
@@ -1741,7 +1780,7 @@ fn test_push_refuses_internal_addresses() {
         ),
     ] {
         assert_eq!(
-            check_push_url(endpoint, false),
+            check_push_url(endpoint, false, &PushHosts::Any),
             Ok(want.to_owned()),
             "{endpoint}"
         );
@@ -1962,7 +2001,7 @@ fn test_disabled_push_ignores_stored_registrations() {
 fn test_badge_count_recorded_only_when_accepted() {
     let relay = new_test_relay();
     let server = push_test_server();
-    let mut a = dial_test_client(&server);
+    let mut a = push_client(&server);
     add_account(&server, "alice", &[&a]);
     add_push(
         &server,
@@ -2000,7 +2039,7 @@ fn test_badge_count_recorded_only_when_accepted() {
 fn test_room_mute_expiry_updates_badge() {
     let relay = new_test_relay();
     let server = push_test_server();
-    let mut clients = dial_group(&server, 2);
+    let mut clients = push_group(&server, 2);
     let mut b = clients.pop().unwrap();
     let mut a = clients.pop().unwrap();
     b.result(
@@ -2036,7 +2075,7 @@ fn test_room_mute_expiry_updates_badge() {
 #[test]
 fn test_wake_names_past_the_bounds_are_ignored() {
     let server = push_test_server();
-    let mut a = dial_test_client(&server);
+    let mut a = push_client(&server);
     let endpoint = "http://127.0.0.1:1/p";
     let mut wake_of = |id: &str, wake: Vec<String>| -> WakeScope {
         a.result(
@@ -2074,7 +2113,7 @@ fn test_wake_names_past_the_bounds_are_ignored() {
 fn test_private_wakes_for_threads_of_joined_rooms() {
     let relay = new_test_relay();
     let server = push_test_server();
-    let mut a = dial_test_client(&server);
+    let mut a = push_client(&server);
     make_account(&server, &a.user_id);
     add_account(&server, "carol", &[&a]);
     add_push(
@@ -2139,7 +2178,7 @@ fn test_private_wakes_for_threads_of_joined_rooms() {
 fn test_mentions_wake_in_private_rooms() {
     let relay = new_test_relay();
     let server = push_test_server();
-    let mut a = dial_test_client(&server);
+    let mut a = push_client(&server);
     make_account(&server, &a.user_id);
     add_account(&server, "carol", &[&a]);
     add_push(
@@ -2204,7 +2243,7 @@ fn unread_state(server: &TestServer, user_id: &str) -> (i64, i64) {
 fn test_room_mute_recounts_threads() {
     let relay = new_test_relay();
     let server = push_test_server();
-    let mut a = dial_test_client(&server);
+    let mut a = push_client(&server);
     make_account(&server, &a.user_id);
     add_account(&server, "carol", &[&a]);
     add_push(
@@ -2276,7 +2315,7 @@ fn test_room_mute_recounts_threads() {
 fn test_leaving_private_room_recounts_threads() {
     let relay = new_test_relay();
     let server = push_test_server();
-    let mut a = dial_test_client(&server);
+    let mut a = push_client(&server);
     make_account(&server, &a.user_id);
     add_account(&server, "carol", &[&a]);
     add_push(
@@ -2385,7 +2424,7 @@ fn test_shutdown_stops_timers() {
     let relay = new_test_relay();
     let server = push_test_server();
     server.app.lock().badge_delay = time::HOUR;
-    let a = dial_test_client(&server);
+    let a = push_client(&server);
     add_account(&server, "dora", &[&a]);
     add_push(
         &server,
@@ -2435,5 +2474,180 @@ fn test_shutdown_stops_timers() {
             && dora.status_timer.is_none()
             && dora.badge_timer.is_none(),
         "timers after shutdown"
+    );
+}
+
+/// `--push.hosts` (apron-server-cloudflare's `PUSH_HOSTS`): host names and
+/// `*.` suffixes, or a standalone `*`; none gives the browsers' services.
+#[test]
+fn test_push_hosts_parse_and_match() {
+    let default = PushHosts::parse(&[]).unwrap();
+    assert_eq!(default, PushHosts::default(), "no --push.hosts");
+    for (host, allowed) in [
+        ("fcm.googleapis.com", true),
+        ("updates.push.services.mozilla.com", true),
+        ("web.push.apple.com", true),
+        ("api.push.apple.com", true),
+        ("wns2-by3p.notify.windows.com", true),
+        ("push.apple.com", false),
+        ("evilfcm.googleapis.com", false),
+        ("relay.example", false),
+    ] {
+        assert_eq!(default.allows(host), allowed, "default allows {host}");
+    }
+    assert_eq!(PushHosts::parse(&strs(&["*"])).unwrap(), PushHosts::Any);
+    let listed = PushHosts::parse(&strs(&["Relay.Example, *.push.example.net"])).unwrap();
+    assert_eq!(
+        listed,
+        PushHosts::Listed(strs(&["relay.example", "*.push.example.net"])),
+        "comma-separated and lowercased"
+    );
+    assert!(listed.allows("relay.example") && listed.allows("a.push.example.net"));
+    assert!(
+        !listed.allows("fcm.googleapis.com"),
+        "a list replaces the default"
+    );
+    for bad in [
+        "localhost",
+        "*",
+        "*.",
+        "-a.example",
+        "a_b.example",
+        "https://relay.example",
+    ] {
+        let entries = if bad == "*" {
+            strs(&["*", "relay.example"])
+        } else {
+            strs(&[bad])
+        };
+        assert!(
+            PushHosts::parse(&entries).is_err(),
+            "--push.hosts {entries:?} accepted"
+        );
+    }
+}
+
+/// A registration's host must be one `--push.hosts` allows, relay or
+/// webpush; a relay is allowed once its host is listed.
+#[test]
+fn test_push_register_checks_hosts() {
+    let server = new_test_server(default_config());
+    let mut a = push_client(&server);
+    let (_, keys) = test_subscription();
+    let refused = reply(
+        &mut a,
+        "push_register",
+        "relay",
+        obj! {"kind" => "relay", "url" => "https://relay.example/a"},
+    );
+    assert_eq!(
+        refused["error"],
+        Json::from(
+            obj! {"code" => CODE_INVALID_PARAMS, "message" => "push service not allowed here"}
+        ),
+        "an unlisted relay"
+    );
+    a.expect_error(
+        "push_register",
+        "webpush",
+        obj! {"kind" => "webpush", "url" => "https://push.example.net/x", "keys" => keys.clone()},
+        CODE_INVALID_PARAMS,
+    );
+    a.result(
+        "push_register",
+        "fcm",
+        obj! {"kind" => "webpush", "url" => "https://fcm.googleapis.com/fcm/send/x", "keys" => keys.clone()},
+    );
+    a.result(
+        "push_unregister",
+        "off",
+        obj! {"url" => "https://fcm.googleapis.com/fcm/send/x"},
+    );
+
+    let mut config = default_config();
+    config.push_hosts = PushHosts::parse(&strs(&["relay.example"])).unwrap();
+    let server = new_test_server(config);
+    let mut b = push_client(&server);
+    b.result(
+        "push_register",
+        "listed",
+        obj! {"kind" => "relay", "url" => "https://relay.example/b"},
+    );
+    assert!(has_push(&server, &b.user_id, "https://relay.example/b"));
+}
+
+/// push_register is limited to PUSH_REGISTERS_PER_MINUTE a user, across
+/// their connections, refused requests included.
+#[test]
+fn test_push_register_rate_limit() {
+    use super::webauthn_test::*;
+    let mut config = default_config();
+    config.web_authn = Some(test_web_authn());
+    let server = new_test_server(config);
+    let (mut a, _) = dial_origin(&server, TEST_PASSKEY_ORIGIN);
+    let registered = register_test_passkey(&mut a, &mut new_test_authenticator());
+    a.drain();
+    let token = registered["token"].as_str().unwrap().to_owned();
+    let (_, keys) = test_subscription();
+    let params = obj! {"kind" => "webpush", "url" => "https://fcm.googleapis.com/fcm/send/again", "keys" => keys};
+    a.expect_error(
+        "push_register",
+        "refused",
+        obj! {"kind" => "webpush", "url" => "https://relay.example/x"},
+        CODE_INVALID_PARAMS,
+    );
+    for i in 1..10 {
+        a.result("push_register", &format!("again-{i}"), params.clone());
+    }
+    let _ = a.ws.close(ws::STATUS_NORMAL_CLOSURE, "bye");
+    let (mut second, _) = dial_origin(&server, TEST_PASSKEY_ORIGIN);
+    super::admin_test::token_auth(&mut second, &token);
+    let over = reply(&mut second, "push_register", "over", params);
+    let error = over["error"].as_object().expect("an error");
+    assert_eq!(error["code"], Json::from(CODE_RETRY_AFTER), "{over:?}");
+    assert_eq!(error["message"], Json::from("Push registrations limited"));
+    let data = error["data"].as_object().unwrap();
+    assert_eq!(data.keys().collect::<Vec<_>>(), ["retry_after"], "data");
+    assert!(
+        matches!(data["retry_after"], Json::Number(n) if n > 0.0),
+        "{data:?}"
+    );
+}
+
+/// `--push.hosts` is checked again before each push: a registration kept
+/// from a wider list is passed over.
+#[test]
+fn test_push_checks_hosts_again_before_each_push() {
+    let relay = new_test_relay();
+    let mut config = default_config();
+    config.allow_insecure_push = true;
+    config.push_hosts = PushHosts::parse(&strs(&["127.0.0.1"])).unwrap();
+    let server = new_test_server(config);
+    server.app.lock().badge_delay = Duration::from_secs(0);
+    let mut a = push_client(&server);
+    add_account(&server, "dora", &[&a]);
+    let port = relay.url.rsplit_once(':').unwrap().1.to_owned();
+    add_push(
+        &server,
+        "dora",
+        relay_push(
+            format!("http://localhost:{port}/retired"),
+            WakeScope::DEFAULT,
+        ),
+    );
+    add_push(
+        &server,
+        "dora",
+        relay_push(format!("{}/kept", relay.url), WakeScope::DEFAULT),
+    );
+    save(
+        &mut a,
+        "mention",
+        obj! {"body" => obj! {"text" => "@dora", "mentions" => list(&["dora"])}},
+    );
+    assert_eq!(
+        paths(&relay.pushes(&server, &mut a)),
+        strs(&["/kept"]),
+        "deliveries"
     );
 }

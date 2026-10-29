@@ -1041,6 +1041,18 @@ pub fn make_account(server: &TestServer, user_id: &str) {
         .invited = true;
 }
 
+/// Lifts user_id's limit on push_register requests, for tests that make
+/// more than a minute's.
+pub fn unlimit_push_registers(server: &TestServer, user_id: &str) {
+    server
+        .app
+        .lock()
+        .users
+        .get_mut(user_id)
+        .expect("user exists")
+        .push_registers = Some(crate::rate::Limiter::new(crate::rate::INF, 1));
+}
+
 /// Sends a request and returns its reply, result or error, skipping the
 /// notifications before it.
 pub fn reply(c: &mut TestClient, method: &str, id: &str, params: Object) -> Object {

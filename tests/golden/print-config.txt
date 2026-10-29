@@ -120,6 +120,9 @@ disable = false
 # Accept http push endpoints and ones on internal addresses, so any client can make the server POST into its network (tests only; refused with --public-url or --tls.domain)
 allow-insecure = false
 
+# Push service an endpoint may name, for relay and webpush alike: a host name, a *.host suffix, or a standalone * for any; repeat for more (default: fcm.googleapis.com, *.push.services.mozilla.com, web.push.apple.com, *.push.apple.com and *.notify.windows.com; not in the Go aprond)
+# hosts = []
+
 # Web Push VAPID private key, the P-256 scalar in base64url as web-push tools print it (default: one generated at the first start and kept in the store)
 vapid-private-key = ""
 
@@ -314,6 +317,9 @@ disable = true
 
 # Accept http push endpoints and ones on internal addresses, so any client can make the server POST into its network (tests only; refused with --public-url or --tls.domain)
 allow-insecure = false
+
+# Push service an endpoint may name, for relay and webpush alike: a host name, a *.host suffix, or a standalone * for any; repeat for more (default: fcm.googleapis.com, *.push.services.mozilla.com, web.push.apple.com, *.push.apple.com and *.notify.windows.com; not in the Go aprond)
+# hosts = []
 
 # Web Push VAPID private key, the P-256 scalar in base64url as web-push tools print it (default: one generated at the first start and kept in the store)
 vapid-private-key = ""
@@ -511,6 +517,9 @@ disable = false
 # Accept http push endpoints and ones on internal addresses, so any client can make the server POST into its network (tests only; refused with --public-url or --tls.domain)
 allow-insecure = false
 
+# Push service an endpoint may name, for relay and webpush alike: a host name, a *.host suffix, or a standalone * for any; repeat for more (default: fcm.googleapis.com, *.push.services.mozilla.com, web.push.apple.com, *.push.apple.com and *.notify.windows.com; not in the Go aprond)
+# hosts = []
+
 # Web Push VAPID private key, the P-256 scalar in base64url as web-push tools print it (default: one generated at the first start and kept in the store)
 vapid-private-key = ""
 
@@ -705,6 +714,9 @@ disable = false
 
 # Accept http push endpoints and ones on internal addresses, so any client can make the server POST into its network (tests only; refused with --public-url or --tls.domain)
 allow-insecure = false
+
+# Push service an endpoint may name, for relay and webpush alike: a host name, a *.host suffix, or a standalone * for any; repeat for more (default: fcm.googleapis.com, *.push.services.mozilla.com, web.push.apple.com, *.push.apple.com and *.notify.windows.com; not in the Go aprond)
+# hosts = []
 
 # Web Push VAPID private key, the P-256 scalar in base64url as web-push tools print it (default: one generated at the first start and kept in the store)
 vapid-private-key = ""

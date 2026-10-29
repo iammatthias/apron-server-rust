@@ -26,7 +26,7 @@ use super::metadata::{ServerMetadata, StoredServer};
 use super::outbound;
 use super::persist::{DirtySet, StoredMeta};
 use super::protocol::*;
-use super::push::{PushDeliverer, PushRegistration};
+use super::push::{PushDeliverer, PushHosts, PushRegistration};
 use super::rooms::RoomState;
 use super::status::optional_statuses;
 use super::toggles::Feature;
@@ -109,6 +109,9 @@ pub struct Config {
     pub disable_push: bool,
     /// Accepts http push endpoints and internal addresses.
     pub allow_insecure_push: bool,
+    /// The push services endpoints may name (`--push.hosts`), checked when
+    /// registering and again before each push.
+    pub push_hosts: PushHosts,
     /// The server's VAPID key for webpush (§4.9), the P-256 scalar in
     /// base64url; empty uses the one kept in the store, or generates one.
     pub vapid_private_key: String,
@@ -212,6 +215,7 @@ pub fn default_config() -> Config {
         store: None,
         disable_push: false,
         allow_insecure_push: false,
+        push_hosts: PushHosts::default(),
         vapid_private_key: String::new(),
         vapid_subject: String::new(),
         max_connections: 0,

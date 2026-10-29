@@ -81,6 +81,7 @@ fn server_config(settings: Settings) -> Result<server::Config, String> {
     config.admin_token = settings.admin_token;
     config.disable_push = settings.disable_push;
     config.allow_insecure_push = settings.allow_insecure_push;
+    config.push_hosts = settings.push_hosts;
     config.vapid_private_key = settings.vapid_private_key;
     config.vapid_subject = settings.vapid_subject;
     config.upload_dir = settings.upload_dir;
