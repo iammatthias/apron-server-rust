@@ -27,7 +27,7 @@ use crate::server::{open, Config};
 use crate::store::{self, Entry, Store};
 use crate::ws;
 
-struct RelayRequest {
+pub(super) struct RelayRequest {
     path: String,
     header: Header,
     body: Vec<u8>,
@@ -35,7 +35,7 @@ struct RelayRequest {
 }
 
 impl RelayRequest {
-    fn header(&self, name: &str) -> &str {
+    pub(super) fn header(&self, name: &str) -> &str {
         self.header.get(name).unwrap_or("")
     }
 
@@ -43,7 +43,7 @@ impl RelayRequest {
         self.payload.as_ref().expect("a JSON payload")
     }
 
-    fn message(&self) -> &Object {
+    pub(super) fn message(&self) -> &Object {
         self.payload()["message"].as_object().expect("message")
     }
 }
@@ -52,14 +52,14 @@ impl RelayRequest {
 /// 410, one ending in /missing 404 and one ending in /forbidden 403; while
 /// failing is set, one ending in
 /// /flaky answers 500.
-struct TestRelay {
+pub(super) struct TestRelay {
     http: httptest::Server,
-    url: String,
+    pub(super) url: String,
     received: Mutex<Receiver<RelayRequest>>,
     failing: Arc<AtomicBool>,
 }
 
-fn new_test_relay() -> TestRelay {
+pub(super) fn new_test_relay() -> TestRelay {
     let (tx, rx): (Sender<RelayRequest>, Receiver<RelayRequest>) = channel();
     let tx = Mutex::new(tx);
     let failing = Arc::new(AtomicBool::new(false));
@@ -110,7 +110,7 @@ impl TestRelay {
     /// The deliveries made so far, sorted by path, after the requests c sent
     /// before have finished waking users and their badge pushes have gone
     /// out.
-    fn pushes(&self, server: &TestServer, c: &mut TestClient) -> Vec<RelayRequest> {
+    pub(super) fn pushes(&self, server: &TestServer, c: &mut TestClient) -> Vec<RelayRequest> {
         c.drain();
         server.app.badges.wait();
         server.app.push.wait();
@@ -126,23 +126,32 @@ impl Drop for TestRelay {
     }
 }
 
-fn paths(requests: &[RelayRequest]) -> Vec<String> {
+pub(super) fn paths(requests: &[RelayRequest]) -> Vec<String> {
     requests.iter().map(|r| r.path.clone()).collect()
 }
 
 /// Accepts internal push endpoints and sends badge pushes without waiting
 /// to coalesce them.
-fn push_test_server() -> TestServer {
+pub(super) fn push_test_server() -> TestServer {
     let mut config = default_config();
     config.allow_insecure_push = true;
     config.push_hosts = PushHosts::Any;
+    config.push_delay = Duration::from_secs(0);
     let server = new_test_server(config);
     server.app.lock().badge_delay = Duration::from_secs(0);
+    without_coalescing(&server);
     server
 }
 
+/// Lets one user be woken for one room again at once.
+pub(super) fn without_coalescing(server: &TestServer) {
+    let mut st = server.app.lock();
+    st.push_coalesce = Duration::from_secs(0);
+    st.joined_coalesce = Duration::from_secs(0);
+}
+
 /// Registers an endpoint for a user without a connection.
-fn add_push(server: &TestServer, user_id: &str, p: PushRegistration) -> String {
+pub(super) fn add_push(server: &TestServer, user_id: &str, p: PushRegistration) -> String {
     let key = push_key(user_id, &p.url);
     server.app.lock().add_push_locked(PushRegistration {
         user_id: user_id.to_owned(),
@@ -152,7 +161,7 @@ fn add_push(server: &TestServer, user_id: &str, p: PushRegistration) -> String {
     key
 }
 
-fn relay_push(url: String, wake: WakeScope) -> PushRegistration {
+pub(super) fn relay_push(url: String, wake: WakeScope) -> PushRegistration {
     PushRegistration {
         url,
         wake,
@@ -170,7 +179,7 @@ fn has_push(server: &TestServer, user_id: &str, url: &str) -> bool {
 
 /// Signs in n guests and makes each an account, as only accounts register
 /// and wake anyone.
-fn push_group(server: &TestServer, n: usize) -> Vec<TestClient> {
+pub(super) fn push_group(server: &TestServer, n: usize) -> Vec<TestClient> {
     let clients = dial_group(server, n);
     for c in &clients {
         make_account(server, &c.user_id);
@@ -178,23 +187,23 @@ fn push_group(server: &TestServer, n: usize) -> Vec<TestClient> {
     clients
 }
 
-fn push_client(server: &TestServer) -> TestClient {
+pub(super) fn push_client(server: &TestServer) -> TestClient {
     let c = dial_test_client(server);
     make_account(server, &c.user_id);
     c
 }
 
 /// Tells the server nobody attends c, which tells c nothing.
-fn go_idle(c: &mut TestClient) {
+pub(super) fn go_idle(c: &mut TestClient) {
     let frames = c.status(obj! {"idle" => 300i64});
     assert!(frames.is_empty(), "frames after idle: {frames:?}");
 }
 
-fn strs(items: &[&str]) -> Vec<String> {
+pub(super) fn strs(items: &[&str]) -> Vec<String> {
     items.iter().map(|s| (*s).to_owned()).collect()
 }
 
-fn list(items: &[&str]) -> Json {
+pub(super) fn list(items: &[&str]) -> Json {
     Json::from(strs(items))
 }
 
@@ -301,12 +310,17 @@ fn test_push_wakes_mentions_and_replies_of_idle_users() {
     );
     let mention_b =
         || obj! {"body" => obj! {"text" => "@guest_2 ping", "mentions" => list(&["guest_2"])}};
-    post(&mut a, &b, "attended", mention_b());
+    let held = post(&mut a, &b, "attended", mention_b());
     assert!(
         relay.pushes(&server, &mut a).is_empty(),
         "attended user woken"
     );
+    // Going idle pushes what came after attention stopped, which `idle`
+    // dates back: 300 seconds, so the mention it was held for.
     go_idle(&mut b);
+    let got = relay.pushes(&server, &mut a);
+    assert_eq!(paths(&got), strs(&["/b"]), "held wake");
+    assert_eq!(got[0].message()["message_id"], Json::from(held.as_str()));
     post(&mut a, &b, "idle", mention_b());
     let got = relay.pushes(&server, &mut a);
     assert!(
@@ -336,8 +350,11 @@ fn test_push_wakes_mentions_and_replies_of_idle_users() {
         relay.pushes(&server, &mut a).is_empty(),
         "user back from idle woken"
     );
-    // A reply wakes the author of the message it replies to.
-    go_idle(&mut b);
+    // A reply wakes the author of the message it replies to. `idle: 0`
+    // dates the idle to now, so the mention held while they were back is
+    // not pushed.
+    let frames = b.status(obj! {"idle" => 0i64});
+    assert!(frames.is_empty(), "frames after idle: 0: {frames:?}");
     post(
         &mut a,
         &b,
@@ -966,7 +983,9 @@ fn test_web_push_delivery() {
     config.allow_insecure_push = true;
     config.push_hosts = PushHosts::Any;
     config.public_url = "https://chat.example".into();
+    config.push_delay = Duration::from_secs(0);
     let server = new_test_server(config);
+    without_coalescing(&server);
     let (mut c, frame) = dial_raw(&server);
     guest_auth(&mut c);
     make_account(&server, &c.user_id);
@@ -2629,6 +2648,7 @@ fn test_push_checks_hosts_again_before_each_push() {
     let mut config = default_config();
     config.allow_insecure_push = true;
     config.push_hosts = PushHosts::parse(&strs(&["127.0.0.1"])).unwrap();
+    config.push_delay = Duration::from_secs(0);
     let server = new_test_server(config);
     server.app.lock().badge_delay = Duration::from_secs(0);
     let mut a = push_client(&server);
@@ -2670,6 +2690,7 @@ fn test_joined_only_for_admins_and_mods() {
     config.allow_insecure_push = true;
     config.push_hosts = PushHosts::Any;
     config.admin_token = super::admin_test::admin_config().admin_token;
+    config.push_delay = Duration::from_secs(0);
     let server = new_test_server(config);
     let mut admin = super::admin_test::admin_on(&server, "http://localhost:5173");
     let mut regular = push_client(&server);

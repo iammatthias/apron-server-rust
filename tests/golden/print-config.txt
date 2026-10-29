@@ -123,6 +123,9 @@ allow-insecure = false
 # Push service an endpoint may name, for relay and webpush alike: a host name, a *.host suffix, or a standalone * for any; repeat for more (default: fcm.googleapis.com, *.push.services.mozilla.com, web.push.apple.com, *.push.apple.com and *.notify.windows.com; not in the Go aprond)
 # hosts = []
 
+# How long a message's push waits, so a user back at their screen by then is not pushed, from 0 (at once) to 60s (not in the Go aprond)
+delay = "30s"
+
 # Web Push VAPID private key, the P-256 scalar in base64url as web-push tools print it (default: one generated at the first start and kept in the store)
 vapid-private-key = ""
 
@@ -320,6 +323,9 @@ allow-insecure = false
 
 # Push service an endpoint may name, for relay and webpush alike: a host name, a *.host suffix, or a standalone * for any; repeat for more (default: fcm.googleapis.com, *.push.services.mozilla.com, web.push.apple.com, *.push.apple.com and *.notify.windows.com; not in the Go aprond)
 # hosts = []
+
+# How long a message's push waits, so a user back at their screen by then is not pushed, from 0 (at once) to 60s (not in the Go aprond)
+delay = "30s"
 
 # Web Push VAPID private key, the P-256 scalar in base64url as web-push tools print it (default: one generated at the first start and kept in the store)
 vapid-private-key = ""
@@ -520,6 +526,9 @@ allow-insecure = false
 # Push service an endpoint may name, for relay and webpush alike: a host name, a *.host suffix, or a standalone * for any; repeat for more (default: fcm.googleapis.com, *.push.services.mozilla.com, web.push.apple.com, *.push.apple.com and *.notify.windows.com; not in the Go aprond)
 # hosts = []
 
+# How long a message's push waits, so a user back at their screen by then is not pushed, from 0 (at once) to 60s (not in the Go aprond)
+delay = "30s"
+
 # Web Push VAPID private key, the P-256 scalar in base64url as web-push tools print it (default: one generated at the first start and kept in the store)
 vapid-private-key = ""
 
@@ -717,6 +726,9 @@ allow-insecure = false
 
 # Push service an endpoint may name, for relay and webpush alike: a host name, a *.host suffix, or a standalone * for any; repeat for more (default: fcm.googleapis.com, *.push.services.mozilla.com, web.push.apple.com, *.push.apple.com and *.notify.windows.com; not in the Go aprond)
 # hosts = []
+
+# How long a message's push waits, so a user back at their screen by then is not pushed, from 0 (at once) to 60s (not in the Go aprond)
+delay = "30s"
 
 # Web Push VAPID private key, the P-256 scalar in base64url as web-push tools print it (default: one generated at the first start and kept in the store)
 vapid-private-key = ""

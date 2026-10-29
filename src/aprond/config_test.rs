@@ -215,6 +215,24 @@ fn test_push_hosts_settings() {
 }
 
 #[test]
+fn test_push_delay_settings() {
+    use rust_stdlib::time::Duration;
+    let delay = |args: &[&str]| server_settings(&parse(args).options).map(|s| s.push_delay);
+    assert_eq!(delay(&[]), Ok(Duration::from_secs(30)), "default");
+    assert_eq!(delay(&["--push.delay", "0"]), Ok(Duration::from_secs(0)));
+    assert_eq!(delay(&["--push.delay", "1m"]), Ok(Duration::from_secs(60)));
+    for bad in ["61s", "1h", "soon"] {
+        assert_eq!(
+            delay(&["--push.delay", bad]),
+            Err(format!(
+                "invalid --push.delay {}: use a duration from 0 to 60s, such as 30s",
+                rust_stdlib::strconv::quote(bad)
+            )),
+        );
+    }
+}
+
+#[test]
 fn test_insecure_push_is_for_tests_only() {
     let parser = parse(&["--push.allow-insecure"]);
     match server_settings(&parser.options) {

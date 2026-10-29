@@ -33,6 +33,7 @@ use super::protocol::*;
 use super::server::{Client, Frame, Server, State};
 use super::toggles::Feature;
 use super::users::UserState;
+use super::wake::HELD_WAKE_WINDOW;
 use crate::obj;
 use crate::rate::{every, Limiter};
 
@@ -206,9 +207,11 @@ impl State {
     /// Reports whether any connection of the user has not said it is idle
     /// (§4.5).
     pub fn attended(&self, u: &UserState) -> bool {
-        u.clients
-            .iter()
-            .any(|id| self.clients.get(id).is_some_and(|conn| !conn.idle))
+        u.clients.iter().any(|id| {
+            self.clients
+                .get(id)
+                .is_some_and(|conn| conn.idle_since.is_none())
+        })
     }
 
     /// Reports whether u's own mute of room r, or of a room r is a thread
@@ -501,13 +504,21 @@ impl State {
     }
 }
 
+/// A connection's report of attention (§4.5.3): `idle: false`, or the
+/// whole seconds since attention stopped.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Idle {
+    Back,
+    For(i64),
+}
+
 /// One parsed `status` request. `None` fields were absent.
 #[derive(Debug, Default, PartialEq)]
 pub struct StatusUpdate {
     /// The room the mute is of, when scoped.
     pub room_id: String,
     pub scoped: bool,
-    pub idle: Option<bool>,
+    pub idle: Option<Idle>,
     /// Present when `has_mute`: forever, a positive number of seconds, or,
     /// when neither, false, which ends it.
     pub has_mute: bool,
@@ -558,14 +569,14 @@ pub fn parse_status(params: &Params) -> Result<StatusUpdate, RpcError> {
         // server takes the connection as idle from the report on.
         let raw = raw.0.trim_ascii();
         update.idle = Some(match raw {
-            b"false" => false,
+            b"false" => Idle::Back,
             b"null" => {
                 return Err(invalid_params(
                     "idle must be false or a non-negative whole number of seconds",
                 ))
             }
             _ => match parse_i64(raw) {
-                Some(seconds) if seconds >= 0 => true,
+                Some(seconds) if seconds >= 0 => Idle::For(seconds),
                 _ => {
                     return Err(invalid_params(
                         "idle must be false or a non-negative whole number of seconds",
@@ -654,14 +665,26 @@ impl State {
     /// what changed. A scoped mute's room is visible to the user.
     pub fn apply_status_locked(&mut self, c: &Arc<Client>, user_id: &str, update: &StatusUpdate) {
         if let Some(idle) = update.idle {
-            let changed = match self.clients.get_mut(&c.id) {
-                Some(conn) if conn.idle != idle => {
-                    conn.idle = idle;
+            let now = time::now();
+            let changed = match (self.clients.get_mut(&c.id), idle) {
+                (Some(conn), Idle::Back) if conn.idle_since.is_some() => {
+                    conn.idle_since = None;
+                    true
+                }
+                (Some(conn), Idle::For(seconds)) if conn.idle_since.is_none() => {
+                    let back = Duration::from_secs(seconds.min(HELD_WAKE_WINDOW.seconds() as i64));
+                    conn.idle_since = Some(now.add(-back));
                     true
                 }
                 _ => false,
             };
             if changed {
+                // Back: a push still waiting for them is not needed. Gone:
+                // what they were passed over for since is pushed.
+                match idle {
+                    Idle::Back => self.drop_wakes_locked(user_id, None),
+                    Idle::For(_) => self.release_held_locked(user_id, &now),
+                }
                 self.announce_status_locked(user_id);
             }
         }

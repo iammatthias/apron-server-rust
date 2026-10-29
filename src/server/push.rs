@@ -414,125 +414,6 @@ impl State {
         }
     }
 
-    /// Pushes a message to the users it concerns (§4.9). previous is the
-    /// snapshot the save replaced, `None` for a new message.
-    ///
-    /// A new message concerns the users its body.mentions lists (scope
-    /// mentions) and the author of the message it replies to (replies), in
-    /// any room they can see, the room's members (joined), and, in a private
-    /// room or a thread of one, the users who joined every private room on
-    /// the way up, members of the thread or not (private). An edit concerns
-    /// only the users it adds to body.mentions. Nobody is woken by their own
-    /// message.
-    ///
-    /// Each concerned user is woken only when no connection of theirs is
-    /// attended (§4.5). Their unscoped mute or a dnd status silences every
-    /// scope, and so does their mute of the room, or of a room it is a
-    /// thread of; what is silenced reaches them only as a badge push
-    /// (badge_locked). Each live registration whose wake scopes select the
-    /// message gets the payload with its push_id and the user's unread
-    /// count, with the most urgent Urgency of the scopes that select it.
-    pub fn wake_locked(&mut self, message_id: &str, snapshot: &Object, previous: Option<&Object>) {
-        // Transient notices, which have no message_id, are never pushed
-        // (§4.9).
-        if self.config.disable_push
-            || self.pushes.is_empty()
-            || snapshot.get("deleted").is_some_and(Json::is_true)
-            || snapshot
-                .get("message_id")
-                .is_none_or(|id| matches!(id, Json::Null))
-        {
-            return;
-        }
-        let Some(m) = self.messages.get(message_id) else {
-            return;
-        };
-        let (room_id, owner) = (m.room_id.clone(), m.owner.clone());
-        // A guest's messages wake no one, as a guest cannot register either.
-        if !self.users.get(&owner).is_some_and(UserState::persists) {
-            return;
-        }
-        let mut reasons: BTreeMap<String, WakeScope> = BTreeMap::new();
-        for id in mentions(snapshot.get("body").and_then(Json::as_object)) {
-            *reasons.entry(id).or_default() |= WakeScope::MENTIONS;
-        }
-        match previous {
-            None => {
-                if let Some(target) = snapshot
-                    .get("reply_to")
-                    .and_then(Json::as_object)
-                    .and_then(|r| r.get("message_id"))
-                    .and_then(Json::as_str)
-                    .and_then(|id| self.messages.get(id))
-                {
-                    *reasons.entry(target.owner.clone()).or_default() |= WakeScope::REPLIES;
-                }
-                let members: Vec<String> = self.rooms[&room_id].members.iter().cloned().collect();
-                for id in members {
-                    if self.user_has_pushes(&id) && self.wakes_joined(&id) {
-                        *reasons.entry(id).or_default() |= WakeScope::JOINED;
-                    }
-                }
-                // private selects messages in the private rooms the user
-                // joined and in their threads (§4.9): those who can see a
-                // private room's thread joined every private room above it.
-                let (everyone, audience) = self.audience(&room_id);
-                if !everyone {
-                    for id in audience {
-                        if self.users.contains_key(&id) && self.user_has_pushes(&id) {
-                            *reasons.entry(id).or_default() |= WakeScope::PRIVATE;
-                        }
-                    }
-                }
-            }
-            Some(previous) => {
-                for id in mentions(previous.get("body").and_then(Json::as_object)) {
-                    reasons.remove(&id);
-                }
-            }
-        }
-        reasons.remove(&owner);
-        let now = time::now();
-        for (id, why) in reasons {
-            let Some(u) = self.users.get(&id) else {
-                continue;
-            };
-            if !self.user_has_pushes(&id)
-                || !self.room_visible_to(&room_id, &id)
-                || self.attended(u)
-                || u.silenced(&now)
-                || self.room_muted(u, &room_id, &now)
-            {
-                continue;
-            }
-            self.expire_pushes_locked(&id, &now);
-            let mut unread = -1;
-            for key in self.sorted_pushes(&id) {
-                let p = &self.pushes[&key];
-                let scopes = why & p.wake;
-                if scopes.is_empty() {
-                    continue;
-                }
-                let push_id = p.push_id.clone();
-                if unread < 0 {
-                    unread = self.unread_locked(&id, &now);
-                }
-                let urgency = if (scopes & WakeScope::URGENT).is_empty() {
-                    "normal"
-                } else {
-                    "high"
-                };
-                self.deliver_push_locked(
-                    &key,
-                    unread,
-                    push_payload(&push_id, unread, snapshot),
-                    urgency,
-                    false,
-                );
-            }
-        }
-    }
-
     /// Hands a payload carrying the count unread to the deliverer, unless
     /// the user has had MAX_PUSHES_PER_USER_DAY pushes today. A push the
     /// endpoint accepts, with a 2xx, counts toward them and records unread
@@ -1122,6 +1003,8 @@ impl Server {
             for id in ids {
                 st.expire_pushes_locked(&id, &now);
             }
+            let window = st.push_coalesce.max(st.joined_coalesce);
+            st.push_woken.retain(|_, woken| now.sub(woken) < window);
             st.expire_history_locked(&now);
             st.sweep_idle_bots_locked(&now);
         });

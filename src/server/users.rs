@@ -132,6 +132,8 @@ pub struct UserState {
     pub push_day: String,
     pub pushes_today: i64,
     pub push_registers: Option<Limiter>,
+    /// The wakes passed over while the user was attended (wake.rs).
+    pub held: Vec<super::wake::HeldWake>,
 }
 
 impl UserState {
@@ -176,6 +178,7 @@ impl UserState {
             push_day: String::new(),
             pushes_today: 0,
             push_registers: None,
+            held: Vec::new(),
         }
     }
 

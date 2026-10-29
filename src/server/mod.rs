@@ -26,6 +26,7 @@ pub mod toggles;
 pub(crate) mod unfurl;
 pub mod unread;
 pub mod users;
+pub mod wake;
 pub mod webauthn;
 pub mod webpush;
 
