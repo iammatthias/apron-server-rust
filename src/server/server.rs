@@ -1735,11 +1735,7 @@ impl State {
             params.insert("status".into(), optional_statuses().into());
         }
         if !self.config.disable_push {
-            let joined = self
-                .clients
-                .get(&client.id)
-                .and_then(|conn| conn.user.as_deref())
-                .is_some_and(|user_id| self.wakes_joined(user_id));
+            let joined = self.connection_wakes_joined(client);
             params.insert(
                 "push".into(),
                 super::push::server_push_params(self, joined).into(),

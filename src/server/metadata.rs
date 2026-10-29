@@ -217,12 +217,8 @@ impl State {
     /// Sends a connection its `server` frame, noting whether it listed
     /// wake scope `joined`.
     pub fn send_server_locked(&mut self, client: &Client) {
-        let params = self.server_params(client);
-        let joined = params
-            .get("push")
-            .and_then(Json::as_object)
-            .is_some_and(|push| push["wake"].as_list().contains(&Json::from("joined")));
-        client.enqueue(&obj! {"method" => "server", "params" => params});
+        let joined = self.connection_wakes_joined(client);
+        client.enqueue(&obj! {"method" => "server", "params" => self.server_params(client)});
         if let Some(conn) = self.clients.get_mut(&client.id) {
             conn.wake_joined = joined;
         }
@@ -232,17 +228,20 @@ impl State {
     /// connection whose wake scopes changed, so its clients offer `joined`
     /// exactly while it works. Other connections get nothing.
     pub fn sync_server_locked(&mut self, client: &Client) {
-        let Some(conn) = self.clients.get(&client.id) else {
-            return;
-        };
-        let joined = !self.config.disable_push
-            && conn
-                .user
-                .as_deref()
-                .is_some_and(|user_id| self.wakes_joined(user_id));
-        if joined != conn.wake_joined {
+        let told = self.clients.get(&client.id).map(|conn| conn.wake_joined);
+        if told.is_some_and(|told| told != self.connection_wakes_joined(client)) {
             self.send_server_locked(client);
         }
+    }
+
+    /// Whether a connection's `server` frame lists wake scope `joined`.
+    pub fn connection_wakes_joined(&self, client: &Client) -> bool {
+        !self.config.disable_push
+            && self
+                .clients
+                .get(&client.id)
+                .and_then(|conn| conn.user.as_deref())
+                .is_some_and(|user_id| self.wakes_joined(user_id))
     }
 
     /// Makes an uploaded image the server's avatar, or with `None` clears
