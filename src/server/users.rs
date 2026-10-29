@@ -6,6 +6,7 @@ use rust_stdlib::time::Timer;
 
 use super::client::{Client, ClientId, Frame};
 use super::dedup::DedupCache;
+use super::limits::Window;
 use super::protocol::*;
 use super::server::{Server, State, DEFAULT_ROOM_ID};
 use super::status::Cause;
@@ -125,7 +126,8 @@ pub struct UserState {
     pub announced_at: i64,
     pub status_hold: i64,
     pub status_timer: Option<Timer>,
-    pub status_requests: Option<Limiter>,
+    /// The user's mute and `me` status changes in the last minute.
+    pub status_changes: Window,
     /// The rooms the user has not joined where a message mentioned or
     /// replied to them, from the first such message, for unread counts.
     pub pings: BTreeMap<String, i64>,
@@ -181,7 +183,7 @@ impl UserState {
             announced_at: 0,
             status_hold: 0,
             status_timer: None,
-            status_requests: None,
+            status_changes: Window::default(),
             typing_relays: None,
             read_relays: None,
             typing_notice_at: 0,
@@ -693,10 +695,18 @@ impl State {
                 ));
             }
         }
-        // A status change counts against the user's limit on status changes,
-        // as a `status` request does (§4.5).
-        if has_status && status != u.chosen {
-            admit_status_locked(self.users.get_mut(&user_id).expect("user exists"))?;
+        // A status change counts against the user's limit on status
+        // changes, with mutes (§4.5 lets servers limit them).
+        let status_changed = has_status && status != u.chosen;
+        if status_changed {
+            let limit = self.config.limits.status_changes_per_user_minute;
+            let u = self.users.get_mut(&user_id).expect("user exists");
+            if let Some(wait) = u
+                .status_changes
+                .wait(rust_stdlib::time::now().unix_milli(), limit)
+            {
+                return Err(retry_after_seconds("Status changes limited", wait));
+            }
         }
         let u = &self.users[&user_id];
         if (has_name && normalize_name(&name) != u.name)
@@ -728,7 +738,11 @@ impl State {
         if has_status {
             // A change of the chosen status is sent at once, with the
             // profile.
-            self.users.get_mut(&user_id).expect("user exists").chosen = status;
+            let u = self.users.get_mut(&user_id).expect("user exists");
+            if status_changed {
+                u.status_changes.note(rust_stdlib::time::now().unix_milli());
+            }
+            u.chosen = status;
             self.publish_locked(&user_id);
         }
         let u = &self.users[&user_id];

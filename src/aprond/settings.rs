@@ -316,6 +316,14 @@ pub fn server_settings(options: &Options) -> Result<Settings, String> {
             l.server_frames_per_minute,
         )?,
         policy_violations: nonnegative("limit.policy-violations", l.policy_violations)?,
+        idle_changes_per_connection_minute: nonnegative(
+            "limit.idle-changes-per-minute",
+            l.idle_changes_per_connection_minute,
+        )?,
+        status_changes_per_user_minute: nonnegative(
+            "limit.status-changes-per-minute",
+            l.status_changes_per_minute,
+        )?,
         status_coalesce: seconds_to_60("limit.status-coalesce-seconds", l.status_coalesce_seconds)?,
         offline_grace: seconds_to_60("limit.offline-grace-seconds", l.offline_grace_seconds)?,
         user_history: history_rate("", l.history_per_minute, l.history_burst)?,

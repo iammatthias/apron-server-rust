@@ -698,6 +698,7 @@ impl Server {
                     client: client.clone(),
                     user: None,
                     idle_since: None,
+                    idle_changes: Window::default(),
                     ceremony: None,
                     token: [0; 32],
                     device: [0; 32],
