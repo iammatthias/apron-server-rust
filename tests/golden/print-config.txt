@@ -236,6 +236,18 @@ uploads-per-user-day = 20
 # New uploads of everyone on the server a UTC day; 0 is unlimited (not in the Go aprond)
 uploads-per-day = 500
 
+# WebSocket messages one connection may send in a rolling minute, past which it is closed with 1008; pings do not count; 0 is unlimited (not in the Go aprond)
+frames-per-connection-minute = 60
+
+# WebSocket messages one client address may send a minute, past which its connection is closed with 1013; 0 is unlimited (not in the Go aprond)
+frames-per-ip-minute = 120
+
+# WebSocket messages everyone may send a minute, past which requests get retry_after and notifications are dropped; 0 is unlimited (not in the Go aprond)
+server-frames-per-minute = 600
+
+# Malformed or invalid requests within a minute that close a connection with 1008; 0 never closes (not in the Go aprond)
+policy-violations = 3
+
 [server]
 
 # Plain name clients show for this server, as server.title, unless an admin's /server title sets one (default: none, so clients show the server's address; not in the Go aprond)
@@ -486,6 +498,18 @@ uploads-per-user-day = 20
 
 # New uploads of everyone on the server a UTC day; 0 is unlimited (not in the Go aprond)
 uploads-per-day = 500
+
+# WebSocket messages one connection may send in a rolling minute, past which it is closed with 1008; pings do not count; 0 is unlimited (not in the Go aprond)
+frames-per-connection-minute = 60
+
+# WebSocket messages one client address may send a minute, past which its connection is closed with 1013; 0 is unlimited (not in the Go aprond)
+frames-per-ip-minute = 120
+
+# WebSocket messages everyone may send a minute, past which requests get retry_after and notifications are dropped; 0 is unlimited (not in the Go aprond)
+server-frames-per-minute = 600
+
+# Malformed or invalid requests within a minute that close a connection with 1008; 0 never closes (not in the Go aprond)
+policy-violations = 3
 
 [server]
 
@@ -739,6 +763,18 @@ uploads-per-user-day = 20
 # New uploads of everyone on the server a UTC day; 0 is unlimited (not in the Go aprond)
 uploads-per-day = 500
 
+# WebSocket messages one connection may send in a rolling minute, past which it is closed with 1008; pings do not count; 0 is unlimited (not in the Go aprond)
+frames-per-connection-minute = 60
+
+# WebSocket messages one client address may send a minute, past which its connection is closed with 1013; 0 is unlimited (not in the Go aprond)
+frames-per-ip-minute = 120
+
+# WebSocket messages everyone may send a minute, past which requests get retry_after and notifications are dropped; 0 is unlimited (not in the Go aprond)
+server-frames-per-minute = 600
+
+# Malformed or invalid requests within a minute that close a connection with 1008; 0 never closes (not in the Go aprond)
+policy-violations = 3
+
 [server]
 
 # Plain name clients show for this server, as server.title, unless an admin's /server title sets one (default: none, so clients show the server's address; not in the Go aprond)
@@ -989,6 +1025,18 @@ uploads-per-user-day = 20
 
 # New uploads of everyone on the server a UTC day; 0 is unlimited (not in the Go aprond)
 uploads-per-day = 500
+
+# WebSocket messages one connection may send in a rolling minute, past which it is closed with 1008; pings do not count; 0 is unlimited (not in the Go aprond)
+frames-per-connection-minute = 60
+
+# WebSocket messages one client address may send a minute, past which its connection is closed with 1013; 0 is unlimited (not in the Go aprond)
+frames-per-ip-minute = 120
+
+# WebSocket messages everyone may send a minute, past which requests get retry_after and notifications are dropped; 0 is unlimited (not in the Go aprond)
+server-frames-per-minute = 600
+
+# Malformed or invalid requests within a minute that close a connection with 1008; 0 never closes (not in the Go aprond)
+policy-violations = 3
 
 [server]
 
