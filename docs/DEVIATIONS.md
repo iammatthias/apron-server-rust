@@ -113,6 +113,31 @@ these times were kept.
 
 **Why.** The times did not exist when those passkeys were stored.
 
+### Session tokens (§3.2)
+
+**Reference.** apron-server-cloudflare denies an expired or unknown passkey
+session token with `Session expired; sign in with your passkey`.
+
+**This server.** Has the same 30-day lifetime and renewal, and says
+`Session expired; sign in again`.
+
+**Why.** An email sign-in makes the same sessions here
+([Email sign-in](#email-sign-in-411)), so the text names no passkey.
+
+### Identity switching (§3.2)
+
+**Reference.** apron-server-cloudflare denies a passkey login, or a
+session, bot, device or invite token, on a connection already signed in to
+an account, with `Identity switching requires reconnect`.
+
+**This server.** Denies it for invite and join tokens only. A passkey login
+or a session, bot or device token signs the connection in as that user
+instead.
+
+**Why.** apron-server-go switched identities on one connection, and the
+iOS client Ladle switches with its device token (see
+[`/invite-device`](#invite-device-41-32)).
+
 ### Admin token (§3.2), `--admin-token-file`
 
 **Reference.** apron-server-cloudflare reads the Worker secret
@@ -392,11 +417,18 @@ untitled thread is `Thread`. A guest's departure removes nothing.
   in as someone else, or a restart) logs its leaves but removes no thread
   they empty. The thread stays in `not_joined` until someone leaves it or
   its log expires.
+- `--max-private-rooms` bounds the private rooms an account is in
+  (Cloudflare's `privateMembershipsPerUser`, 20), and 0 lifts the bound.
+  The caps of 5 started rooms an account and 100 on the server are fixed.
+  Neither server lets a deployment turn private rooms off. The server
+  cap's denial says `The server holds as many private rooms as it can`
+  for Cloudflare's `The demo holds`.
 
 **Why.** Private threads and titles from descriptions predate the
 reference, and apron-web shows them. A page reload in apron-web closes the
 guest's connection and signs in a new guest, so removing the thread then
-would take its card away from everyone.
+would take its card away from everyone. `--max-private-rooms` predates the
+reference, and a self-hosted server is no demo.
 
 ### Memberships of others (§4.2.2)
 
@@ -530,6 +562,24 @@ no snapshot bound. A message's `ext` is bounded at 64 KiB, and a profile's
 **Why.** Cloudflare sizes its field bounds to its Durable Object budgets.
 The frame bound already caps every field.
 
+### HTTP refusals before the upgrade (SPEC §5)
+
+**Reference.** apron-server-cloudflare serves the WebSocket at `/` and
+`/ws`, and refuses a request it will not upgrade with a JSON body,
+`{"error": "<message>"}`: 403 `Origin not allowed`, 405 `Method not
+allowed`, 400 `WebSocket upgrade must not contain a body`, and 400
+`WebSocket upgrade required`.
+
+**This server.** Serves it at `/ws` only. A request it will not upgrade
+gets coder/websocket's plain-text refusal: 426 when the `Connection` or
+`Upgrade` header is missing, 405 for a method other than `GET`, and 400
+for a bad `Sec-WebSocket-Version` or `Sec-WebSocket-Key`, and 403 for an
+origin not allowed. A request body is not refused. The connection-status
+probe answers in JSON, as Cloudflare's does.
+
+**Why.** The handshake is the Go port's coder/websocket. A WebSocket
+client never sees these refusals.
+
 ### Client address (SPEC §5, IP key), `--client-ip-header`
 
 **Reference.** apron-server-cloudflare reads `CF-Connecting-IP` (with
@@ -548,19 +598,28 @@ sit behind any proxy.
 ### Connection caps (SPEC §6, Connections)
 
 **Reference.** apron-server-cloudflare refuses a connection past its caps
-before the upgrade with HTTP 429 and `Retry-After`, and has a daily
-admission budget of 4,000.
+before the upgrade with HTTP 429, `Retry-After` and `Demo capacity
+reached`, and has a daily admission budget of 4,000. Its edge also counts
+upgrade attempts, probes and refused attempts included: 20 a minute per
+address and 60 per IPv6 /48 (429 `Connection attempts exceeded`), and 200
+a minute at one Cloudflare location (503 `Demo is busy; try again
+shortly`).
 
-**This server.** Has the same caps and admission rate by default, each a
-flag (`--max-connections`, `--limit.*connections*`,
-`--limit.admissions-per-ip-minute`, 0 is unlimited). A refused connection
-is upgraded, gets its `server` frame and a `retry_after` error without
-`id`, and is closed. The connection-status probe answers 429 with
-`Retry-After` for the caps. An account past its cap gets `retry_after` for
-its `auth`. There is no daily admission budget.
+**This server.** Has the same caps, admission rate and auth attempt rate
+by default, each a flag (`--max-connections`, `--limit.*connections*`,
+`--limit.admissions-per-ip-minute`, `--limit.auth-attempts-per-ip-minute`,
+0 is unlimited). A refused connection is upgraded, gets its `server` frame
+and a `retry_after` error without `id`, and is closed. The texts are
+`Server at capacity` for the server's cap and `Connection limit reached
+for this network` for an address's. The connection-status probe answers
+429 with `Retry-After` for the caps. An account past its cap gets
+`retry_after` for its `auth`. There is no daily admission budget and no
+attempt limit, so a probe counts against nothing.
 
 **Why.** A client sees the reason in the protocol instead of a failed
-handshake. The daily budget guards Cloudflare's bill.
+handshake, and the text names no demo. The daily budget and the attempt
+limits bound Cloudflare's bill and its Durable Object requests. The
+admission rate, 12 a minute, already holds back a reconnect loop.
 
 ### Registration limits (SPEC §6), `--limit.registrations-*`, `--limit.identities`
 
@@ -617,6 +676,10 @@ closes with 1003 `text frames required`, and a frame over the size limit
 closes with 1009 `read limited at <n> bytes`. Cloudflare's reasons are
 `Binary application frames are not supported` and `Frame exceeds the
 maximum size`.
+
+A second `history` request sent before the first is answered waits its
+turn instead of getting `retry_after` `History request already in
+progress`.
 
 **Why.** A connection's frames are read one at a time and each runs to
 completion, so at most one is pending. Leases and the daily budget save
