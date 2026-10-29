@@ -106,12 +106,6 @@ impl State {
     ) -> Result<Object, RpcError> {
         let owner_id = self.client_user(c).unwrap_or_default();
         let owner = &self.users[&owner_id];
-        if !owner.account() {
-            return Err(RpcError::new(
-                CODE_DENIED,
-                "Sign in with a passkey or email to use /invite-bot",
-            ));
-        }
         if !args.is_empty() {
             return Err(invalid_params("Usage: /invite-bot"));
         }

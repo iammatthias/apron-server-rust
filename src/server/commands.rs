@@ -1,6 +1,6 @@
-//! Server commands (§4.1): /help, /avatar, /invite-device, /invite-bot, and
-//! /kick, run from a `command` request and answered with scoped system
-//! notices (Appendix A.1).
+//! Server commands (§4.1): /help, /avatar, /invite-device, /invite-bot,
+//! /kick and the admin commands, run from a `command` request and answered
+//! with scoped system notices (Appendix A.1).
 
 use std::sync::Arc;
 
@@ -8,7 +8,7 @@ use super::messages::{mentions, parse_message_ref, validate_body, MessageState};
 use super::protocol::*;
 use super::rooms::RoomState;
 use super::server::{Client, Server, State, DEFAULT_ROOM_ID};
-use super::users::{UserState, GUEST_READ_ONLY};
+use super::users::{UserState, ADMIN_ROLE, GUEST_READ_ONLY};
 use crate::obj;
 
 /// Scoped system identities (Appendix A.1). user_ids starting with `~` are
@@ -23,14 +23,48 @@ pub const MAX_KICK_REASON_RUNES: usize = 200;
 /// the arguments after the command word.
 type CommandFn = fn(&mut State, &Arc<Client>, &str, &Object, &str) -> Result<Object, RpcError>;
 
+/// Who may run a command, as apron-server-cloudflare names them.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Audience {
+    Everyone,
+    /// Accounts, which bots and guests are not.
+    Accounts,
+    /// Accounts with the admin role.
+    Admins,
+    /// Those who may remove others from the room (`RoomState::may_remove`);
+    /// the command itself refuses everyone else.
+    Removers,
+}
+
+impl Audience {
+    /// Reports whether /help lists the command for u in r.
+    fn lists(self, u: &UserState, r: &RoomState) -> bool {
+        match self {
+            Audience::Removers => r.may_remove(u),
+            _ => self.refusal(u, "").is_none(),
+        }
+    }
+
+    /// The error that refuses u the command `name`, if any.
+    fn refusal(self, u: &UserState, name: &str) -> Option<RpcError> {
+        let message = match self {
+            Audience::Everyone | Audience::Removers => return None,
+            Audience::Accounts if u.account() => return None,
+            Audience::Accounts if u.bot() => format!("A bot can't use /{name}"),
+            Audience::Accounts => format!("Sign in with a passkey or email to use /{name}"),
+            Audience::Admins if u.account() && u.has_role(ADMIN_ROLE) => return None,
+            Audience::Admins => format!("Only an admin can use /{name}"),
+        };
+        Some(RpcError::new(CODE_DENIED, message))
+    }
+}
+
 /// One command this server provides (§4.1).
 struct ServerCommand {
     name: &'static str,
     usage: &'static str,
     help: &'static str,
-    /// Reports whether the sender may use the command in the room; `None`
-    /// means everyone may.
-    available: Option<fn(&UserState, &RoomState) -> bool>,
+    audience: Audience,
     /// Whether it changes anything, which a read-only guest may not do.
     writes: bool,
     /// Executes the command, sending the frames it causes, and returns its
@@ -44,7 +78,7 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         name: "help",
         usage: "/help",
         help: "list the commands you can use here",
-        available: None,
+        audience: Audience::Everyone,
         writes: false,
         run: State::help_command,
     },
@@ -52,7 +86,7 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         name: "avatar",
         usage: "/avatar",
         help: "with one image attached: set your avatar",
-        available: None,
+        audience: Audience::Everyone,
         writes: true,
         run: State::avatar_command,
     },
@@ -60,7 +94,7 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         name: "invite-device",
         usage: "/invite-device <name>",
         help: "get a token that signs in as you on another device, named <name>; at most 3 names, and a name again replaces its token",
-        available: Some(|u, _| u.account()),
+        audience: Audience::Accounts,
         writes: true,
         run: State::invite_device_command,
     },
@@ -68,7 +102,7 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         name: "invite-bot",
         usage: "/invite-bot",
         help: "get a token that signs in as your bot, named after you; again, it replaces the token and renames the bot",
-        available: Some(|u, _| u.account()),
+        audience: Audience::Accounts,
         writes: true,
         run: State::invite_bot_command,
     },
@@ -76,9 +110,25 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         name: "kick",
         usage: "/kick @user [reason]",
         help: "remove someone from this room (its creator or a moderator)",
-        available: Some(|u, r| r.may_remove(u)),
+        audience: Audience::Removers,
         writes: true,
         run: State::kick_command,
+    },
+    ServerCommand {
+        name: "admin",
+        usage: "/admin [remove] <user_id>",
+        help: "make a registered user an admin, or no longer one",
+        audience: Audience::Admins,
+        writes: true,
+        run: State::admin_command,
+    },
+    ServerCommand {
+        name: "role",
+        usage: "/role <user_id> [<role>]",
+        help: "show a user's roles, or give or take away one (admin, mod and bot act as such; any other is a label)",
+        audience: Audience::Admins,
+        writes: true,
+        run: State::role_command,
     },
 ];
 
@@ -147,6 +197,9 @@ impl State {
                 if command.writes && self.read_only_guest(&user_id) {
                     return Err(RpcError::new(CODE_DENIED, GUEST_READ_ONLY));
                 }
+                if let Some(refusal) = command.audience.refusal(&self.users[&user_id], &name) {
+                    return Err(refusal);
+                }
                 let result = (command.run)(self, c, &room_id, &body, args.trim())?;
                 c.send_result(req, result.clone().into());
                 return Ok((result.into(), true));
@@ -201,7 +254,7 @@ impl State {
         let lines: Vec<String> = SERVER_COMMANDS
             .iter()
             .filter(|command| !(command.writes && read_only))
-            .filter(|command| command.available.is_none_or(|available| available(u, r)))
+            .filter(|command| command.audience.lists(u, r))
             .map(|command| format!("- `{}`: {}", command.usage, command.help))
             .collect();
         c.enqueue(&private_notice(r, &lines.join("\n")));
