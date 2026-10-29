@@ -141,6 +141,9 @@ pub struct LimitOptions {
     pub ip_posts_per_day: i64,
     pub server_posts_per_minute: i64,
     pub server_posts_per_day: i64,
+    pub room_lists_per_minute: i64,
+    pub uploads_per_user_day: i64,
+    pub uploads_per_day: i64,
 }
 
 /// An extension Go lacks (docs/DEVIATIONS.md).
@@ -344,6 +347,9 @@ pub static GROUPS: &[Group] = &[
             spec!("ip-posts-per-day", Int, limit.ip_posts_per_day, ["2000"], [], "Posts of everyone at one client address together a UTC day; 0 is unlimited (not in the Go aprond)"),
             spec!("server-posts-per-minute", Int, limit.server_posts_per_minute, ["120"], [], "Posts of everyone on the server a minute; 0 is unlimited (not in the Go aprond)"),
             spec!("server-posts-per-day", Int, limit.server_posts_per_day, ["10000"], [], "Posts of everyone on the server a UTC day; 0 is unlimited (not in the Go aprond)"),
+            spec!("room-lists-per-minute", Int, limit.room_lists_per_minute, ["6"], [], "room_list requests of one user a minute, besides the first joined listing after each sign-in; 0 is unlimited (not in the Go aprond)"),
+            spec!("uploads-per-user-day", Int, limit.uploads_per_user_day, ["20"], [], "New uploads of one user a UTC day: a message's upload embeds, /avatar, /emoji add and /server avatar; 0 is unlimited (not in the Go aprond)"),
+            spec!("uploads-per-day", Int, limit.uploads_per_day, ["500"], [], "New uploads of everyone on the server a UTC day; 0 is unlimited (not in the Go aprond)"),
         ],
     },
     Group {

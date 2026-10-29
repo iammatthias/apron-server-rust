@@ -341,16 +341,23 @@ impl State {
             }
         }
 
-        let new_upload = submitted.iter().any(|value| {
-            embed_id(value).is_none()
-                && value
-                    .as_object()
-                    .and_then(|e| e.get("kind"))
-                    .and_then(Json::as_str)
-                    == Some("upload")
-        });
-        if new_upload && !self.feature_on(Feature::Uploads) {
-            return Err(RpcError::new(CODE_DENIED, UPLOADS_OFF));
+        let new_uploads = submitted
+            .iter()
+            .filter(|value| {
+                embed_id(value).is_none()
+                    && value
+                        .as_object()
+                        .and_then(|e| e.get("kind"))
+                        .and_then(Json::as_str)
+                        == Some("upload")
+            })
+            .count();
+        if new_uploads > 0 {
+            if !self.feature_on(Feature::Uploads) {
+                return Err(RpcError::new(CODE_DENIED, UPLOADS_OFF));
+            }
+            let user_id = self.client_user(c).unwrap_or_default();
+            self.charge_uploads_locked(&user_id, new_uploads as u32)?;
         }
         let mut embeds: Vec<Json> = Vec::with_capacity(submitted.len());
         let mut written: Vec<Json> = Vec::new();

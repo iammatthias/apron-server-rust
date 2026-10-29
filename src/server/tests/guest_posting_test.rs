@@ -186,7 +186,8 @@ fn test_server_frame_advertises_guest_posting() {
                 vec![
                     "ext:settings".to_owned(),
                     "ext:media".to_owned(),
-                    "ext:permissions".to_owned()
+                    "ext:permissions".to_owned(),
+                    "ext:limits".to_owned()
                 ],
                 want
             ),

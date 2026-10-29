@@ -636,6 +636,7 @@ impl State {
         }
         if let Some(conn) = self.clients.get_mut(&c.id) {
             conn.user = Some(user_id.to_owned());
+            conn.listed_joined = false;
         }
         if let Some(u) = self.users.get_mut(user_id) {
             u.clients.insert(c.id);
@@ -898,7 +899,7 @@ impl State {
             || (has_avatar && avatar != u.avatar)
             || (has_ext && ext != u.ext)
         {
-            self.charge_post_locked(c, &user_id)?;
+            self.charge_post_locked(c, &user_id, None)?;
         }
         let u = &self.users[&user_id];
         let (before, before_you) = (u.profile(), self.you_locked(u));

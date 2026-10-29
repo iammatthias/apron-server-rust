@@ -4,6 +4,7 @@ use std::sync::Arc;
 use rust_stdlib::encoding::json::jsontext::Value;
 
 use super::bots::BOT_ID_PREFIX;
+use super::limits::{refused, Allowance, Category, Charge, Principal, Scope};
 use super::messages::MessageState;
 use super::protocol::*;
 use super::server::{
@@ -876,7 +877,7 @@ impl State {
                 format!("The room's ext would be over {MAX_ROOM_EXT_BYTES} bytes"),
             ));
         }
-        self.charge_post_locked(c, &user_id)?;
+        self.charge_post_locked(c, &user_id, Some(Category::Write))?;
         let mut fields = Object::new();
         if title.is_empty() && parent.is_some() {
             // Servers title threads so clients unaware of parent_room_id
@@ -968,6 +969,36 @@ impl State {
     /// recently active first; MAX_THREADS and MAX_CREATED_ROOMS bound both.
     /// The result is followed by the read cursors kept for the listed rooms
     /// (§4.6).
+    /// Charges a `room_list` to the user's minute, except the first
+    /// `joined` listing after a sign-in, which is how a client learns its
+    /// rooms.
+    fn charge_room_list_locked(&mut self, c: &Client, req: &Request) -> Result<(), RpcError> {
+        let Some(conn) = self.clients.get_mut(&c.id) else {
+            return Ok(());
+        };
+        let Some(user_id) = conn.user.clone() else {
+            return Ok(());
+        };
+        let joined = parse_string(&req.params, "filter", false).is_ok_and(|f| f == "joined");
+        if joined && !conn.listed_joined {
+            conn.listed_joined = true;
+            return Ok(());
+        }
+        let user = Principal::User(user_id);
+        let charge = Charge {
+            scope: Scope::RoomList,
+            principal: &user,
+            allowance: Allowance::minute(self.config.limits.room_lists_per_user_minute),
+        };
+        self.limits.charge(&[charge], 1).map_err(|refusal| {
+            refused(
+                "Room listing limited",
+                refusal.retry_after(),
+                Some(Category::Read),
+            )
+        })
+    }
+
     pub fn list_rooms_locked(
         &self,
         c: &Arc<Client>,
@@ -1178,7 +1209,7 @@ impl State {
             target = target_id;
         }
         if !r.members.contains(&target) {
-            self.charge_post_locked(c, &user_id)?;
+            self.charge_post_locked(c, &user_id, Some(Category::Write))?;
         }
         if !self.join_locked(&target, &room_id) && target == user_id {
             let frame = self.joined_update_locked(&room_id, None);
@@ -1217,7 +1248,7 @@ impl State {
             target = target_id;
         }
         if r.members.contains(&target) {
-            self.charge_post_locked(c, &user_id)?;
+            self.charge_post_locked(c, &user_id, Some(Category::Write))?;
         }
         self.leave_locked(&target, &room_id);
         let result = Object::new();
@@ -1556,7 +1587,9 @@ impl Server {
         c: &Arc<Client>,
         req: &Request,
     ) -> Result<(Json, bool), RpcError> {
-        self.lock().list_rooms_locked(c, req)
+        let mut st = self.lock();
+        st.charge_room_list_locked(c, req)?;
+        st.list_rooms_locked(c, req)
     }
     pub(crate) fn join_room(
         self: &Arc<Self>,

@@ -276,6 +276,9 @@ pub fn server_settings(options: &Options) -> Result<Settings, String> {
             l.server_posts_per_minute,
             l.server_posts_per_day,
         )?,
+        room_lists_per_user_minute: rate("limit.room-lists-per-minute", l.room_lists_per_minute)?,
+        uploads_per_user_day: rate("limit.uploads-per-user-day", l.uploads_per_user_day)?,
+        uploads_per_day: rate("limit.uploads-per-day", l.uploads_per_day)?,
     };
     Ok(config)
 }

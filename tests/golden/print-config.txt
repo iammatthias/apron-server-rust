@@ -227,6 +227,15 @@ server-posts-per-minute = 120
 # Posts of everyone on the server a UTC day; 0 is unlimited (not in the Go aprond)
 server-posts-per-day = 10000
 
+# room_list requests of one user a minute, besides the first joined listing after each sign-in; 0 is unlimited (not in the Go aprond)
+room-lists-per-minute = 6
+
+# New uploads of one user a UTC day: a message's upload embeds, /avatar, /emoji add and /server avatar; 0 is unlimited (not in the Go aprond)
+uploads-per-user-day = 20
+
+# New uploads of everyone on the server a UTC day; 0 is unlimited (not in the Go aprond)
+uploads-per-day = 500
+
 [server]
 
 # Plain name clients show for this server, as server.title, unless an admin's /server title sets one (default: none, so clients show the server's address; not in the Go aprond)
@@ -468,6 +477,15 @@ server-posts-per-minute = 120
 
 # Posts of everyone on the server a UTC day; 0 is unlimited (not in the Go aprond)
 server-posts-per-day = 10000
+
+# room_list requests of one user a minute, besides the first joined listing after each sign-in; 0 is unlimited (not in the Go aprond)
+room-lists-per-minute = 6
+
+# New uploads of one user a UTC day: a message's upload embeds, /avatar, /emoji add and /server avatar; 0 is unlimited (not in the Go aprond)
+uploads-per-user-day = 20
+
+# New uploads of everyone on the server a UTC day; 0 is unlimited (not in the Go aprond)
+uploads-per-day = 500
 
 [server]
 
@@ -712,6 +730,15 @@ server-posts-per-minute = 120
 # Posts of everyone on the server a UTC day; 0 is unlimited (not in the Go aprond)
 server-posts-per-day = 10000
 
+# room_list requests of one user a minute, besides the first joined listing after each sign-in; 0 is unlimited (not in the Go aprond)
+room-lists-per-minute = 6
+
+# New uploads of one user a UTC day: a message's upload embeds, /avatar, /emoji add and /server avatar; 0 is unlimited (not in the Go aprond)
+uploads-per-user-day = 20
+
+# New uploads of everyone on the server a UTC day; 0 is unlimited (not in the Go aprond)
+uploads-per-day = 500
+
 [server]
 
 # Plain name clients show for this server, as server.title, unless an admin's /server title sets one (default: none, so clients show the server's address; not in the Go aprond)
@@ -953,6 +980,15 @@ server-posts-per-minute = 120
 
 # Posts of everyone on the server a UTC day; 0 is unlimited (not in the Go aprond)
 server-posts-per-day = 10000
+
+# room_list requests of one user a minute, besides the first joined listing after each sign-in; 0 is unlimited (not in the Go aprond)
+room-lists-per-minute = 6
+
+# New uploads of one user a UTC day: a message's upload embeds, /avatar, /emoji add and /server avatar; 0 is unlimited (not in the Go aprond)
+uploads-per-user-day = 20
+
+# New uploads of everyone on the server a UTC day; 0 is unlimited (not in the Go aprond)
+uploads-per-day = 500
 
 [server]
 
