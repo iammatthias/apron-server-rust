@@ -117,6 +117,17 @@ fn og_image_alt(og: Option<&Json>) -> String {
         .to_owned()
 }
 
+/// Drops an embed's `og.image`, and its `og` when nothing else is left.
+fn without_image(embed: &mut Object) {
+    let Some(og) = embed.get_mut("og").and_then(Json::as_object_mut) else {
+        return;
+    };
+    og.remove("image");
+    if og.is_empty() {
+        embed.remove("og");
+    }
+}
+
 /// Swaps one embed in a body for `update`, or removes it when `update` is
 /// `None`. Reports whether the embed was present.
 pub fn replace_embed(body: &mut Object, id: &str, update: Option<&dyn Fn(&mut Object)>) -> bool {
@@ -427,15 +438,21 @@ impl State {
             .sum()
     }
 
-    /// Removes the oldest message uploads, other than `keep`, while hosted
-    /// uploads exceed max_upload_storage_bytes. Each affected message is
-    /// republished once without its evicted embeds, as for a failed write
-    /// (§4.8.3). Avatars count toward the total but are never removed.
+    /// Removes hosted files, other than `keep`, while they exceed
+    /// max_upload_storage_bytes: link preview images first, then the
+    /// oldest message uploads. Each affected message is republished once:
+    /// a link keeps its card without `og.image`, and an upload embed leaves
+    /// the message, as for a failed write (§4.8.3). Avatars count toward the
+    /// total but are never removed.
     pub fn evict_uploads_locked(&mut self, keep: &str) {
-        let mut evicted: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        let (links, uploads): (Vec<String>, Vec<String>) = self
+            .uploads
+            .iter()
+            .map(|(_, id)| id.clone())
+            .partition(|id| self.embeds.get(id).is_some_and(EmbedState::is_link));
+        let mut evicted: BTreeMap<String, Vec<(String, bool)>> = BTreeMap::new();
         let mut order: Vec<String> = Vec::new();
-        let candidates: Vec<String> = self.uploads.iter().map(|(_, id)| id.clone()).collect();
-        for id in candidates {
+        for id in links.into_iter().chain(uploads) {
             if self.upload_bytes <= self.config.max_upload_storage_bytes {
                 break;
             }
@@ -445,12 +462,19 @@ impl State {
             if id == keep || e.avatar_for.is_some() {
                 continue;
             }
-            let message_id = e.message_id.clone();
+            let (message_id, link) = (e.message_id.clone(), e.is_link());
             if !evicted.contains_key(&message_id) {
                 order.push(message_id.clone());
             }
-            evicted.entry(message_id).or_default().push(id.clone());
-            self.remove_embed_locked(&id);
+            evicted
+                .entry(message_id)
+                .or_default()
+                .push((id.clone(), link));
+            if link {
+                self.remove_link_image_locked(&id);
+            } else {
+                self.remove_embed_locked(&id);
+            }
         }
         for message_id in order {
             if !self.messages.contains_key(&message_id) {
@@ -459,12 +483,34 @@ impl State {
             let ids = &evicted[&message_id];
             self.republish_locked(&message_id, |body| {
                 let mut changed = false;
-                for id in ids {
-                    changed = replace_embed(body, id, None) || changed;
+                for (id, link) in ids {
+                    let update: Option<&dyn Fn(&mut Object)> =
+                        if *link { Some(&without_image) } else { None };
+                    changed = replace_embed(body, id, update) || changed;
                 }
                 changed
             });
         }
+    }
+
+    /// Deletes a link preview's hosted image, keeping the preview.
+    fn remove_link_image_locked(&mut self, id: &str) {
+        let Some(e) = self.embeds.get_mut(id) else {
+            return;
+        };
+        let path = std::mem::take(&mut e.path);
+        let key = (e.seq, e.id.clone());
+        let size = std::mem::take(&mut e.size);
+        e.seq = 0;
+        e.content_type.clear();
+        without_image(&mut e.owned);
+        if self.uploads.remove(&key) {
+            self.upload_bytes -= size;
+        }
+        if !path.is_empty() {
+            let _ = os::remove(&path);
+        }
+        self.touch_embed(id);
     }
 
     /// Resolves "embed_id/secret" from a file or stream path.
