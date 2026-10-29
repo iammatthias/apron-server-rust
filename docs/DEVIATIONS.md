@@ -1,70 +1,859 @@
 # Deviations
 
-apron-server-cloudflare is the reference: its `SPEC.md` and its behavior.
-apron-server-go is a fallback where Cloudflare leaves room for choice. Each
-entry names the behavior, how the reference does it, how this port does it,
-and why. A reference cell that names no server describes apron-server-go:
-those rows are re-based as their area is aligned with Cloudflare, and a row
-that becomes Cloudflare-aligned is deleted. A
-client-visible difference that is not listed here is a bug. An entry marked
-*interim* is the state after a phase and goes away when the named phase
-lands.
+This file lists every known way a client can tell this server from
+apron-server-cloudflare, the reference: its `SPEC.md` and its behavior,
+with its defaults. Each section names the server it compares against.
 
-| Area | Reference | Rust | Why |
-|---|---|---|---|
-| `server.agent` (§3.1) | `apron-go/9` | `apron-rust/9` | The agent names the implementation. Clients key nothing on it; `apron` carries the protocol version. |
-| Display names (§3.3) | `normalizeName` applies the PRECIS Nickname profile (RFC 8266) through `golang.org/x/text/secure/precis`: NFKC normalization and the FreeformClass check, besides dropping invisible characters and folding spaces. | Drops Cc, Cf, Co, and Cs characters, maps Zs to space, collapses and trims spaces, and caps the name at 64 runes. No NFKC, no FreeformClass check: a name with compatibility characters such as fullwidth letters is kept as sent. | `x/text` is not Go's standard library, so rust-stdlib has no Unicode normalization. A third-party crate (`unicode-normalization`) would need an allowlist entry; the owner decides. |
-| Push delivery (§4.9), *interim until the rust-stdlib transport fix* | A delivery to a push host whose idle keep-alive connection the host has closed dials a new connection and is delivered. | The pooled connection is reused, the POST fails with `EOF`, and the push is dropped (status 0): the registration is kept, but that push never arrives. | rust-stdlib's `net/http` transport passes a closed idle connection as healthy; docs/PORT.md, "Pending rust-stdlib fixes". Disabling keep-alives here would work around it, which AGENTS.md rules out. |
-| WebSocket close handshake | coder/websocket's `Close` sends a close frame and waits up to 5 seconds for the peer's. | `close` sends the close frame and closes the TCP connection at once. | The server only ever uses `CloseNow` (no handshake) and `Close(1003)` on a binary frame, after which it reads nothing more. The peer still receives the close code. |
-| Store format: empty lists and maps | `FormatNilSliceAsNull` writes `null` for a nil slice or map, such as a room with no `members`. | Writes `[]` or `{}`. | Rust has no nil slice. The Go server reads either form, so a database this port wrote opens in Go, and the other way round. Not client-visible. |
-| Passkey attestation formats | go-webauthn verifies `packed` with an `x5c` chain, `tpm`, `android-key`, `android-safetynet`, `fido-u2f`, `apple` and `compound` statements, and registers the passkey if they check out | These registrations fail with "Passkey verification failed" | aprond requests no attestation, so a conforming client sends `none` or `packed` self attestation, which verify as in Go; only a client that ignores the preference sees the difference (docs/PORT.md) |
-| `--apple.app-id` and `/.well-known/apple-app-site-association`, *extension* | No such flag. The path is 404, and `--static-dir` cannot serve it: `staticFS` refuses any path element that starts with a dot, and an extensionless JSON file would go out as `text/plain; charset=utf-8` (both checked against the Go `aprond`). | `--apple.app-id <team ID>.<bundle ID>`, repeatable (`[apple] app-id = [...]` in TOML), makes `GET` on that path answer `Content-Type: application/json` with `{"webcredentials":{"apps":[...]}}` and no redirect. Without the flag the path is unchanged. An ID that is not ten uppercase letters or digits, a dot, and a bundle ID stops `run` with `invalid --apple.app-id`. `--help` and `--print-config` end with an `Apple` group; a Go `aprond` loads a printed config whose `[apple]` table is empty, and stops on one that sets `app-id` with `unknown setting "apple.app-id"`. | A native iOS app can use a domain's passkeys only if that domain lists the app under `webcredentials`. A static directory is optional, so the server serves the file itself. |
-| Account user_ids from a guest's passkey registration (§3.2, §3.3.3) | A guest that registers a passkey becomes the account in place and keeps its `guest_<n>` user_id, so Go never sends `user` with `old` (SERVER.md). The WebAuthn creation options name the user, `name` and `displayName` both, by the requested name, else the guest's name, else its user_id. | Follows apron-server-cloudflare (auth.ts `userIdSlug` and `candidateUserIdFor`, index.ts `handleAuth` and `guestLeaves`). The register `begin` on a guest's connection picks the new account's user_id from the requested `name`, normalized as any name is: lowercased, ASCII letters and digits kept, every other run one `_`, leading and trailing `_` dropped, cut to 16 characters; empty when it is `guest`, `bot` or `user` or starts with one of them and `_`. The id is that slug, `_`, and 4 digits, each a random u32 modulo 10, tried 8 times against every user_id assigned before, ignoring case, every room name, and every `Config.roles` holder; after 8 taken, or with no `name` or no slug, it is `u_` and 16 random bytes as unpadded base64url. The account's name is the requested one, else the guest's. The creation options give the id as `user.name` and the name as `user.displayName` (the id when there is no name). apron-web replaces both with the name typed for the account, when there is one, before the browser sees them (`labelledCreationOptions` in its `webauthn.ts`), so its passkeys are labelled as in Go. The id is not reserved at `begin`: `finish` claims it, and if another user took it meanwhile, `finish` is `invalid_params` (`identity already exists`) and the connection stays the guest. A verified `finish` answers `{you, token}` with the new user_id, its name, `roles: []` and its status. The guest is retired: its leave of each room it had joined, oldest room first, is logged and goes to the room's other members. The account then joins the same rooms in the same order, each join logged; the registering connection gets each as `room_update` `memberships` alone, then what follows a sign-in (§4.5): the statuses of those who share a room, and no mute. Everyone else in those rooms gets each join's `memberships`, the account's status with each join as with any join here, and then `user` `{new: <account>, old: {user_id, name}}`, the guest as recorded. The guest's messages and reactions keep its user_id, so the account cannot edit them; the rooms it created, its uploads and avatar, `ext`, chosen status, mutes, read cursors and push registrations go with the retired guest, and its user_id is never reissued. Unchanged: a passkey added to an account (passkey or email) keeps the user_id and the Go creation options; a guest adding an email address keeps `guest_<n>` in place, as in Go; a new email account is `user_<n>`; a registration on a connection not signed in is `denied`. Accounts made before this change keep their `guest_<n>` user_ids until an admin moves them with `/rename` (docs/PORT.md, Migrating a guest_<n> account). | Owner decision, 2026-10-28: account user_ids follow the official servers, and where Go and Cloudflare differ, Cloudflare. Clients see a guest's registration as a sign-in to a new user: the `auth` result names another user_id, and the guest's messages are no longer the user's own. In Go's Playwright suite (`tools/interop/run.sh --project=desktop webauthn.spec.ts`), the two tests that expect the guest's user_id to survive registration fail at that check (webauthn.spec.ts:83 and :137); the other two pass, the passkey-label test among them because apron-web relabels the creation options. Where this differs from Cloudflare's: Cloudflare keeps guest memberships out of the log, so it sends no guest leaves, while this server logs them, as Go does, so the rooms' members get the guest's leaves before the account's joins, and a status with each join. rust-stdlib has no Unicode normalization (Display names row), so the slug skips Cloudflare's NFKD step: `Zoë Ångström` gives `zo_ngstr_m` here and `zoe_angstrom` there, and a fullwidth letter is a separator rather than its ASCII letter. The slug also refuses `user`, this server's email-account counter. The taken check ignores case and covers room names and role grants, where Cloudflare's compares user_ids exactly and covers renamed and purged ones; here a renamed or purged user_id stays in `used_ids`, so it is taken too. A name over 64 runes is cut, as Go cuts any name, where Cloudflare answers `too_large`. A passkey added to an account keeps Go's creation options, where Cloudflare's `user.name` is the account's user_id. Cloudflare's guests only read and hold no mutes, pushes or avatars, so what is left with the guest here is what a Cloudflare guest could not have. Store: the account is an ordinary passkey `user` entry and its id an ordinary `used_ids` entry, so a Go `aprond` opens it as it opens any account; `tools/crossopen/run.sh` passed in both directions, the Rust-made `cross_open_<4 digits>` account resumed and signed in under Go. A Go `aprond` running on the same store still makes accounts in place. |
-| Roles (§3.3), `--role` | apron-server-cloudflare: roles are a column of the user's identity row, at most 8 in the order given, each 1 to 24 lowercase letters, digits, `_` or `-` starting with a letter; admins change them at runtime with `/admin` and `/role`. `admin` runs the admin commands, `admin` and `mod` (and `threader`) move others' messages and `admin` and `mod` create top-level rooms, `bot` makes a user a bot, and any other name is a label. Go: roles come from `--role` alone and change only with a restart; it knows `admin` and `moderator`. | Roles are stored with the user (`roles` in its `user` entry), at most 8, in the order given, and sent in every current user object of an account or bot, `[]` included. `--role role=user_id` or `role=email` seeds a role: each grant is given once, when the server starts or the account is made, and the grants given are remembered (`role_grants` in the `counters` meta entry), so an account keeps a seeded role after the grant leaves the configuration. `--role moderator=…` grants `mod`, and a malformed role name is a startup error. `admin` and `mod` may remove others from rooms and create and edit top-level rooms, and only `admin` edits `general`; `admin`, `mod` and `threader` move others' messages. A bot's roles grant none of these. | Admin commands change roles at runtime, so the store, not the configuration, holds them; seeding once keeps a role an admin took away from coming back at the next restart. `moderator` stays accepted for earlier configurations. No role raises posting limits yet (Track E). |
-| Rooms and threads (§4.2.4) | Cloudflare: only an account with `admin` or `mod` creates or saves a public top-level room, and only an `admin` saves `general`; anyone creates and saves threads. At most 16 top-level rooms besides `general`, 100 public rooms besides `general` in all, and 25 live threads created by one account. A thread's parent must be a top-level room, and a private room has no threads. A blank title falls back to `General` for `general` and `Room` for other top-level rooms, `Thread` for threads. `room_list` never truncates `not_joined`. | The same permissions and caps, with the same `denied` messages (`room_limit` and `thread_limit` for the server-wide caps) but `Threads cannot be nested`, without Cloudflare's `on this demo`. A private room may have threads, private or not, which count against the 100. No message moves into or out of a private room, its threads or a private thread, as Cloudflare refuses moves into or out of a private room. A blank title falls back to `General` for `general` and `Room` for other public top-level rooms, as on Cloudflare, but an untitled thread takes the first line of its description, else `Thread`. A thread or private room is removed, with its messages, when a leave, a removal, `/kick` or `/purge` leaves nobody in it, as Cloudflare's `removeIfEmpty` does. A guest's retirement (its last connection closed, its connection signed in as someone else, or a restart) logs its leaves, as Go does, but removes no thread emptied by them, as Cloudflare's `connectionGone` removes nothing: the thread stays, listed in `not_joined`, until someone leaves it or its log expires. | Private threads predate the reference and apron-web shows them. A title from the description predates the reference. A page reload in apron-web closes the guest's connection and signs in a new guest; removing the thread then would take its card away from everyone, which neither reference server does. |
-| Memberships of others (§4.2.2) | Cloudflare: `room_join` with another's `user_id` adds only a registered user (`<user_id> is not a registered user`): an admin adds anyone, an account its own bot, and any account anyone while addmember is on; in a private room any member but a guest or bot. `room_leave` with one removes them for an admin, the room's creator (an account) or the bot's owner (`Only an admin, the room's creator, or a bot's owner, can remove someone else`). Only accounts start private rooms (`Sign in to start a private room`). | The same, except that the adder must have joined the room (`Join <title> before adding others to it`), and adding someone to a private room's thread takes adding them to the room first. | Private threads are this server's; the join rule predates the reference. |
-| Activity (§4.6), `--read-receipts` | Cloudflare: typing is relayed to the room's other members, capped at 30 seconds, at most 10 relays per user a minute, past which it is dropped and the sender gets one `~private` notice a minute (`Typing updates are limited to 10 per minute, so others may not see you typing for a moment.`); a read-only guest's is dropped. An account's read cursor goes only to its other connections, within its own allowance of 10 a minute, and is kept; a guest's is dropped. No read receipts. | The same by default. `--read-receipts` (*extension, off by default*) restores Go's read receipts: cursors go to the room's members, the reader's own connections included, without the typing, and every member's kept cursor follows `room_list`. | Read receipts are a privacy choice for the server's owner. |
-| Admin token (§3.2), `--admin-token-file`, *extension* | apron-server-cloudflare: the Worker secret `APRON_ADMIN_TOKEN`, when set, signs in with `scheme: "token"` as the registered user `admin` ("Admin") from any origin, made on first use with the role `admin` and a logged join of `general`; the result has no session `token`; a connection already signed in as a registered user is `denied` (`Identity switching requires reconnect`); the user never holds a passkey or a device token (`denied`, `The admin user signs in with APRON_ADMIN_TOKEN only; make your own account an admin with /admin`). Go: no such token. | The same, with the token read at start from the file `--admin-token-file` names, or else from `$APRON_ADMIN_TOKEN`, without surrounding whitespace; empty or unset disables it. The flag holds a path, so `--print-config` never shows the token. A token shorter than 16 bytes is a startup error. Only its SHA-256 is kept, and a presented token is compared with it in constant time. No one else may take the user_id `admin`. The user is stored as an account with an `invited` member, since it has no passkey or address. | Break-glass admin access that needs no passkey origin, as Cloudflare offers. The short-token check guards a token anyone on the internet may try. A store that already holds a different user `admin`, made before the user_id was reserved, makes the admin token fail with `internal_error`. |
-| `/admin` and `/role` commands (§4.1, §3.3), *extension* | apron-server-cloudflare: admins run `/admin [remove] <user_id>` and `/role <user_id> [<role>]`, each answered by a `~private` notice before `{}`, naming the user as `**name** (`user_id`)`: `is now an admin.`, `is already an admin.`, `is no longer an admin.`, `was not an admin.`; `has the roles `a`, `b`.` or `has no roles.`; `now has the role `r`.`, `already has the role`, `no longer has the role`, `did not have the role`. A change is announced with `user` `you` to the user and `new` to those who share a room. Malformed roles, guests and unknown users are `invalid_params`; the user `admin` losing `admin`, an owner's bot losing `bot`, a bot made an admin, an admin or passkey holder made a bot, and a ninth role are `denied`. Others get `denied` `Only an admin can use /<name>`, and a bot running an account command `A bot can't use /<name>`. Go: no such commands. | The same commands, texts and codes. A user with an email address is not made a bot either (`denied`, `A bot signs in with a token and holds no email address; this user has one`). `/help` keeps this server's order and texts for its earlier commands and lists `/admin` and `/role` after `/kick`; `/role`'s line names `admin`, `mod` and `bot` and leaves out `threader` and posting limits. `/kick <user_id>` is Cloudflare's: admins only, a bare or `@` user_id, an account or a connected guest, a `~private` notice `Removed `<user_id>` from this room.` and no `~room` message. | Roles change at runtime, as on Cloudflare. This server has no per-role posting limits (see Roles). |
-| `/invite-token <user_id>` command (§4.1, §3.2), *extension* | apron-server-cloudflare: an admin's `/invite-token <user_id>` (a leading `@` allowed) makes a registered user with that user_id, named after it, with no passkey, starting in `general` with a logged membership, and sends a `~private` notice before `{}`: `Created `<id>`, who signs in with this token instead of a passkey. …`, the token (`apron_invite_` and 43 base64url characters) in a code block, `Or send them this link, which signs them in with any Apron app: <https://link.apron.chat/#server=…&token=…>` and the `auth` frame. The user_id is 1 to 64 letters, digits, `_` or `-`, starting with a letter or digit and ending with a letter, digit or `_`, not `guest_…` or `bot_…` (else `invalid_params`), and free (`invalid_params`, `The user_id <id> is taken`). `auth` with the token signs in from any origin with no session `token`; an unknown one is `denied` (`This invite token is not valid; ask an admin for a new one`); a connection signed in as a registered user is `denied` (`Identity switching requires reconnect`). `/rename` moves the token and `/purge` revokes it. Go: no such command. | The same command, texts and codes. The account is stored with an `invited` member, and only the token's SHA-256 is kept, in an `invite` store entry with the account and when it was minted. A user_id `--role` grants is free for `/invite-token`, and the new account gets the granted roles. The link names the `/ws` endpoint under `--public-url` (or the first `--tls.domain`); without one the notice has no link line. | Onboarding for small servers without passkeys, which the iOS client signs in with. Cloudflare's link names the URL the connection reached; this server builds links one way for every command (see `/invite-device`). `/rename` moves the token to the new user_id, and `/purge` revokes it with the account. A Go `aprond` opening the same store ignores `invite` entries and takes these accounts for guests. |
-| `/invite <uses>` sign-up invites and `server.signup` (§3.2, §4.1, Appendix B), *extension* | apron-server-cloudflare: an admin's `/invite <uses>` mints one live sign-up token, `apron_join_` and 43 base64url characters, for 1 to 50 sign-ups (`invalid_params` `Usage: /invite <uses>, 0 to 50` unless 1 to 3 digits; above 50 `denied` `An invite signs up at most 50 users`) within 7 days, replacing the last; `/invite 0` revokes it (`The sign-up invite is revoked.`). The notice gives the count and expiry (`until YYYY-MM-DD HH:MM UTC`), the token, a link.apron.chat link and the `auth` frame. Each `auth` with `scheme: "token"`, the invite and an optional `name`, on a guest or unauthenticated connection, makes an account with no passkey, named as asked (else `Member`), with a user_id picked from the name (`ada_1234`, else `u_…`), joining `general` after the result, which carries `you` and the account's own `apron_invite_` token. A used-up, expired or revoked invite is `denied` (`This invite is used up or has expired; ask an admin for a new one`), and a used-up or expired one is dropped. `signup` is `["webauthn","token"]` where passkeys are offered, else `["token"]`. Go: no invites; `signup` lists `webauthn` and `email` only. | The same command, texts, codes and limits. The invite is kept as the hex SHA-256 of its token with its remaining count and expiry in the `counters` meta entry. `signup` lists `webauthn` where passkeys are offered, `email` where email sign-in is on, and always `token`; `auth` lists the same, then `guest`. A `name` is normalized as a passkey registration's is, so one past the name limit is cut rather than refused with `too_large`. The link names the `/ws` endpoint under `--public-url`, as for `/invite-token`. `server.welcome` does not mention invite tokens. | Group onboarding without per-person admin work. Cloudflare reserves storage budget before each sign-up; this server has no budget, and a sign-up is one step under the state lock, so uses never exceed the count. |
-| `/passkeys` and the passkey-added notice (§4.1, §4.10), *extension* | apron-server-cloudflare: an account's `/passkeys` lists its passkeys oldest first as `Your passkeys:` and lines `<n>. `<first 8 base64url characters of the credential ID>…`, added YYYY-MM-DD, last used YYYY-MM-DD` (or `Your account has no passkey. Register one while signed in to add it.`); `/passkeys remove <n>` removes one (`Removed the passkey `…` from your account.`, also sent to the account's other connections in no room) and deletes the account's push registrations, but never the only one (`denied`, `You can't remove your only passkey`); other arguments are `invalid_params` (`Usage: /passkeys, or /passkeys remove <n>`, or `You have <k> passkeys; see /passkeys`). A passkey added from one connection is told to the account's other connections in a `~private` notice in no room: `A passkey was added to your account from another connection. If it wasn't you, remove it with `/passkeys`.` Go: none of these. | The same, with when each passkey was added and last used kept in the `times` member of the user's stored `passkey`, by base64url credential ID. A passkey stored before these were kept shows `unknown` for both days. Bots and guests are refused as for other account commands. | A lost device's passkey can be revoked, and an unexpected one is noticed. Sessions the removed passkey started stay valid until they expire, as on Cloudflare. A Go `aprond` opening the same store drops the `times` member when it next writes the user. |
-| `/toggle` (§4.1, §4.5, §4.7, §4.8), *extension* | apron-server-cloudflare: an admin's `/toggle activity`, `/toggle uploads` (with uploads configured), `/toggle presence` (with push configured) and `/toggle addmember` turn the feature off or on for everyone, answered by a `~private` notice naming the new state (`Activity is now **off**: …` and so on), kept in `_meta` across restarts; toggling back to the default removes the override. Any other argument is `invalid_params` (`Usage: /toggle activity|uploads|presence|addmember`). New connections are offered `activity` and `embed:upload` only while on, with `read_cursors` following activity, `server.status` listed only while presence is on, and `ext.media` without `upload` and `avatar` while uploads are off. Activity off stops typing and takes the unsupported-method path; uploads off makes `/help` leave out `/avatar` and new upload embeds and `/avatar` `denied` (`Uploads are turned off here`); presence off tells connected clients each status is `""` while `you` keeps the chosen one; addmember off makes `room_join` with another user's `user_id` `denied` (`Only an admin, or a bot's owner, can add someone else here`) unless the sender is an admin or it names their bot, and sends connected users `user` `you` with their `ext.permissions`. Go: no such command; every feature is always on. | The same command, notices, codes and effects, `user` `you` with `ext.permissions` included, with every feature on by default; the features turned off are kept as `features_off` in the `counters` meta entry. `uploads` and `presence` are always toggleable, since this server always takes uploads and always offers `status`. Turning presence on sends each user's shown status to those who share a room with them as `user` `new`. | Lets the owner of a small server switch a feature off without a restart. |
-| `/rename <old_user_id> <new_user_id>` (§4.1, §3.3), *extension* | apron-server-cloudflare: an admin's `/rename` (a leading `@` allowed on either) gives a registered user a new user_id: 1 to 64 letters, digits, `_` or `-`, starting with a letter or digit and ending with a letter, digit or `_`, not `guest_…` or `bot_…` (else `invalid_params`), and not taken (`The user_id <id> is taken`, `admin` included). The identity, its passkeys (which then sign in as the new id), memberships, roles, read cursors, the rooms it created, uploads, push registrations with their `push_id`s and wake times, status, mutes, limiter windows and dedup rows move; its invite and device tokens move too. The `from` of its logged and current messages, its reaction sets, logged and current, and its logged membership changes are rewritten to the new id, keeping the recorded names, without notifications, so the user can still edit them. The old user_id is retired (`renamed:<old>`). The user's connections get `user` `you`, and those who share a room with them `user` `{new, old}`, `new` with the status shown. Others' `body.mentions` keep the old id; the user's sessions are `denied` on resume, sending the client back to its passkey; the user's bot keeps `bot_<old>` and its token. The sender gets ``Renamed `<old>` to `<new>`.`` before `{}`. `/rename admin …` is `denied` (`The admin user's user_id is fixed`), a bot is `denied` (`A bot's user_id is fixed`), a user_id no registered user has is `invalid_params` (`No registered user has the user_id <id>`), and anything but two words is `invalid_params` (`Usage: /rename <old_user_id> <new_user_id>`). Go: no such command. | The same command, texts, codes and effects. The user's sessions are deleted at once rather than refused when presented, which a client sees the same way (`Session expired; sign in again`). The old user_id stays in `used_ids`, which also takes it from `/invite-token` and passkey registration, ignoring case. A user_id `--role` grants is free for `/rename`, as for `/invite-token`, and the renamed user then gets the granted roles. The address an email account signs in with and its pending email proposals move too. Timed mutes keep running under the new id. The user's bot keeps `bot_<old>` and its token but is owned by the new id: `/invite-bot` then gives it a new token, where Cloudflare makes a second bot, `bot_<new>`, and `/purge <new>` removes it. | Moves accounts made before Cloudflare-style user_ids, such as `guest_<n>` ones from a guest's passkey registration (docs/PORT.md, Migrating a guest_<n> account), and fixes a mistyped invite. The bot follows its owner so that a purge after a rename cannot leave a bot whose token still signs in. |
-| `/purge <user_id>` (§4.1), *extension* | apron-server-cloudflare: an admin's `/purge <user_id>` (a leading `@` allowed) closes the connections of the user and their bot (`bot_<user_id>`) with 1008 `Removed by an admin`, then deletes, silently and with no new records, their message snapshots and current messages with every reaction set on them, their reaction sets elsewhere, their memberships and membership records, their uploads and avatar, and their identity, roles, passkeys, bot, invite and device tokens, push registrations, status, mutes, limiter and dedup rows. A logged record listing them beside others (a move's reaction sets) is rewritten without them; rooms they created stay without a creator; a thread the purge leaves nobody in is removed. The user_id is retired (`purged:<user_id>`) and never issued again, so a session still held for it is `denied`. The sender gets ``Purged `<id>`: <n> messages, <n> reaction sets, <n> uploads.`` (singular for 1) before `{}`. Purging oneself is `denied` (`You can't purge yourself`), as is `admin` (`The admin user can't be purged`); a user_id no user has is `invalid_params` (`No user has the user_id <id>`, cut to 200 characters); anything but one word is `invalid_params` (`Usage: /purge <user_id>`). Go: no such command. | The same command, texts, codes and effects, guests included. The connections close the way this server closes any revoked one, with a connection-level `denied` error frame and no close frame. The user's sessions are deleted at once, since this server finds them by user, so resuming one is `denied` (`Session expired; sign in again`) as on Cloudflare. The user_id stays in `used_ids`, which also keeps it from a later passkey or `/invite-token`. The upload count leaves out link previews and streams, which Cloudflare does not have. Address sign-ins (`emails`) and pending email proposals of the user go too. Unread counts are taken again for everyone, as after retention. The user's bots are the users whose owner they are, not the user named `bot_<user_id>`, so a renamed user's bot goes too, every bot token they minted is revoked, and a user who only holds the name `bot_<user_id>` stays. | The only spam cleanup tool. Bots are found by owner so that a purge after a rename cannot leave a bot whose token still signs in. It also removes the `livecheck_` accounts the live check makes (`tools/deploy/live-check.mjs`). |
-| Idle bot sweep (§3.2), *extension* | apron-server-cloudflare: a user whose only role is `bot` that neither signs in nor posts or reacts for 7 days is signed out by a sweep that runs at most daily, up to 4 bots at a time, due again at once after a full batch: its connections close with 1008, it leaves each of its rooms with a logged leave, and its tokens are revoked; its account and posts stay, and its `updated_ms` becomes 0 so it is not swept again. Activity is written at sign-in and on a post at most hourly, and by `/role`. A new or upgraded object's first sweep only sets the next one a week out. Go: bots do not exist. | The same, from the hourly maintenance thread, with the due time kept as `bot_sweep` in the `counters` meta entry and each bot's activity as `active` in its `user` entry. A bot's connections get a connection-level `denied` error (`Signed out after a week without signing in or posting`) and close, as this server closes any connection. Its push registrations go too. A bot stored before activity was kept counts as active from the first start that keeps it. | Keeps abandoned bot tokens from staying valid forever. |
-| `/invite-device <name>` command (§4.1, §3.2), *extension* | No such command: `/invite-device` is `Unknown command /invite-device; try /help`, and a passkey or email account has only the origin-bound session its own sign-in returned. | Follows apron-server-cloudflare's `/invite-device` (its SPEC.md, section 5, Devices). A passkey or email account runs `/invite-device <name>` and gets a `~private` markdown notice in the command's room, before the `{}` result, with a bearer token in a fenced code block, then a line `Or open this link on **<name>**, which signs you in there with any Apron app: <https://link.apron.chat/#server=wss://chat.example/ws&token=apron_device_…>` (an Appendix A.4 sign-in link, link.apron.chat SPEC.md section 2.1, with `server` and the token percent-encoded as Cloudflare's `apronLink` does: every byte but letters, digits and `-._~:/`), and the `auth` frame that uses it. The token is `apron_device_` plus 32 random bytes as unpadded base64url. Only its SHA-256 is kept, in a `device` store entry with the account, the name and when it was minted. `auth` with `scheme: "token"` and a device token signs in as the account from any origin or none; the result has `you` and no `token`. Device tokens do not expire. The name is 1 to 32 letters, digits, `_`, `.` or `-`, starting with a letter or digit; anything else, or other than one word, is `invalid_params`. An account holds at most 3 device tokens, one per name; a fourth name is `denied`, naming the three oldest first. The same name again mints a new token and revokes the old one: the old one no longer signs in, the account's other connections that signed in with it are signed out at once and get a connection-level `denied` error (`Device token replaced; sign in with the new one`) and close, so none of their requests runs as the account after the replacement, even one already read, and the push registrations made by connections signed in with it are deleted. Each registration's `push` store entry records that token's SHA-256, in hex, as a `device` member; one without it, stored before the member existed, is never deleted by a replacement. The asking connection stays open, even when it signed in with the replaced token, and then counts as signed in with the new one, so the next replacement closes it. A replacement undoes nothing else done with the old token: a passkey added with `register`, and the session token it returned, keep working, though a connection that signed in with the old token still closes after it got a session token. `/help` lists the command for accounts only. A guest gets `denied` (`Sign in with a passkey to use /invite-device`). A presented token that is unknown or revoked is `denied` (`This device token is not valid; get a new one with /invite-device on a signed-in device`). | A native client (the iOS app) cannot run the web client's passkey ceremony on every origin, so it signs in with a token another signed-in client issues, as §4.10 allows; matching the official server lets clients and docs give one instruction everywhere. Where this differs from Cloudflare's: Go has no bots and no `APRON_ADMIN_TOKEN` user, and its `admin` is a role on an ordinary account, so every passkey or email account may run the command, admins included. A replaced token's connections close the way this server closes any connection, with an error frame and no close frame, rather than with close code 1008. The sign-in link names the `/ws` endpoint under the configured public URL (`--public-url`, or `https://` and the first `--tls.domain`), where Cloudflare names the URL the connection reached, so without a public URL the notice has no link line. A connection already signed in may present a device token, which switches it as a session token would, where Cloudflare answers `denied`. `/rename` moves the account's tokens and `/purge` revokes them, as Cloudflare's do. A Go `aprond` opening the same store loads only the entry kinds it knows: it ignores `device` entries, leaves them in place, and refuses device tokens. It skips the `device` member of a `push` entry and drops it when it next writes the entry. |
-| `/invite-bot` command and bot users (§4.1, §3.2, §3.3), *extension* | No such command: `/invite-bot` is `Unknown command /invite-bot; try /help`. Go has no bots: every user is a guest, retired when its last connection closes, or a passkey or email account. | Follows apron-server-cloudflare's `/invite-bot`. A passkey or email account runs `/invite-bot`, which takes no arguments (any is `invalid_params`, `Usage: /invite-bot`). The first run makes the account's bot, the user `bot_<owner user_id>`, which keeps that user_id and stays the account's through a `/rename` (later runs find it by owner), named `Bot of <owner's name>` (the owner's user_id when it has no name), cut to the 64-rune name limit like any name. The bot has no credential and holds the roles `["bot"]`, and only those: `Config.roles` grants it nothing. It persists across connections and restarts as an account does, and joins `general` with a logged membership that the room's members receive as `room_update` `memberships`, as any join is. A later run renames the bot when the owner's name has changed since, which everyone who shares a room with it receives as a `user` notification. Every run mints a token, `apron_bot_` plus 32 random bytes as unpadded base64url, and replaces the bot's earlier one: the old one is deleted first, so a failure never leaves two, the bot's connections that signed in with it are signed out at once and get a connection-level `denied` error (`Bot token replaced; sign in with the new one`) and close, so none of their requests runs as the bot after the replacement, even one already read, and the bot's push registrations are deleted. Only the token's SHA-256 is kept, in a `bot` store entry keyed by its hex and holding `{bot, owner, created}`; the bot's `user` entry carries its owner in a `bot` member. The token goes only to the asking connection, in a `~private` markdown notice in the command's room before the `{}` result: it names the bot, as **<name>** followed by its user_id in code, says the token replaces any earlier one and that anyone who has it can post as the bot, then gives the token in a fenced code block and, after `If you're using an LLM, you can give it these instructions:`, a fenced block reading `Read https://github.com/shazow/apron/blob/main/PROTOCOL.md`, `Connect to <wss URL>` and `Auth using token scheme with this token: "<token>"`. `auth` with `scheme: "token"` and a bot token signs in as the bot from any origin or none; the result has `you`, with `roles: ["bot"]`, and no `token`. An unknown or replaced token is `denied` (`Bot token is not valid; its owner can get a new one with /invite-bot`). A bot is no account: it cannot run `/invite-bot` or `/invite-device` (`denied`, `A bot can't use /...`), `/help` lists neither for it, and a passkey registration (`begin`) or an email proposal on a bot's connection is `denied` (`A bot signs in only with its token; it cannot add a passkey or an email address`). A bot's `me` with a name other than its own, after name normalization, is `denied` (`A bot is named after its owner, who can rename it with /invite-bot`); its own name, which the bot client sends on every connection, is no change, and its other fields change as anyone's do. `/help` lists `/invite-bot` for accounts only; a guest gets `denied` (`Sign in with a passkey to use /invite-bot`). | The owner tests bots against this server and needs a bot identity that outlives restarts, which a guest is not; matching the official server lets bot docs give one instruction everywhere. Where this differs from Cloudflare's: there are no registration caps (one bot per account bounds the bots), and the notice has no `Say hello when you join` line, so bots do not greet rooms. A replaced token's connections close the way this server closes any connection, with an error frame and no close frame, rather than with close code 1008. The `Connect to` line names the `/ws` endpoint under the configured public URL (`--public-url`, or `https://` and the first `--tls.domain`), and reads `Connect to this server's WebSocket URL` without one. Should `bot_<owner>` already be held by someone else, a user_id taken before the prefix was reserved, `/invite-bot` is `denied` rather than reissuing it (§3.3). A Go `aprond` opening the same store skips the `bot` member of the bot's `user` entry and ignores `bot` entries, refusing bot tokens, but it takes the bot for a guest and retires it at start: it logs the bot's leaves and deletes its `user` entry. This server then drops the orphaned `bot` entry at its next start, and the bot's user_id, used, cannot be made again. |
-| Requested `user_id` starting `bot_` (§3.2, Appendix A.3), *extension* | Go: a guest or a new email account may request a user_id starting `bot_`, ignoring case, like any requestable one. | A new email account's request is not honored: it gets the next `user_<n>`, as for a requested `guest_` or `user_` id. A guest's requested user_id is never honored (Guests row). | `/invite-bot` names each bot `bot_<owner user_id>`, so no other user may hold the prefix. A passkey registration's user_id is `<slug>_<4 digits>` or `u_…`, and the slug refuses `bot` (Account user_ids row), so no account gets the prefix either. |
-| `--unfurl.enable` and `link` embeds (§4.8, §4.8.1), *extension, off by default* | No such flag. A message's URLs stay text, and the server never sets `og` on any embed but a finished upload. | With `--unfurl.enable` (`[unfurl] enable = true` in TOML), a saved message whose text gains http(s) URLs is posted and answered as before, and then unfurled in the background. The server reads the first 8 KiB of the text, and in it the first 32 distinct URLs, skipping, in `format: "markdown"`, those inside code spans and fenced code blocks. It leaves out URLs the previous snapshot's text already had (so a preview a user removed does not come back) and URLs an embed already links, and takes the first 3 that remain, so an edit that adds a URL gets that URL's preview. A save that keeps the text and format unchanged is not scanned. Each user gets 10 such URLs a minute and the server 60, each refilled evenly; at most 16 messages unfurl at once, and a message beyond that is not unfurled and spends none of either allowance. A message whose URLs exceed what is left of either allowance unfurls the first ones that fit. Each page is fetched with `GET`, `User-Agent: Mozilla/5.0 (compatible; aprond/<version>; link preview; +https://github.com/iammatthias/apron-server-rust)`, 5 seconds for each URL, its page and image together and DNS lookups included (a fetch still running then, such as one stuck in a lookup, is abandoned and finishes in the background, filling the cache; shutdown waits at most that long for unfurls), at most 3 redirects, http and https only, no proxy, no kept-alive connections, and only to public addresses on ports 80 and 443: every dialed address, after each redirect too, must be on one of those ports and pass push's check (no loopback, private, link-local, CGNAT, documentation or other special-purpose ranges), checked on the address actually dialed, so a name resolves once and cannot be rebound. Only `text/html` and `application/xhtml+xml` answers are read, judged by their `Content-Type` before any of the body is, and only their first 512 KiB, as text: no script runs. The preview comes from the `og:title`, `og:description`, `og:site_name`, `og:image` (or `og:image:url`, `og:image:secure_url`) and `og:image:alt` meta tags, with `<title>` and the meta description as fallbacks. The `og:image` is downloaded under the same limits and kept only when it is declared `image/*`, is at most 2 MiB, and has the header of a PNG, JPEG, GIF or WebP of at most 8192 pixels a side and 40 megapixels in all (only the header is read, not the pixels); its `type` is the format the header reads as, whatever the site declared. It is then stored as an upload of the message. A page with no title, description or image gives no preview. Each URL's result is cached in memory, a preview for an hour and a failure for 5 minutes, at most 256 entries and 32 MiB of images. The message is then republished once, as for a finished upload (§4.8.3), with a `link` embed appended per preview whose URL its text still has: `{"embed_id", "kind": "link", "url": <the URL as posted>, "og": {"title", "description", "site_name", "image": {"url": <this server's /files/ URL>, "type", "width", "height", "alt"}}}`, absent members left out, within the 32-embed limit. A `link` embed is server-hosted (§4.8.2): a save that keeps its `embed_id` gets its `url` and `og` back from the server's records, and a save that drops it, a delete or a redaction deletes its image. Its image counts toward `--upload.max-storage-mb` but not toward a message's upload limit. Eviction takes link images, oldest first, before any upload, so previews never push out users' uploads; an evicted image leaves its `link` embed in place without `og.image`, and a later save that keeps the embed gets that card back. Each message stores its own copy of an image, even one the cache served: sharing one file would need a count of the embeds that hold it, because deleting an embed deletes its file. A job is not persisted: a restart before it lands, or a message deleted or edited past its URLs meanwhile, leaves the message without the preview. `--help` and `--print-config` end with a `Link previews` group after `Apple`; a printed config always holds `[unfurl] enable = ...`, which a Go `aprond` refuses with `unknown setting "unfurl.enable"`. Store: a `link` embed is an ordinary `embed` entry. From Go's source (`persist.go` restores any `kind`, `handleFile` serves any finished embed with a file), a Go `aprond` opening the store restores the embed, serves its image and keeps its `og` on saves; `tools/crossopen/run.sh` does not cover embeds, so this is read, not run. | Clients load media only from the server's origin (§4.8.1), so a link can show a preview only if the server describes it and hosts its image, which the protocol allows (servers MAY publish a snapshot at any time, §3.5.3, and SHOULD set and host `og`). Off by default because it changes what the server does on the network: any user can make it request any public URL, which reveals the server's address to that site and spends its bandwidth, so the operator opts in, and without the flag the server stays identical to Go. |
-| `server.welcome` and the welcome notice (§3.2, §3.5) | Cloudflare: `welcome` is `general`'s description, else a generated summary of guests, sign-in and retention. Right after the `server` frame, before `auth`, a `~private` notice with no `room_id` reads `Welcome to Apron Chat. Server version: \`<deploy tag>\``, then, where guests only read, `Guests can read. *Sign in with passkey* to participate.` Only an admin edits `general`. | The same, except: `--welcome` (`welcome` in TOML), when set, comes before `general`'s description; the version is the crate version; the summary names email sign-in when it is configured, and retention only when `--history.retention` is set; on a connection not offered passkeys the summary says where they work, and the notice points at email or says only `Guests can read.`. The capacity refusal sends no notice. | `--welcome` predates the reference and keeps a deployment's text fixed. A Rust build has no deploy tag. |
-| Reaction entries (§4.7) | Cloudflare: each emoji sequence is stored fully qualified, by the runtime's `\p{RGI_Emoji}` (emoji.ts `qualifyEmoji`), entries that differ only in U+FE0F are one, the first form kept, and an unchanged set in any form logs nothing. A `:name:` key (EXTENSIONS.md `ext:emoji`) must be in the custom emoji catalog or already in the user's set on the message, else `invalid_params` (`<key> is not a custom emoji here`); other text is kept as written. Stored sets are not rewritten. | The same, qualified from a table of the fully-qualified sequences that hold U+FE0F, generated from Unicode's emoji-test.txt by `tools/emoji/generate.mjs` (`src/server/emoji_qualified.txt`, Unicode 18.0; it agrees with Cloudflare's function on all 5,244 sequences of that file under Node 22). Reaction sets stored before this load qualified and are saved so. Reaction records are logged qualified; records logged before this change keep the form they were sent in and are not rewritten (docs/PORT.md, 2026-10-29), so `history` may return such a record unqualified; clients compare without U+FE0F. | A table keeps the result independent of the runtime's Unicode data. |
-| Custom emoji, `ext:emoji` and `/emoji` (EXTENSIONS.md), *extension* | Cloudflare: a registered user (not a bot) with the role `admin`, `mod` or `friend` may run `/emoji add :name:` with one `upload` embed adds or replaces a key's image when the write finishes, and `/emoji remove :name:` removes it with a `~private` notice (`Removed the custom emoji \`<key>\`.`). A name is 1 to 32 of `[A-Za-z0-9_+-]`; at most 500 emoji, each a PNG, JPEG, GIF or WebP of at most 256 KiB, never scaled (no `max_side`). The catalog is one JSON object of each key's `url` and, where the write showed them, `width` and `height`, published to R2 at `e/c/<SHA-256 of the JSON>.json` and served `public, max-age=31536000, immutable`. `ext:emoji` and `ext.emoji.catalog_url` are in the `server` frame only while the catalog has an emoji; each change sends every connection a new frame. The catalog a change replaced stays, with the images only it refers to, until the next change. Images are the server's, never expire, and are kept under `e/` on the media origin. | The same commands, texts, limits, types and catalog rules. The catalog is served by aprond at `/emoji/<SHA-256>.json` on the connection's base URL (`--public-url` where set), the images from `/files/` with the same cache header, and the catalog with its images and the previous catalog are kept in the store as meta `emoji`. Uploads off refuse `/emoji add` with `Uploads are turned off here`, and it counts as an upload (see `ext:limits`). The limits are not flags. A new key whose write finishes after another add filled the catalog fails with 410, as on Cloudflare, but says `This server keeps at most <n> custom emoji; remove one first` where Cloudflare's says the upload is no longer wanted. `/emoji remove :name:` also drops every add of that key still on its way, whose write URL is then unknown (404), and a write that finishes after its sender lost every one of the roles fails with 403 (`/emoji needs one of the roles admin, mod, friend`); Cloudflare applies such a write. | Uploads here are served by aprond itself. A removal or a role taken away is final, not undone by an image that was already on its way. |
-| `server.title`, `description` and `avatar`, and `/server` (§3.1, §4.1), *extension* | Cloudflare: the `SERVER_TITLE`, `SERVER_DESCRIPTION` and `SERVER_AVATAR` variables, each trimmed and left out when empty; the title one line within the display-name policy (80 code points), the description at most 500 bytes with no control character but a line feed, the avatar an `https:` URL or a `data:image/{png,jpeg,gif,webp};base64,` URL of at most 8,192 characters. An admin's `/server` shows the three with where each comes from, and `/server title|description [<text>]` and `/server avatar` (one `upload` embed, or alone to clear) set or clear them over the variables; each change sends every connection a new `server` frame. Without either, the description is `general`'s, trimmed, when it passes the description rules, and a change to it is announced the same way. The avatar is stored under `e/` on the media origin, owned by the server, never expires, and is served `public, max-age=31536000, immutable`. | The same, with `--server.title`, `--server.description` and `--server.avatar` (`[server]` in TOML) for the variables and in the notices. The title's limit is this server's display-name length, 64 characters. The avatar is an upload served from `/files/` on this server's own origin, with the same cache header, kept in the store as meta `server` with the title and description; uploads off refuse `/server avatar` as they refuse `/avatar`, and it counts as an upload as `/avatar` does. | Rust names are at most 64 characters. Uploads here are served by aprond itself. |
-| Uploads and `ext:media` (EXTENSIONS.md, §4.8) | Cloudflare: an attachment is a PNG, JPEG, GIF or WebP image or WebM, Ogg or MP4 audio, typed from its bytes; a declared type it does not keep, or bytes that show none, are 415. `upload` lists those seven types, each 5 MiB, `avatar` the four image types, each 256 KiB, and `emoji` the image types for custom emoji; `origins` names its media bucket. The sizes and types are fixed by its plan. | The same types, sniffing, codes and default sizes, with `--upload.max-mb` (default 5), `--upload.max-avatar-kb` (default 256) and `--upload.type` (repeatable; a MIME type, `type/*` or `*/*`) to change them; a type the sniffer does not know is taken from its declared type, as before. `ext:media` lists the configured types with their sizes. No `origins`: uploads are served from this server's own origin. `emoji` lists the four image types, each 256 KiB (Cloudflare's `maxEmojiBytes`), for `/emoji add`. Streams (`embed:stream`) are unaffected. An avatar's, a custom emoji's or the server avatar's write whose declared type is not one of the four image types is 415 before its body is read and stays open, as on Cloudflare; an attachment's declared type is checked once the body is read, and its refusal fails the write, where Cloudflare refuses it first and leaves the write open. | A self-hosted server may want other sizes or files; Cloudflare's numbers are its plan's. |
-| `ext:permissions` (EXTENSIONS.md) | Cloudflare: listed in `capabilities`; every `you` (the `auth` and `me` results, `user` `you`) carries `ext.permissions`, an object of the keys that differ from their defaults: `write: false` for a guest while guests only read, `add_members: true` for an admin or, while addmember is on, any account, `move_any: true` for `admin`, `mod` or `threader`; a bot has neither. `me` ignores the key. `/toggle addmember` sends each connected account but admins and bots `user` `{you: {user_id, ext: {permissions}}}`. A move of someone else's message by a moderator must change only `room_id`. | The same, except that an owner's bot gets `{}` where Cloudflare's tier check gives it `write: false` while guests only read. | A bot writes on this server whether or not guests may. |
-| Frame and field sizes (§1, §1.1) | Cloudflare: frames of at most 16 KiB (a larger one closes with 1009), JSON nested at most 8 deep with at most 2048 values, request ids of at most 128 bytes, and 4 KiB of `body.text`; also 8 KiB message snapshots, 512 bytes of user `ext` and 2 KiB of room fields. | The same frame, JSON, id and text bounds by default, each configurable (`--frame.max-bytes`, `--frame.max-text-bytes`, `--frame.max-depth`, `--frame.max-nodes`, `--frame.max-id-bytes`). No snapshot bound; a message's `ext` is bounded at 64 KiB, a profile's and a room's at 16 KiB, and a room description at 16 KiB, which only a raised `--frame.max-bytes` reaches. | Cloudflare sizes the field bounds to its Durable Object budgets. The frame bound already caps every field, so the field bounds stay as they were for servers that raise it. |
-| Client address (SPEC §5, IP key), `--client-ip-header` | Cloudflare: the visitor's address from `CF-Connecting-IP` (with `CF-Connecting-IPv6` for Pseudo IPv4), an IPv4-mapped address folded into IPv4 and native IPv6 grouped by /56, stored as the first 128 bits of its SHA-256; a missing or unusable address refuses the connection. The entry Worker also limits a native IPv6 /48's attempts together. | The address from the last entry of the configured header, or the connection's own without one, keyed the same way (IPv4, or the IPv6 /56), unhashed. With the header configured, a connection that lacks it or names no address is refused with 403 `Trusted client address unavailable` before the upgrade, and the connection-status probe answers the same. No /48 limit and no Pseudo IPv4 handling. | The key lives only in memory, so it needs no hash. The header is configurable because the server may sit behind any proxy; Pseudo IPv4 is a Cloudflare zone setting the proxy in front resolves. |
-| Connection caps (SPEC §6, Connections), `--max-connections`, `--limit.*connections*`, `--limit.admissions-per-ip-minute` | Cloudflare: 100 open sockets, 10 per IP, 6 per IP that are not signed in to an account, 3 per account, and 12 admissions per IP a minute, refused before the upgrade with HTTP 429 and `Retry-After`; also 4,000 admissions a day server-wide. | The same caps and admission rate by default, each a flag (0 is unlimited). A refused connection is upgraded, gets its `server` frame and a `retry_after` error without `id`, and is closed, as Go refuses at its cap; the connection-status probe answers 429 with `Retry-After` for the caps (not the admission rate, which it does not spend). An account past its cap gets `retry_after` for its `auth`. No daily admission budget. | A client sees the reason in the protocol instead of a hidden handshake failure. The daily admission budget guards Cloudflare's bill. |
-| Posting limits (SPEC §6, Posting), `--limit.*posts*` | Cloudflare: every logged change (message saves, edits, deletes, moves, reaction changes, room saves, name and profile changes) and every join or leave that changes membership is a post, charged to the poster (guests of one IP together, 5 a minute and 200 a day; an account 20 and 1,000; one holding any role 50 and 4,000), to its IP (30 and 2,000, raised to the trusted numbers for a trusted poster) and to the server (120 and 10,000). Its limiter rows are kept in SQLite, so a restart keeps them. | The same posts, rows, defaults and messages, each a flag (0 is unlimited). The rows are kept in memory, so a restart starts every poster's minute and day afresh. `--messages-per-minute` is gone. | Durable counts guard Cloudflare's bill across evictions; a self-hosted server restarts rarely. |
-| `ext:limits` (EXTENSIONS.md, SPEC §6), `--limit.room-lists-per-minute`, `--limit.uploads-per-*` | Cloudflare: listed in `capabilities`. `write` on every posting refusal of `message`, `reactions`, `room_join`, `room_leave` and `room_set`, none on `me`'s; `read` on history limits and on `room_list` past 6 a user a minute (the first `joined` listing after each sign-in free), with `Room listing limited`; `upload` on the daily upload counts (20 a user, 500 the server, charged for each new `upload` embed, `/avatar`, `/emoji add`) and on a full upload store. | The same categories, limits and messages, the limits as flags (0 is unlimited); `/server avatar` counts as an upload too. A full upload store evicts the oldest uploads instead of refusing, so it names no category. | The storage cap is this port's eviction (Uploads and `ext:media`). |
-| Frame limits and policy violations (SPEC §4, Framing; §4.2; §6, Connections), `--limit.frames-*`, `--limit.server-frames-per-minute`, `--limit.policy-violations` | Cloudflare: 60 frames a connection in a rolling minute (past it, close 1008 `Frame rate limit reached`), 120 an IP, reserved in leases of 10 (past it, close 1013), and 300 or 600 server-wide (past it a request gets `retry_after` `Demo is busy with too many requests` and a notification is dropped); 8 pending frames or 128 KiB a connection (close 1008); a daily frame budget; 3 `parse_error`, `invalid_request`, `invalid_params` or `too_large` within 60 seconds close with 1008 `Repeated policy violations`. | The same limits and close codes by default (600 server-wide, Cloudflare's Paid number), each a flag (0 is unlimited), with the server's refusal saying `Server is busy with too many requests`; no leases, no daily budget, and no pending-frame bound. | Each connection's frames are read one at a time and each runs to completion before the next is read, so at most one is ever pending. Leases and the daily budget save Cloudflare's SQL writes and bill. |
-| Request deduplication (§1.2; SPEC §8, Deduplication) | Cloudflare: every accepted mutating request is kept by `(user_id, request id)` for 24 hours as a SHA-256 of its method and canonical params, in SQLite, so a retry after a restart or an eviction is answered from it. | Accepted requests are kept by `(user_id, request id)` for 24 hours with a SHA-256 of the method and canonical params and the result; an account's (not a guest's, whose identity ends with its connections) are stored as `dedup` entries, so a retry after a restart replays the result. At most 1,024 a user are kept; past that the oldest are forgotten early. Reads (`history`, `room_list`) are not kept. | The bound keeps a flooding client's ids from growing the store without end. |
-| Status announcements (§4.5; SPEC §4.4, User status), `--limit.status-coalesce-seconds`, `--limit.offline-grace-seconds` | Cloudflare: a user's status changes that connections cause go to others at most once a minute, the latest winning; one a closed connection caused waits 60 seconds first, so a reload or reconnect shows nothing; a `me` change goes at once. `seen` is written at most once per 10 minutes. | The same coalescing and grace by default, each a flag of 0 to 60 seconds. `seen` is exact, as the protocol has it. | Cloudflare's `seen` granularity saves its SQL writes. |
-| History pages (§4.3; SPEC §6, Payload and query bounds), `--limit.*history*` | Cloudflare: 20 records a page by default and at most 50 (a larger `limit` is clamped), at most 256 KiB a reply with its envelope; per user 20 pages a minute after a burst of 60 and 3,000 a day, per IP 60 after 120 and 6,000, and 40,000 a day server-wide, refused with `retry_after` and the `read` category; a request that serves no page is not counted; one page in flight per connection, refused with `History request already in progress`. | The same sizes and limits by default, the limits as flags (0 is unlimited). No in-flight refusal. | A connection's frames run one at a time, each to completion, so a second page can never be in flight. |
-| `--email.sender http`, *extension* | Cloudflare has no email sign-in. Go sends codes only through SMTP or the log. | `--email.sender http` POSTs each sign-in email as JSON, `{"from", "to", "subject", "text"}`, to `--email.http-url` with each `--email.http-header` (`Name: value`, repeatable), such as Cloudflare Email Service's REST API with `Authorization: Bearer <token>`. A 2xx status is a delivery; any other fails the send. `from` is `--email.from`. | A homelab with a mail API account but no SMTP relay can still offer email sign-in and recovery. |
-| Guests (§3.2, §3.3), `--guest.posting` | Cloudflare: guests only read unless `GUEST_POSTING=true`, and a guest's `you` says so with `ext.permissions.write: false`. Guest `auth` ignores a requested `name` and `user_id`: the guest is `guest_<n>` named `Guest <n>`. `me` with any `name` is `denied` (`Only registered users may change their name`), and so is `me` with `ext` keys, whether or not guests post. | Guests only read unless `--guest.posting` (`[guest] posting = true` in TOML). A read-only guest's `message`, `reactions`, `room_set`, `room_join` and `room_leave` are `denied` with `Guests can only read here; sign in to post or join rooms` before they run (every guest's `push_register` and `push_unregister` are `denied` as Push registration says), and so is every command but `/help`, which then lists only itself; its `activity` is dropped. Guest `auth` ignores a requested `name` and `user_id` as Cloudflare does (a malformed `user_id` is still `invalid_params`). `me` with a `name` (`Only registered users may change their name`) or `ext` (`Only registered users may change their profile`) is `denied` from a guest, as on Cloudflare. | apron-web takes the refused name as declined and does not show it. |
-| `--history.retention` (`history_log_id`, §4.2, §4.3.3), *extension, off by default* | No such flag: every record is kept, and `history_log_id` is always the room's creation record. | With `--history.retention <duration>` (`[history] retention = "168h"` in TOML; Go's duration syntax, empty or `0` keeps everything, a negative or unparsable one stops the server), the hourly sweep that forgets expired push registrations, and every start, discard the records logged more than the window ago, as apron-server-cloudflare's rolling history does. A `log_id` is its commit time in milliseconds (or later), so the discarded records are a prefix of the server-wide log, and the server keeps a floor F, one past the newest discarded record, in the store's counters (`history_floor`) so it never decreases across restarts. Each room's `history_log_id` is then `max(F, creation log_id)` while that is at most its `latest_log_id`, and `null` once its whole log is gone; `latest_log_id` stays the room's historical head, and history results report the same boundaries, without `room_id` too. A message whose latest snapshot is discarded goes with its hosted uploads and link previews, files included; one an edit kept keeps only its retained snapshots, and loses each reaction set whose record was discarded (a move re-logs its sets, keeping them). A discarded message, a removed thread, and a log range below F then behave as if they never existed: `message`, `reactions`, `history` and `room_join` answer `invalid_params` (and `activity` naming one is dropped as invalid), except that a save may resubmit the `reply_to` it already has after its target goes, so old replies stay editable. A thread (a room with `parent_room_id`) whose whole log is gone and which has no threads left under it is removed: everyone who could see it gets `room_update` `left` with its `room_id`, and its users' joins, mutes and pings of it are forgotten. A private room goes the same way as a thread; `general` and the top-level rooms admins and mods make stay. A thread or private room also goes when its last member leaves, with the messages in it and its threads, and nobody is told, as on Cloudflare. Every other room whose `history_log_id` moved goes to its members and its parent's as `room_update` `updated`, after the `left`s. A `room_list` delta (`latest_log_id`) from before the latest thread removal is answered with a full listing, without `left`, since a delta cannot name a removed room (§4.2.1 says it should). New `log_id`s keep growing past every one issued, even after the whole log is gone, since `last_id` is kept apart from the records. Memberships are discarded like any record, without the full-member record §4.3.3 asks for first; apron-server-cloudflare skips it too, and `room_list` and `room_update` carry current members. Read cursors, avatars, accounts, sessions and push registrations are not history and stay. Differences from apron-server-cloudflare: it expires by a separate nondecreasing commit time and cleans up daily for a 7-day window, where this server uses `log_id` and sweeps hourly; it tells only a removed thread's members, where this server tells everyone who could see it; its private rooms have no threads, where here a private room with live threads waits for them; and it deletes uploads through bucket lifecycle rules, where here a file goes with its message. The `server` frame's `welcome` is the operator's `--welcome` as before, so an operator mentions the window there. Store: `history_floor` and `rooms_removed_at` in the counters entry and `log_id` in each stored reaction set are new members, which Go's decoder skips; discarded records, messages, rooms and embeds are deleted entries. A Go `aprond` opening such a store serves the retained history with its creation-based `history_log_id`, which can point below the oldest retained record. `--help` and `--print-config` gain a `History` group after `Guests`. | A public demo cannot keep everything anyone posts forever; apron-server-cloudflare keeps 7 days, and the protocol defines how a server that discards history says so (§4.3.3). Off by default so the server stays identical to Go. |
-| Push registration (§4.9) | Cloudflare: kind `webpush` only, from registered users (a guest's `push_register` and `push_unregister` are `denied` `Sign in to receive push notifications`), at most 10 `push_register` requests a user a minute across connections, refused ones included (`retry_after` `Push registrations limited`). The endpoint's host must be one `PUSH_HOSTS` lists, host names or `*.` suffixes or a standalone `*`, by default `fcm.googleapis.com`, `*.push.services.mozilla.com`, `web.push.apple.com`, `*.push.apple.com` and `*.notify.windows.com` (`invalid_params` `push service not allowed here`), and the list is checked again before each push. A user keeps at most 5 registrations, a sixth replacing the least recently registered, and one not registered again within 7 days is neither pushed to nor kept. A push's `body.text` is cut to 200 code points, the last `…`. A guest's messages wake no one. | The same rules, texts and default list, with `--push.hosts` (repeatable or comma-separated). Kind `relay` stays, as an extension: its host must be listed in `--push.hosts` like any other, so a self-hosted relay works once its host is added. The list is checked again before each wake and badge push. `--push.allow-insecure` (tests only) still admits `http` and internal addresses, but not hosts the list leaves out. | `relay` carries native iOS pushes (Ladle) through an operator's relay; listing its host keeps the server from POSTing to arbitrary hosts. |
-| Wake scopes and unread counts (§4.9), *extension* | Cloudflare: scopes `mentions`, `replies`, `private` and `joined`, with `joined` only for an account holding `admin` or `mod` (no bot): a registration from anyone else drops it, a wake checks the role as it is then, and the `server` frame's `push.wake` lists `joined` only to a connection whose user may wake for it, so a sign-in or role change that changes this sends that connection a new `server` frame (a moderator's sign-in right after its result; a role change after `user` `you`). No `relay` kind, `badge` scope or `unread` count. | The same `joined` rules and frames. `push.wake` also lists `badge`, `push.relay` is `{}`, and every payload carries `unread`, the user's count of messages after their read positions; a `badge` registration of kind `relay` gets a low-urgency push without a message on each change of that count. | Native iOS badges (Ladle) need the count and a relay; browsers ignore both. |
-| Push wakes (§4.9) | Cloudflare: a new message wakes the replied-to author, the users it mentions, a private room's members and moderators who kept `joined`, in that order, at most 32 considered and 10 woken (`wakesPerMessage`), counting only users with a live registration for why they qualify on an allowed host. A wake waits `PUSH_DELAY_SECONDS` (30, 0 to 60) and then goes, with the message as it is then (not at all once deleted; an edit keeps only mentions it still has and a reply while it still replies), to those not attended: `idle: false` drops a user from waiting wakes, and posting in a room drops their waiting and held wakes for that room. A user is woken at most once a minute per room (`coalesceSeconds`), once in 5 minutes when pushed only for `joined`. A user attended when a message came is held instead, at most 8 a user and 10 minutes back, never for `joined`; when their last attended connection goes idle, what came after the time its `idle` dates back to is pushed as one push, the newest message that still wakes them, through the same wait. Daily allowances: 5000 pushes a day for the server, 200 per sender and 100 per recipient (20 for `joined`). Wakes are held in memory, and a restart drops waiting ones; coalescing times are stored. | The same order, bounds, wait (`--push.delay`, a duration from 0 to 60s, default 30s), edit and delete rules, drops, coalescing windows and held wakes. An edit that adds mentions still wakes the users it adds, as before. Only users who hold a registration when a message comes are considered, so one who registers later is neither woken nor held for it, where Cloudflare holds a wake for any attended user. The coalescing times are kept in memory, so a restart forgets them, and the held wakes are kept per user rather than per connection. No server, sender or recipient allowances: each user still gets at most 1000 pushes a UTC day. | The allowances bound a metered platform's spend; this server has no meter, and the per-user cap already bounds a flood. |
-| Frames from a closing connection | `closeWithError` (at shutdown and at the connection cap) queues the error and drops later outgoing frames, but the read loop keeps running the frames the client sends until the writer has drained and stopped the socket: a request in that window takes effect, a `message` is posted and broadcast to others, though its reply is dropped. | Once a connection-level error is queued, `process_frame` ignores every frame the connection sends, `auth` included, and an `auth` already read is `denied`. At shutdown, a request sent after the error was queued has no effect. | A replaced device or bot token must stop working at once (`/invite-device`, `/invite-bot`), and the close waits behind up to 128 queued batches, each written with a 10-second timeout, so a slow reader could keep acting on a revoked token for minutes. Every reply would be dropped anyway, so a client sees no difference except effects that, in Go, would follow a close it was already sent. |
-| `aprond --help` width | go-flags wraps help to the terminal's width, read with an ioctl on standard input, and to 80 columns when standard input is not a terminal. | Always 80 columns. | rust-stdlib exposes no terminal-size call, and this crate forbids `unsafe`. Output is byte-identical to Go's whenever standard input is not a terminal. |
-| TOML syntax errors | `Failed to load <path>: ` followed by BurntSushi/toml's message, such as `toml: line 1 (last key "x"): expected ...`. | `Failed to load <path>: toml: ` followed by the `toml` crate's message. | The decoder is a different library. Exit status and the `Failed to load` prefix match; `unknown setting` and `setting "...": ...` errors match exactly. |
-| TOML dates in the config file | A date value reaches the option as Go's `time.Time.String()`, such as `1979-05-27 07:32:00 +0000 UTC`. | It reaches the option as its TOML text, such as `1979-05-27T07:32:00Z`. | No option takes a date; a date only matters for a string option, which then holds different text. |
-| `/debug/pprof/` | Go's runtime profiles (heap, goroutine, CPU, trace). | The same routes from rust-stdlib's `net/http/pprof`; the index and `cmdline` work, and the runtime profiles, `profile` and `trace` answer that the profile is not available. | Rust has no Go runtime to profile. |
-| `/debug/vars` | `cmdline` and `memstats`. | `cmdline` only. | rust-stdlib's `expvar` has no Go memory statistics to publish. |
-| ACME certificates for clients without ECDSA | autocert issues an RSA certificate (cache name `<domain>+rsa`) for a ClientHello that lists no ECDSA signature scheme, P-256 curve, or ECDHE-ECDSA suite. | Every client gets the ECDSA P-256 certificate; a client without ECDSA fails the handshake. | Scope: the port issues ECDSA only. rust-stdlib-crypto has RSA, so the RSA path can be added; it serves only clients that support no ECDSA at all. A Go-written `+rsa` cache entry is ignored. |
-| Non-ASCII TLS server names | autocert converts the SNI name with `idna.Lookup.ToASCII`. | A name that is not ASCII fails with `acme/autocert: server name contains invalid character`. | TLS carries A-labels (RFC 6066 §3), so a conforming client never sends one. |
-| ACME failure text | When no challenge type is left, autocert's error names the authorization and domain only. | The same text, followed by ` (last: <the CA's error for the last challenge>)`. | The CA's reason is what an operator needs when reading the TLS handshake error in the log. |
-| ACME time bounds | One five-minute context bounds `GetCertificate`, every request to the CA included. | Polling stops at a five-minute deadline and each request to the CA times out after 30 seconds. | rust-stdlib's HTTP client takes a timeout rather than a context. |
+- [Deviations from apron-server-cloudflare](#deviations-from-apron-server-cloudflare)
+  lists where both servers do the same job and this one does it
+  differently.
+- [Extensions and choices where Cloudflare is silent](#extensions-and-choices-where-cloudflare-is-silent)
+  lists what apron-server-cloudflare does not have. apron-server-go is the
+  fallback there, and its behavior is named where this server differs from
+  it.
+
+When this server matches apron-server-cloudflare in an area, delete that
+section. A client-visible difference that is not listed here is a bug.
+
+## Deviations from apron-server-cloudflare
+
+### `server.agent`
+
+**Reference.** apron-server-cloudflare sends `apron-cloudflare-demo/9`.
+
+**This server.** Sends `apron-rust/9`.
+
+**Why.** The agent names the implementation. Clients key nothing on it.
+`apron` carries the protocol version.
+
+### Display names (§3.3)
+
+**Reference.** apron-server-cloudflare trims a name and refuses one longer
+than 80 code points or 320 bytes with `too_large`. It does not normalize
+the name.
+
+**This server.** Drops Cc, Cf, Co and Cs characters, maps Zs to a space,
+collapses and trims spaces, and cuts the name to 64 code points instead of
+refusing it. It does not apply NFKC or the PRECIS FreeformClass check, so a
+name with fullwidth letters is kept as sent.
+
+**Why.** The cleanup follows the PRECIS Nickname profile (RFC 8266) that
+apron-server-go applies. rust-stdlib has no Unicode normalization, and a
+third-party crate needs the owner's approval. The Go test
+`TestNamesAreNormalized` is ignored for this reason.
+
+### Account user_ids from a guest's passkey registration (§3.2, §3.3.3)
+
+**Reference.** apron-server-cloudflare gives a guest that registers a
+passkey a new account, `<slug>_<4 digits>` or `u_<random>`, with an NFKD
+slug of the requested name (auth.ts `userIdSlug`, `candidateUserIdFor`).
+It keeps guest memberships out of the log, so the rooms see no guest
+leaves.
+
+**This server.** Picks the user_id the same way, with these differences:
+
+- The slug skips NFKD, so `Zoë Ångström` gives `zo_ngstr_m` here and
+  `zoe_angstrom` on Cloudflare. A fullwidth letter is a separator.
+- The slug also refuses `user`, the prefix of email accounts.
+- The taken check ignores case and covers room names and `--role` holders.
+  A renamed or purged user_id stays in `used_ids`, so it is taken too.
+- A name over 64 code points is cut, not refused with `too_large`.
+- The guest's leaves are logged and go to the rooms' other members before
+  the account's joins, each join with the account's status. Everyone in
+  those rooms then gets `user` `{new, old}`.
+- A passkey added to an existing account names the user in the creation
+  options as apron-server-go does. Cloudflare's `user.name` is the
+  account's user_id.
+- What a Cloudflare guest cannot hold (mutes, pushes, avatar) stays with the
+  retired guest.
+
+Accounts made before 2026-10-28 keep `guest_<n>` user_ids until an admin
+moves them with `/rename` (docs/PORT.md, Migrating a guest_<n> account).
+
+**Why.** The owner chose Cloudflare's user_ids on 2026-10-28. The
+differences come from logging guest memberships and from the missing
+Unicode normalization. Two Go Playwright tests fail by design
+(`tools/interop/expected-failures.md`).
+
+### Guests (§3.2, §3.3)
+
+**Reference.** apron-server-cloudflare denies a read-only guest's writes
+with `Guests can only read here; sign in with a passkey to post or join
+rooms`, and a guest's `me` with `ext` with `Only registered users keep
+ext`.
+
+**This server.** Says `Guests can only read here; sign in to post or join
+rooms` and `Only registered users may change their profile`. The switch is
+`--guest.posting` (`[guest] posting = true`) instead of `GUEST_POSTING`. A
+malformed requested `user_id` is still `invalid_params`.
+
+**Why.** The texts predate the reference.
+
+### Passkey attestation formats
+
+**Reference.** apron-server-cloudflare verifies registrations with
+`@simplewebauthn/server`, which verifies every attestation format that
+library supports.
+
+**This server.** Verifies `none` and `packed` self attestation only. The
+other formats fail with `Passkey verification failed`.
+
+**Why.** Both servers request no attestation (`attestationType: "none"`),
+so a conforming client sends `none` or self attestation. Porting the X.509,
+TPM and SafetyNet checks would serve only clients that ignore the
+preference (docs/PORT.md).
+
+### `/passkeys` on older passkeys
+
+**Reference.** apron-server-cloudflare always knows when a passkey was
+added and last used.
+
+**This server.** Shows `unknown` for both days of a passkey stored before
+these times were kept.
+
+**Why.** The times did not exist when those passkeys were stored.
+
+### Admin token (§3.2), `--admin-token-file`
+
+**Reference.** apron-server-cloudflare reads the Worker secret
+`APRON_ADMIN_TOKEN`.
+
+**This server.** Reads the token at start from the file
+`--admin-token-file` names, else from `$APRON_ADMIN_TOKEN`, without
+surrounding whitespace. A token shorter than 16 bytes stops the server.
+Only its SHA-256 is kept. If the store already holds a different user
+`admin`, made before the user_id was reserved, the token fails with
+`internal_error`.
+
+**Why.** A file keeps the token out of `--print-config`. The length check
+guards a token anyone on the internet may try.
+
+### `/invite-token` (§4.1, §3.2)
+
+**Reference.** apron-server-cloudflare's notice links to the URL the
+connection reached.
+
+**This server.** Links to the `/ws` endpoint under `--public-url`, or the
+first `--tls.domain`. Without one, the notice has no link line. A user_id
+that `--role` grants is free for `/invite-token`, and the new account gets
+the granted roles.
+
+**Why.** This server builds links one way for every command, from
+configuration and not from the request's `Host`, so it never links to an
+address it may not be reachable at.
+
+### `/invite` and `server.signup` (§3.2, §4.1, Appendix B)
+
+**Reference.** apron-server-cloudflare lists `signup` as `webauthn` and
+`token`, refuses a sign-up `name` over the limit with `too_large`, and
+reserves storage budget before each sign-up.
+
+**This server.** `signup` lists `webauthn` where passkeys are offered,
+`email` where email sign-in is on, and always `token`. A long `name` is cut.
+The link follows `--public-url`, as for `/invite-token`. `server.welcome`
+does not mention invite tokens. There is no storage budget.
+
+**Why.** Email sign-in exists only here. A sign-up runs as one step under
+the state lock, so uses never exceed the count without a budget.
+
+### `/invite-device` (§4.1, §3.2)
+
+**Reference.** apron-server-cloudflare closes a replaced token's
+connections with close code 1008 and deletes all of the account's push
+registrations. Its link names the URL the connection reached. A
+connection already signed in that presents a device token is `denied`.
+
+**This server.** Closes them as described in
+[Closing a connection](#closing-a-connection). The link follows
+`--public-url`, as for `/invite-token`. A connection already signed in
+may present a device token, which switches it as a session token would.
+A replacement deletes only the push registrations made under the old
+token. A registration stored before the server recorded the token is kept.
+
+**Why.** A native client (the iOS app Ladle) signs in with these tokens.
+Keeping the account's other devices' registrations keeps their pushes
+working.
+
+### `/invite-bot` and bot users (§4.1, §3.2, §3.3)
+
+**Reference.** apron-server-cloudflare caps registrations, ends the token
+notice with a `Say hello when you join` line, closes a replaced token's
+connections with 1008, and makes a second bot, `bot_<new>`, for an owner
+renamed with `/rename`.
+
+**This server.**
+
+- No registration caps. One bot per account bounds the bots.
+- No `Say hello` line, so bots do not greet rooms.
+- A replaced token's connections close as described in
+  [Closing a connection](#closing-a-connection).
+- The `Connect to` line names the `/ws` endpoint under `--public-url`, and
+  reads `Connect to this server's WebSocket URL` without one.
+- A bot belongs to its owner by an owner field, not by its name, so it
+  keeps `bot_<old>` after a rename. A later `/invite-bot` gives that bot a
+  new token.
+- If `bot_<owner>` is held by someone else, a user_id taken before the
+  prefix was reserved, `/invite-bot` is `denied`.
+
+**Why.** Finding bots by owner means a purge after a rename cannot leave a
+bot whose token still signs in.
+
+### Idle bot sweep (§3.2)
+
+**Reference.** apron-server-cloudflare runs the sweep from its alarm at most
+daily and closes a swept bot's connections with 1008.
+
+**This server.** Runs it from the hourly maintenance thread. A swept bot's
+connections get a connection-level `denied` error (`Signed out after a week
+without signing in or posting`) and close. Its push registrations go too. A
+bot stored before activity was kept counts as active from the first start
+that keeps it.
+
+**Why.** The hourly thread already exists. The close follows
+[Closing a connection](#closing-a-connection).
+
+### Closing a connection
+
+**Reference.** apron-server-cloudflare closes a revoked, purged or swept
+connection with WebSocket close code 1008 and a reason.
+
+**This server.** Queues a connection-level error frame (no `id`, code
+`denied`, the reason as its message) and then closes the TCP connection
+without a close frame. Policy closes (frame rate, repeated violations,
+authentication timeout) still use close code 1008. Once the error is
+queued, the server ignores every frame the connection sends, and an `auth`
+already read is `denied`.
+
+**Why.** The error frame tells the client why in the protocol. A close
+handshake would wait on a peer that may not be reading, behind up to 128
+queued batches. Ignoring later frames means a revoked token stops working
+at once, even for a request already read.
+
+### Roles (§3.3), `--role`
+
+**Reference.** apron-server-cloudflare stores roles with the identity and
+changes them only with `/admin` and `/role`.
+
+**This server.** Also seeds roles from `--role role=user_id` or
+`role=email`. Each grant is given once, when the server starts or the
+account is made, and the grants given are remembered, so a role an admin
+took away does not come back at the next restart. `--role moderator=…`
+grants `mod`. A malformed role name stops the server.
+
+**Why.** `--role` predates the reference.
+
+### `/admin`, `/role`, `/kick` and `/help` (§4.1, §3.3)
+
+**Reference.** apron-server-cloudflare's `/help` lists `/invite-bot`,
+`/invite-device`, `/avatar`, `/passkeys`, `/admin`, `/role`, `/kick`, then
+the other admin commands. Its `/role` line names `threader` and says any
+role raises posting limits.
+
+**This server.**
+
+- `/help` lists `/avatar`, `/invite-device`, `/invite-bot`, `/passkeys`,
+  `/kick`, `/admin`, `/role`, then the other admin commands, with its own
+  texts for `/avatar` and `/invite-bot`.
+- The `/role` line names `admin`, `mod`, `bot` and `friend`, and leaves out
+  `threader` and posting limits.
+- A user with an email address cannot be made a bot (`denied`, `A bot signs
+  in with a token and holds no email address; this user has one`).
+
+**Why.** The earlier commands kept their order and texts. Email addresses
+exist only here.
+
+### `/rename` (§4.1, §3.3)
+
+**Reference.** apron-server-cloudflare refuses the renamed user's sessions
+when they are presented, and makes a second bot for the new user_id.
+
+**This server.**
+
+- Deletes the user's sessions at once. A client sees the same `Session
+  expired; sign in again`.
+- Keeps the old user_id in `used_ids`, which also takes it from
+  `/invite-token` and passkey registration, ignoring case.
+- Frees a user_id that `--role` grants, and the renamed user then gets the
+  granted roles.
+- Moves the email sign-in address and pending email proposals.
+- Keeps timed mutes running under the new id.
+- Keeps the bot as `bot_<old>` with its token, owned by the new id (see
+  [`/invite-bot`](#invite-bot-and-bot-users-41-32-33)).
+
+**Why.** Sessions are found by user here, so deleting them is one step.
+The bot follows its owner so that `/purge <new>` removes it.
+
+### `/purge` (§4.1)
+
+**Reference.** apron-server-cloudflare closes the user's connections with
+1008 `Removed by an admin` and counts uploads in its reply.
+
+**This server.**
+
+- Closes them as described in
+  [Closing a connection](#closing-a-connection), with the message
+  `Removed by an admin`.
+- Deletes the user's sessions at once, so a resume is `denied` as on
+  Cloudflare.
+- Keeps the user_id in `used_ids`.
+- Leaves link previews and streams out of the upload count.
+- Removes the user's email sign-in address and pending proposals.
+- Recounts unread messages for everyone, as retention does.
+- Removes every bot the user owns, found by owner and not by the name
+  `bot_<user_id>`, so a renamed user's bot goes too. A user who only holds
+  the name `bot_<user_id>` stays.
+
+**Why.** Finding bots by owner means a purge after a rename cannot leave a
+bot whose token still signs in. The live check (`tools/deploy/live-check.mjs`)
+uses `/purge` to remove its `livecheck_` accounts.
+
+### `/toggle` (§4.1, §4.5, §4.7, §4.8)
+
+**Reference.** apron-server-cloudflare offers `/toggle uploads` only with
+uploads configured and `/toggle presence` only with push configured.
+
+**This server.** Always offers both, because it always takes uploads and
+always offers `status`. Turning presence on sends each user's shown status
+to those who share a room with them as `user` `new`.
+
+**Why.** The features exist in every configuration here.
+
+### `/server` and `server.title`, `description` and `avatar` (§3.1, §4.1)
+
+**Reference.** apron-server-cloudflare sets the defaults with
+`SERVER_TITLE`, `SERVER_DESCRIPTION` and `SERVER_AVATAR`, limits the title
+to 80 code points, and stores the avatar under `e/` on its media origin.
+
+**This server.** Takes the defaults from `--server.title`,
+`--server.description` and `--server.avatar` (`[server]` in TOML) and
+names those flags in its notices. The title limit is 64 code points. The
+avatar is an upload served from `/files/` on this server's origin with the
+same cache header. With uploads off, `/server avatar` is refused as
+`/avatar` is, and it counts as an upload as `/avatar` does.
+
+**Why.** Names here are at most 64 code points. aprond serves its own
+uploads.
+
+### Custom emoji and `/emoji` (EXTENSIONS.md `ext:emoji`)
+
+**Reference.** apron-server-cloudflare publishes the catalog to its media
+bucket at `e/c/<SHA-256>.json`. A new key whose write finishes after the
+catalog filled fails with 410, saying the upload is no longer wanted. It
+applies a write that finishes after its sender lost the role.
+
+**This server.**
+
+- Serves the catalog at `/emoji/<SHA-256>.json` on the connection's base
+  URL (`--public-url` where set), and the images from `/files/` with the
+  same cache header.
+- The 410 says `This server keeps at most <n> custom emoji; remove one
+  first`.
+- `/emoji remove :name:` also drops every add of that key still on its way,
+  whose write URL then answers 404.
+- A write that finishes after its sender lost every one of the roles fails
+  with 403 (`/emoji needs one of the roles admin, mod, friend`).
+- With uploads off, `/emoji add` is refused with `Uploads are turned off
+  here`, and it counts as an upload (see
+  [`ext:limits`](#extlimits-extensionsmd-spec-6)).
+- The limits are not flags.
+
+**Why.** aprond serves its own uploads. A removal or a role taken away is
+final, not undone by an image already on its way.
+
+### Rooms and threads (§4.2.4)
+
+**Reference.** apron-server-cloudflare refuses a nested thread with
+`Threads cannot be nested on this demo`. A private room has no threads. An
+untitled thread is `Thread`. A guest's departure removes nothing.
+
+**This server.**
+
+- Says `Threads cannot be nested`.
+- A private room may have threads, private or not, which count against the
+  100 public rooms. No message moves into or out of a private room, its
+  threads or a private thread.
+- An untitled thread takes the first line of its description, else
+  `Thread`.
+- A guest's retirement (its last connection closed, its connection signed
+  in as someone else, or a restart) logs its leaves but removes no thread
+  they empty. The thread stays in `not_joined` until someone leaves it or
+  its log expires.
+
+**Why.** Private threads and titles from descriptions predate the
+reference, and apron-web shows them. A page reload in apron-web closes the
+guest's connection and signs in a new guest, so removing the thread then
+would take its card away from everyone.
+
+### Memberships of others (§4.2.2)
+
+**Reference.** apron-server-cloudflare lets an allowed user add someone to
+a room they have not joined.
+
+**This server.** The adder must have joined the room (`Join <title> before
+adding others to it`). Adding someone to a private room's thread takes
+adding them to the room first.
+
+**Why.** Private threads exist only here. The join rule predates the
+reference.
+
+### Reaction entries (§4.7)
+
+**Reference.** apron-server-cloudflare qualifies emoji with the runtime's
+`\p{RGI_Emoji}` (emoji.ts `qualifyEmoji`) and does not rewrite stored
+sets.
+
+**This server.** Qualifies from a table of the fully qualified sequences
+that hold U+FE0F, generated from Unicode's `emoji-test.txt` by
+`tools/emoji/generate.mjs` into `src/server/emoji_qualified.txt` (Unicode
+18.0). It agrees with Cloudflare's function on all 5,244 sequences of that
+file under Node 22. Reaction sets stored before this load qualified and are
+saved so. Records logged before 2026-10-29 keep the form they were sent in,
+so `history` may return one unqualified (docs/PORT.md, 2026-10-29).
+
+**Why.** A table keeps the result independent of the runtime's Unicode
+data. The log is append-only, so old records are not rewritten. Clients
+compare entries without U+FE0F (§4.7).
+
+### `server.welcome` and the welcome notice (§3.2, §3.5)
+
+**Reference.** apron-server-cloudflare's `welcome` is `general`'s
+description, else a generated summary. Its notice gives the deploy tag.
+
+**This server.**
+
+- `--welcome` (`welcome` in TOML), when set, comes before `general`'s
+  description.
+- The notice gives the crate version.
+- The summary names email sign-in when it is configured, and retention
+  only when `--history.retention` is set.
+- On a connection not offered passkeys, the summary says where they work,
+  and the notice points at email or says only `Guests can read.`.
+- A connection refused for capacity gets no notice.
+
+**Why.** `--welcome` predates the reference and keeps a deployment's text
+fixed. A Rust build has no deploy tag.
+
+### History retention (§4.2, §4.3.3), `--history.retention`
+
+**Reference.** apron-server-cloudflare always keeps rolling history: 7
+days, cleaned daily, on Workers Paid. It expires by a commit time kept
+apart from `log_id`, tells only a removed thread's members, and deletes
+uploads through bucket lifecycle rules (7 days for attachments, 30 for
+avatars).
+
+**This server.**
+
+- Keeps everything by default. `--history.retention <duration>`
+  (`[history] retention = "168h"`, Go duration syntax) turns retention on.
+  An empty or `0` value keeps everything. A negative or unparsable value
+  stops the server.
+- Expires by `log_id`, which is the commit time in milliseconds or later,
+  in the hourly sweep and at every start. The floor is stored as
+  `history_floor` and never decreases.
+- A removed thread or private room goes to everyone who could see it as
+  `room_update` `left`.
+- A private room with live threads waits for them.
+- A message's files go with the message. Avatars and accounts never
+  expire.
+- A `room_list` delta from before the latest removal gets a full listing,
+  since a delta cannot name a removed room.
+
+**Why.** A self-hosted server may want to keep everything, so retention is
+opt-in. `log_id` already carries the commit time here.
+
+### History pages (§4.3; SPEC §6, Payload and query bounds), `--limit.*history*`
+
+**Reference.** apron-server-cloudflare refuses a second page in flight on
+one connection with `History request already in progress`.
+
+**This server.** Has the same sizes and limits by default, as flags (0 is
+unlimited). It has no in-flight refusal.
+
+**Why.** A connection's frames run one at a time, each to completion, so a
+second page can never be in flight.
+
+### Uploads and `ext:media` (EXTENSIONS.md, §4.8)
+
+**Reference.** apron-server-cloudflare's types and sizes are fixed by its
+plan, and `ext.media.origins` names its media bucket. It refuses an
+attachment's declared type before the body and leaves the write open.
+
+**This server.**
+
+- `--upload.max-mb` (default 5), `--upload.max-avatar-kb` (default 256)
+  and `--upload.type` (repeatable, a MIME type, `type/*` or `*/*`) change
+  them. A type the sniffer does not know is taken from its declared type.
+- No `origins`: uploads are served from this server's own origin.
+- An attachment's declared type is checked once the body is read, and a
+  refusal fails the write. Avatar, custom emoji and server avatar writes
+  are refused before the body, as on Cloudflare.
+
+**Why.** A self-hosted server may want other sizes or files.
+
+### `ext:permissions` (EXTENSIONS.md)
+
+**Reference.** apron-server-cloudflare gives an owner's bot `write: false`
+while guests only read.
+
+**This server.** Gives an owner's bot `{}`.
+
+**Why.** A bot writes on this server whether or not guests may.
+
+### Frame and field sizes (§1, §1.1)
+
+**Reference.** apron-server-cloudflare bounds frames at 16 KiB, JSON at 8
+levels and 2048 values, request ids at 128 bytes and `body.text` at 4 KiB.
+It also bounds message snapshots at 8 KiB, user `ext` at 512 bytes and room
+fields at 2 KiB.
+
+**This server.** Has the same frame, JSON, id and text bounds by default,
+each a flag (`--frame.max-bytes`, `--frame.max-text-bytes`,
+`--frame.max-depth`, `--frame.max-nodes`, `--frame.max-id-bytes`). It has
+no snapshot bound. A message's `ext` is bounded at 64 KiB, and a profile's
+`ext`, a room's `ext` and a room description at 16 KiB each. Only a raised
+`--frame.max-bytes` reaches them.
+
+**Why.** Cloudflare sizes its field bounds to its Durable Object budgets.
+The frame bound already caps every field.
+
+### Client address (SPEC §5, IP key), `--client-ip-header`
+
+**Reference.** apron-server-cloudflare reads `CF-Connecting-IP` (with
+`CF-Connecting-IPv6` for Pseudo IPv4), keys by IPv4 or the IPv6 /56, stores
+the key hashed, and also limits a native IPv6 /48.
+
+**This server.** Reads the last entry of the configured header, or the
+connection's own address without one, and keys it the same way, unhashed.
+With the header configured, a connection that lacks it is refused with 403
+`Trusted client address unavailable`. There is no /48 limit and no Pseudo
+IPv4 handling.
+
+**Why.** The key lives only in memory, so it needs no hash. The server may
+sit behind any proxy.
+
+### Connection caps (SPEC §6, Connections)
+
+**Reference.** apron-server-cloudflare refuses a connection past its caps
+before the upgrade with HTTP 429 and `Retry-After`, and has a daily
+admission budget of 4,000.
+
+**This server.** Has the same caps and admission rate by default, each a
+flag (`--max-connections`, `--limit.*connections*`,
+`--limit.admissions-per-ip-minute`, 0 is unlimited). A refused connection
+is upgraded, gets its `server` frame and a `retry_after` error without
+`id`, and is closed. The connection-status probe answers 429 with
+`Retry-After` for the caps. An account past its cap gets `retry_after` for
+its `auth`. There is no daily admission budget.
+
+**Why.** A client sees the reason in the protocol instead of a failed
+handshake. The daily budget guards Cloudflare's bill.
+
+### Posting limits (SPEC §6, Posting), `--limit.*posts*`
+
+**Reference.** apron-server-cloudflare keeps its limiter rows in SQLite, so
+a restart keeps them.
+
+**This server.** Has the same posts, tiers, defaults and messages, each a
+flag (0 is unlimited). The rows live in memory, so a restart starts every
+poster's minute and day afresh.
+
+**Why.** Durable counts guard Cloudflare's bill across evictions. A
+self-hosted server restarts rarely.
+
+### `ext:limits` (EXTENSIONS.md, SPEC §6)
+
+**Reference.** apron-server-cloudflare refuses an upload when its store is
+full, with the `upload` category.
+
+**This server.** Evicts the oldest uploads instead, so a full store names
+no category. `/server avatar` counts as an upload. The limits are flags
+(`--limit.room-lists-per-minute`, `--limit.uploads-per-*`, 0 is
+unlimited).
+
+**Why.** Eviction is this server's storage cap (see
+[Uploads](#uploads-and-extmedia-extensionsmd-48)).
+
+### Frame limits and policy violations (SPEC §4, §6)
+
+**Reference.** apron-server-cloudflare reserves IP frames in leases of 10,
+has a daily frame budget and a bound of 8 pending frames or 128 KiB, and
+refuses a request at the server-wide limit with `Demo is busy with too many
+requests`.
+
+**This server.** Has the same limits and close codes by default (600
+server-wide, Cloudflare's Paid number), each a flag (`--limit.frames-*`,
+`--limit.server-frames-per-minute`, `--limit.policy-violations`, 0 is
+unlimited). The refusal says `Server is busy with too many requests`. There
+are no leases, no daily budget and no pending-frame bound.
+
+**Why.** A connection's frames are read one at a time and each runs to
+completion, so at most one is pending. Leases and the daily budget save
+Cloudflare's SQL writes.
+
+### Request deduplication (§1.2; SPEC §8)
+
+**Reference.** apron-server-cloudflare keeps every accepted mutating
+request for 24 hours in SQLite, as a SHA-256 of its method and canonical
+params.
+
+**This server.** Keeps the same key and hash with the result. It stores an
+account's entries as `dedup` store entries, so a retry after a restart
+replays the result. A guest's live only in memory, since its identity ends
+with its connections. At most 1,024 a user are kept, and past that the
+oldest go early. Reads (`history`, `room_list`) are not kept.
+
+**Why.** The bound keeps a flooding client's ids from growing the store
+without end.
+
+### Status announcements (§4.5; SPEC §4.4)
+
+**Reference.** apron-server-cloudflare writes `seen` at most once per 10
+minutes.
+
+**This server.** Has the same coalescing and grace by default, each a flag
+of 0 to 60 seconds (`--limit.status-coalesce-seconds`,
+`--limit.offline-grace-seconds`). `seen` is exact.
+
+**Why.** Cloudflare's granularity saves its SQL writes. The protocol has
+`seen` exact.
+
+### Push wakes (§4.9)
+
+**Reference.** apron-server-cloudflare holds a wake for any attended user,
+keeps coalescing times in storage, holds wakes per connection, and has
+daily allowances: 5,000 pushes for the server, 200 per sender and 100 per
+recipient (20 for `joined`).
+
+**This server.** Has the same order, bounds, wait (`--push.delay`, 0 to
+60s, default 30s), edit and delete rules, drops, coalescing windows and
+held wakes, with these differences:
+
+- An edit that adds mentions wakes the users it adds.
+- Only users who hold a registration when a message comes are considered.
+- Coalescing times live in memory, so a restart forgets them.
+- Held wakes are kept per user.
+- No server, sender or recipient allowances. Each user gets at most 1,000
+  pushes a UTC day.
+
+**Why.** The allowances bound a metered platform's spend. The per-user cap
+already bounds a flood here.
+
+### Push delivery (§4.9), *interim until the rust-stdlib transport fix*
+
+**Reference.** apron-server-cloudflare, like any HTTP client that detects
+a closed connection, delivers a push to a host that closed its idle
+keep-alive connection.
+
+**This server.** Reuses the closed connection. The POST fails with `EOF`,
+and the push is dropped with status 0. The registration is kept.
+
+**Why.** rust-stdlib's `net/http` transport passes a closed idle connection
+as healthy (docs/PORT.md, Pending rust-stdlib fixes). Disabling
+keep-alives here would work around a rust-stdlib bug, which AGENTS.md rules
+out. The Go Playwright test `push.spec.ts:257` fails on it.
+
+## Extensions and choices where Cloudflare is silent
+
+apron-server-cloudflare has none of the features below. Where
+apron-server-go has one, this server follows it unless the section says
+otherwise.
+
+### Email sign-in (§4.11)
+
+**Reference.** apron-server-cloudflare has no email sign-in and never
+advertises `email`. apron-server-go has it, sending codes through SMTP or
+the log, and lets a new email account request any user_id.
+
+**This server.** Follows apron-server-go, with two differences:
+
+- `--email.sender http` POSTs each sign-in email as JSON, `{"from", "to",
+  "subject", "text"}`, to `--email.http-url` with each
+  `--email.http-header` (`Name: value`, repeatable), such as Cloudflare
+  Email Service's REST API with `Authorization: Bearer <token>`. A 2xx
+  status is a delivery. `from` is `--email.from`.
+- A requested user_id starting `bot_`, ignoring case, is not honored. The
+  account gets the next `user_<n>`, as for a requested `guest_` or `user_`
+  id.
+
+**Why.** A homelab with a mail API but no SMTP relay can still offer email
+sign-in. `/invite-bot` names each bot `bot_<owner user_id>`, so no other
+user may hold the prefix.
+
+### `--apple.app-id` and `/.well-known/apple-app-site-association`
+
+**Reference.** Neither apron-server-cloudflare nor apron-server-go serves
+the path. apron-server-go's `--static-dir` cannot serve it, because it
+refuses dot paths.
+
+**This server.** `--apple.app-id <team ID>.<bundle ID>`, repeatable
+(`[apple] app-id = [...]`), makes `GET` on the path answer
+`application/json` with `{"webcredentials":{"apps":[...]}}`. Without the
+flag the path is 404. A malformed ID stops the server with `invalid
+--apple.app-id`.
+
+**Why.** A native iOS app can use a domain's passkeys only if the domain
+lists the app under `webcredentials` (docs/PORT.md, Passkeys for a native
+iOS client).
+
+### Link previews, `--unfurl.enable`
+
+**Reference.** Neither apron-server-cloudflare nor apron-server-go
+unfurls links. A message's URLs stay text.
+
+**This server.** Off by default. With `--unfurl.enable` (`[unfurl] enable =
+true`), a saved message whose text gains http or https URLs is posted as
+before and then unfurled in the background:
+
+- The server scans the first 8 KiB of the text for the first 32 distinct
+  URLs, skipping Markdown code. It leaves out URLs the previous snapshot
+  already had and URLs an embed already links, and takes the first 3.
+- Each user gets 10 URLs a minute and the server 60. At most 16 messages
+  unfurl at once.
+- Each page is fetched with `GET` and a `User-Agent` naming aprond, within
+  5 seconds per URL including DNS, at most 3 redirects, no proxy, and only
+  to public addresses on ports 80 and 443. The address check runs on each
+  dialed address, after each redirect too.
+- Only `text/html` and `application/xhtml+xml` answers are read, at most
+  512 KiB, as text. The preview comes from the `og:` meta tags, with
+  `<title>` and the meta description as fallbacks.
+- The `og:image` is kept only if it is declared `image/*`, is at most 2
+  MiB, and has the header of a PNG, JPEG, GIF or WebP of at most 8192
+  pixels a side and 40 megapixels. It is stored as an upload of the
+  message.
+- Results are cached in memory: a preview for an hour, a failure for 5
+  minutes, at most 256 entries and 32 MiB of images.
+- The message is republished once with a `link` embed per preview,
+  `{"embed_id", "kind": "link", "url", "og": {...}}`, within the 32-embed
+  limit. A `link` embed is server-hosted (§4.8.2). Its image counts toward
+  `--upload.max-storage-mb` and is evicted before any user upload.
+- A job is not persisted. A restart before it lands leaves the message
+  without the preview.
+
+**Why.** Clients load media only from the server's origin (§4.8.1), so a
+link can show a preview only if the server hosts it. Unfurling makes the
+server request any public URL a user names, which reveals its address and
+spends its bandwidth, so the operator opts in.
+
+### Read receipts, `--read-receipts`
+
+**Reference.** apron-server-cloudflare sends an account's read cursor only
+to its own other connections. apron-server-go sends read cursors to every
+member of the room.
+
+**This server.** Follows apron-server-cloudflare by default.
+`--read-receipts` restores apron-server-go's read receipts: cursors go to
+the room's members, the reader's own connections included, and every
+member's kept cursor follows `room_list`.
+
+**Why.** Read receipts are a privacy choice for the server's owner.
+
+### Push kind `relay`, the `badge` scope and `unread` (§4.9)
+
+**Reference.** apron-server-cloudflare has kind `webpush` only, no `badge`
+scope and no `unread` count.
+
+**This server.** Also takes kind `relay`, whose host must be in
+`--push.hosts` like any other. `push.relay` is `{}`, `push.wake` also lists
+`badge`, and every payload carries `unread`, the user's count of messages
+after their read positions. A `badge` registration of kind `relay` gets a
+low-urgency push without a message on each change of that count.
+`--push.allow-insecure`, for tests only, admits `http` and internal
+addresses, but not hosts the list leaves out.
+
+**Why.** Native iOS pushes and badges (Ladle) go through an operator's
+relay. Browsers ignore both.
+
+### WebSocket close handshake
+
+**Reference.** apron-server-go's `Close` sends a close frame and waits up
+to 5 seconds for the peer's.
+
+**This server.** Sends the close frame and closes the TCP connection at
+once.
+
+**Why.** The server sends a close code only when it ends a connection for
+a policy breach or load, after which it reads nothing more. The peer still
+receives the close code.
+
+### `aprond --help` width
+
+**Reference.** apron-server-go wraps help to the terminal's width, and to
+80 columns when standard input is not a terminal.
+
+**This server.** Always wraps at 80 columns.
+
+**Why.** rust-stdlib has no terminal-size call, and this crate forbids
+`unsafe`.
+
+### TOML syntax errors
+
+**Reference.** apron-server-go prints `Failed to load <path>: ` and
+BurntSushi/toml's message.
+
+**This server.** Prints `Failed to load <path>: toml: ` and the `toml`
+crate's message. The exit status, `unknown setting` errors and `setting
+"...": ...` errors match.
+
+**Why.** The decoder is a different library.
+
+### TOML dates in the config file
+
+**Reference.** apron-server-go passes a date to the option as
+`time.Time.String()`, such as `1979-05-27 07:32:00 +0000 UTC`.
+
+**This server.** Passes its TOML text, such as `1979-05-27T07:32:00Z`.
+
+**Why.** No option takes a date, so only a string option sees the
+difference.
+
+### `/debug/pprof/` and `/debug/vars`
+
+**Reference.** apron-server-go serves Go's runtime profiles and the
+`cmdline` and `memstats` variables.
+
+**This server.** Serves the same routes from rust-stdlib. The index and
+`cmdline` work. The runtime profiles, `profile` and `trace` answer that the
+profile is not available, and `/debug/vars` has no `memstats`.
+
+**Why.** Rust has no Go runtime to profile.
+
+### ACME certificates for clients without ECDSA
+
+**Reference.** apron-server-go's autocert issues an RSA certificate
+(`<domain>+rsa`) for a ClientHello with no ECDSA support.
+
+**This server.** Issues ECDSA P-256 only. A client without ECDSA fails the
+handshake.
+
+**Why.** The RSA path serves only clients with no ECDSA support at all.
+rust-stdlib-crypto has RSA, so it can be added.
+
+### Non-ASCII TLS server names
+
+**Reference.** apron-server-go's autocert converts the SNI name with
+`idna.Lookup.ToASCII`.
+
+**This server.** Fails with `acme/autocert: server name contains invalid
+character`.
+
+**Why.** TLS carries A-labels (RFC 6066 §3), so a conforming client never
+sends a non-ASCII name.
+
+### ACME failure text
+
+**Reference.** When no challenge type is left, apron-server-go's autocert
+names the authorization and domain only.
+
+**This server.** Adds ` (last: <the CA's error for the last challenge>)`.
+
+**Why.** The CA's reason is what an operator needs in the log.
+
+### ACME time bounds
+
+**Reference.** apron-server-go bounds `GetCertificate` with one
+five-minute context.
+
+**This server.** Stops polling at a five-minute deadline, and each request
+to the CA times out after 30 seconds.
+
+**Why.** rust-stdlib's HTTP client takes a timeout, not a context.

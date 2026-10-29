@@ -1,38 +1,49 @@
 # Port plan and log
 
-Source: apron-server-go at `f137c64`, protocol v9 (`testdata/apron` at
-`233ec54`).
+This file is the port's history. The port started from apron-server-go at
+`f137c64`, protocol v9 (`testdata/apron` at `233ec54`), and phases 0 to 3
+below are done. Since 2026-10-28 the reference is apron-server-cloudflare,
+and Go is a fallback only where Cloudflare is silent. New work comes from
+the review queue that `tools/reference/check.sh` prints (AGENTS.md,
+Reference parity), not from this plan.
+
+Sections that record comparisons with the Go `aprond` say so. Those
+comparisons no longer run, and some of the tools they name are deleted.
 
 ## Definition of done
 
 `aprond` matches apron-server-cloudflare's `SPEC.md` and its ported tests,
-except the rows in `docs/DEVIATIONS.md`. `REFERENCE` pins the Cloudflare and
-protocol commits that were last reviewed, and `tools/reference/check.sh`
+except the sections in `docs/DEVIATIONS.md`. `REFERENCE` pins the Cloudflare
+and protocol commits that were last reviewed, and `tools/reference/check.sh`
 lists what changed since.
 
 ## Phases
 
-Each phase ends at a gate. A phase is not done until its gate ran and passed.
+Each phase ended at a gate. These gates were measured against
+apron-server-go, the reference at the time.
 
 | # | Scope (Go files) | Gate | Status |
 |---|---|---|---|
 | 0 | Scaffold, spikes: rust-stdlib resolves as a dependency, WebSocket over a hijacked connection, JSON round trip of unknown keys | Spike binary echoes over WS to Node's client | done |
 | 1a | `store/*`, `ws.rs`, `rate.rs`, `protocol.go`, `server.go`, `users.go`, `rooms.go`, `messages.go`, `persist.go`, `unread.go`, and the model half of `status.go` | Ported `store_test`, `protocol_test`, `server_test`, `persist_test` (see "Tests held for later phases" below) | done |
 | 1b | The `status` request of `status.go`, `commands.go`, `embeds.go` | Ported `status_test`, `reference_test`, `limits_test`, `ext_test`, and the held tests below; interop `chat`, `responsive`, `reference`, `seen` | done, except interop `seen`, whose two tests sign up with a passkey (2a; rerun after the merge below) |
-| 2a | `webauthn.go` | Ported `webauthn_test`, `fixtures/webauthn.json`; interop `webauthn` | done: `src/server/webauthn.rs`, `src/server/tests/webauthn_test.rs`, cross-open (`tools/crossopen/run.sh`), interop `webauthn` |
+| 2a | `webauthn.go` | Ported `webauthn_test`, `fixtures/webauthn.json`; interop `webauthn` | done: `src/server/webauthn.rs`, `src/server/tests/webauthn_test.rs`, cross-open (`tools/crossopen/run.sh`, deleted 2026-10-29), interop `webauthn` |
 | 2b | `email.go`, `cmd/aprond/email.go` | Ported `email_test`s | done: `src/server/email.rs`, `src/server/tests/email_test.rs` (all 18 run, the 3 that register passkeys since the merge with 2a), email smoke against Go below. The SMTP sender of `cmd/aprond/email.go` is `src/aprond/email.rs`, merged in phase 3 |
 | 2c | `push.go`, `webpush.go` | Ported `push_test`, `webpush_test`, `fixtures/push.json`; interop `push` | done, except interop `push`, 3 of 4, held by the idle-connection gap in "Pending rust-stdlib fixes" (see "Web Push" below): `src/server/push.rs`, `src/server/webpush.rs`, `src/server/tests/push_test.rs` (26), `webpush_test.rs` (4), `push_fixture_test.rs`, the Web Push differential |
-| 3 | `cmd/aprond/main.go`, `config.go`: flags, TOML, `--print-config`, static dir, TLS, ACME, debug listener, signals | Ported `config_test`; ACME against Pebble | done: helpers in `src/aprond`, `run` in `src/bin/aprond/main.rs`, static dir in `server.rs`; `config_test`, `email_test`, `TestHTTPEndpoints`, `tests/aprond.rs` against the Go binary, and the Pebble gate (with `PEBBLE_BIN_DIR`) pass. Real-binary checks below. Adds the `--apple.app-id` extension |
+| 3 | `cmd/aprond/main.go`, `config.go`: flags, TOML, `--print-config`, static dir, TLS, ACME, debug listener, signals | Ported `config_test`; ACME against Pebble | done: helpers in `src/aprond`, `run` in `src/bin/aprond/main.rs`, static dir in `server.rs`; `config_test`, `email_test`, `TestHTTPEndpoints`, `tests/aprond.rs` against the Go binary (golden files since 2026-10-28), and the Pebble gate (with `PEBBLE_BIN_DIR`) pass. Real-binary checks below. Adds the `--apple.app-id` extension |
 | 4 | Whole-branch review (`/pstack:thermos`), fixes | All gates green | |
 
-Phases 2a, 2b, and 2c run in parallel once phase 1 lands.
+Phases 2a, 2b, and 2c ran in parallel once phase 1 landed.
 
 ## Decisions
 
+The log is append-only. A later row that replaces an earlier one says so,
+and the earlier row stays as it was decided.
+
 | Date | Decision | Why |
 |---|---|---|
-| 2026-10-27 | The tests and tools find the Go clone through `APRON_GO_DIR`, and keep the clone unmodified. | Tests read fixtures and run Go comparisons from the clone at the commit `UPSTREAM` pins. |
-| 2026-10-27 | rust-stdlib comes in through a local git URL on the `dogfood/apron` branch. | A path dependency would follow whatever branch that checkout has open. The git dependency pins a commit in `Cargo.lock`, and fixes reach this crate only after a merge into `dogfood/apron`. |
+| 2026-10-27 | The tests and tools find the Go clone through `APRON_GO_DIR`, and keep the clone unmodified. | Tests read fixtures and run Go comparisons from the clone at the commit `UPSTREAM` pins. (`UPSTREAM` gave way to `REFERENCE` on 2026-10-29. The clone now supplies only the shared fixtures and the Playwright suites.) |
+| 2026-10-27 | rust-stdlib comes in through a local git URL on the `dogfood/apron` branch. (Replaced: `Cargo.toml` now pins rust-stdlib over https, and `dogfood/apron` is retired; see "rust-stdlib fixes".) | A path dependency would follow whatever branch that checkout has open. The git dependency pins a commit in `Cargo.lock`, and fixes reach this crate only after a merge into `dogfood/apron`. |
 | 2026-10-27 | `Cargo.lock` is updated only with `cargo update -p <crate>`. | The lock was first seeded with the yanked `crypto-bigint 0.7.5`; `fix/crypto-bigint-yank` moved it to 0.7.10, so that caveat is gone, but a targeted update keeps every other pin where the last gate left it. |
 | 2026-10-27 | Thread per connection, with one `Mutex` guarding server state, as the Go server's `s.mu` does. | rust-stdlib has no async runtime. Keeping Go's locking shape makes the port checkable line by line against the Go source. |
 | 2026-10-27 | The browser gate runs the Go repository's Playwright suites through a `go` shim on `PATH`. | This reuses the real web client and the Go suites without changing the clone. |
@@ -61,7 +72,7 @@ Phases 2a, 2b, and 2c run in parallel once phase 1 lands.
 | 2026-10-27 | `serverConfig` is `settings::server_settings`, returning `Settings`, a mirror of the `server.Config` fields it sets. | `server.Config` belongs to the core. The mirror lets the five `serverConfig` tests of config_test.go run here with Go's check order and messages; the core maps `Settings` onto `server::Config` and builds WebAuthn from `Settings.webauthn`. |
 | 2026-10-27 | `SmtpSender::send_sign_in_code` takes `to`, `code`, `add` and the rendered `text` rather than a `server::SignInEmail`. | It keeps `src/aprond` free of server types. The core's `EmailSender` adapter passes `m.text()`. |
 | 2026-10-27 | `limit_listener` releases a slot when a connection is closed or dropped. | Go releases only on `Close`; a Rust connection dropped without `close` is closed too, so not releasing it would leak the slot. |
-| 2026-10-27 | `--help` and `--print-config` are compared byte for byte with the Go `aprond` by `cargo test` (`test_help_and_errors_match_go`, `test_print_config_matches_go`) always, against the Go clone. Since phase 3 they live in `tests/aprond.rs` and run the built binary, next to `test_startup_errors_match_go`, which compares the errors `run` stops with (log times dropped). | The comparison is the gate for go-flags' layout and BurntSushi's encoder. Without `go` or the clone the tests fail, unless `APRON_SKIP_GO=1`; a skipped run prints `SKIPPED` and does not count as the gate passing (AGENTS.md, Verification). |
+| 2026-10-27 | (Replaced on 2026-10-28 by golden files, below.) `--help` and `--print-config` are compared byte for byte with the Go `aprond` by `cargo test` (`test_help_and_errors_match_go`, `test_print_config_matches_go`) always, against the Go clone. Since phase 3 they live in `tests/aprond.rs` and run the built binary, next to `test_startup_errors_match_go`, which compares the errors `run` stops with (log times dropped). | The comparison is the gate for go-flags' layout and BurntSushi's encoder. Without `go` or the clone the tests fail, unless `APRON_SKIP_GO=1`; a skipped run prints `SKIPPED` and does not count as the gate passing (AGENTS.md, Verification). |
 | 2026-10-27 | `run` is Go's: `server_settings`, then `server_config` maps `Settings` onto `server::Config` (counts at or below 0 become 0, Go's unlimited) and builds WebAuthn. `signal::notify_context` from `rust-stdlib-sys` watches SIGINT and SIGTERM under a cancellable parent context; each `http::Server` serves on its own thread, and the first serve error other than `ERR_SERVER_CLOSED` cancels the parent, as errgroup does. Shutdown gives `Server::shutdown` and each `http::Server::shutdown` one 10-second context. The text handler logger is `run`'s own; the server keeps `slog::default`, as Go's does. | The errgroup and `NotifyContext` pair is one context in Go; here the parent context carries the errgroup half. |
 | 2026-10-28 | `/invite-device <name>` replaces `/add-device [label]`. Device tokens are a store kind of their own, `device`, keyed by the hex SHA-256 of the token and holding `{user, name, created}`, rather than sessions. The per-account session cap and the `/add-device` limiter are gone. | The official server (apron-server-cloudflare) has `/invite-device` for the same job, so clients can give one instruction everywhere. Its tokens sign in from any origin and never expire, which sessions, bound to an origin and renewed on use, cannot express without sentinel values a Go `aprond` would misread. Go loads only the kinds it knows, so it ignores `device` entries and never deletes them. The cap and limiter existed only because `/add-device` minted sessions without bound; three named tokens per account bound the new store kind. |
 | 2026-10-28 | The `/invite-device` notice carries Cloudflare's sign-in link line when a public URL is configured, and none otherwise. | A client can open the link or draw it as a QR code for a phone to scan. Cloudflare builds it from the URL each connection reached. This server builds it from the public URL (`--public-url`, or `--tls.domain`) only, not from the request's `Host`, so a server without one never writes a link for an address it may not be reachable at. |
@@ -89,7 +100,7 @@ Phases 2a, 2b, and 2c run in parallel once phase 1 lands.
 Accounts registered before 2026-10-28, such as the live `guest_1` with its
 bot `bot_guest_1`, keep their user_ids until an admin moves them with
 `/rename <old_user_id> <new_user_id>` (`src/server/rename.rs`,
-docs/DEVIATIONS.md). The live `guest_1` became `matthias` on 2026-10-29,
+docs/DEVIATIONS.md). The live `guest_1` was renamed on 2026-10-29,
 after a copy of the `apron_data` volume was kept on the host in
 `~/apron-backups/pre-rename-202610291340`. For the account itself:
 
@@ -112,8 +123,8 @@ after a copy of the `apron_data` volume was kept on the host in
 
 A native iOS app signs in with the server's passkeys when the app and the
 domain name each other. The app's Associated Domains entitlement lists
-`webcredentials:<domain>`. The server, an extension Go lacks
-(docs/DEVIATIONS.md), lists the app at
+`webcredentials:<domain>`. The server lists the app, an extension neither
+apron-server-cloudflare nor apron-server-go has (docs/DEVIATIONS.md), at
 `https://<domain>/.well-known/apple-app-site-association`. Start `aprond`
 with all three of:
 
@@ -130,15 +141,15 @@ web client's origins, and `--apple.app-id` for each app, such as a
 development build with its own bundle ID.
 
 The native client gets its bearer token from another signed-in client,
-with `/invite-device <name>`, an extension Go lacks that matches
-apron-server-cloudflare's (docs/DEVIATIONS.md). Send it in the web client
+with `/invite-device <name>`, apron-server-cloudflare's command
+(docs/DEVIATIONS.md). Send it in the web client
 while signed in with a passkey or email, and paste the token from the
 `~private` reply, which shows it in a code block with a Copy button. With
 `--public-url` or `--tls.domain` set, the reply also has a link.apron.chat
 sign-in link for the server's `/ws` endpoint and the token, which a client
 can open or show as a QR code. The app authenticates with
-`{"scheme": "token", "token": ...}` (§3.2), from any origin or none. The token does not expire. An account holds at most three,
-one per name; running `/invite-device` with a held name again mints a new
+`{"scheme": "token", "token": ...}` (§3.2), from any origin or none. The
+token does not expire. An account holds at most three, one per name; running `/invite-device` with a held name again mints a new
 token for it, revokes the old one, and closes the connections that signed
 in with the old one.
 
@@ -198,6 +209,10 @@ passed 43 of 44, the failure being push.spec.ts:257 (Web Push below).
 
 ## aprond end to end
 
+This section records a one-time check after phase 3. It no longer runs.
+`tests/aprond.rs` now checks `--help`, `--print-config` and the startup
+errors against golden files instead of the Go binary.
+
 After phase 3 the built `aprond` was checked against the Go `aprond` (built
 from the clone), each with a temp `--store` and `--upload.dir`:
 
@@ -234,15 +249,16 @@ from the clone), each with a temp `--store` and `--upload.dir`:
 
 ## Passkey cross-open
 
-Retired on 2026-10-29 with Go store compatibility as a goal; the tool is in
-the history before that date. `tools/crossopen/run.sh` built both `aprond`s and a Go client with the
+Retired on 2026-10-29 with Go store compatibility as a goal. The store
+format is now this server's own, and the tool is in the git history before
+that date. `tools/crossopen/run.sh` built both `aprond`s and a Go client with the
 software authenticator of `webauthn_test.go`. In each direction one server
 registers a guest's passkey on a SQLite database and stops; the other opens
 the database, resumes the bearer token, and signs in with the passkey. After
 phase 2a both directions passed: the Go-written user and session open here,
 and the Rust-written ones open in Go. The stored user records have the same
 `passkey` shape; the Rust one also carries `"left_at":{}` and `"pings":{}`,
-the empty-map difference listed in `docs/DEVIATIONS.md`.
+because this server writes an empty map as `{}` where Go writes `null`.
 
 Playwright's `--project` takes several values, so run one spec as
 `tools/interop/run.sh --project=desktop webauthn.spec.ts`; with a space, the
