@@ -206,9 +206,7 @@ impl State {
     pub fn announce_server_locked(&self) {
         for conn in self.clients.values() {
             let client = &conn.client;
-            client.enqueue(
-                &obj! {"method" => "server", "params" => self.server_params(&client.origin)},
-            );
+            client.enqueue(&obj! {"method" => "server", "params" => self.server_params(client)});
         }
     }
 
