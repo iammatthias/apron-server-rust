@@ -1,5 +1,5 @@
 //! activity (§4.6): typing, read cursors and attention, relayed to a room's
-//! other members within their limits.
+//! other connections within their limits.
 
 use std::sync::Arc;
 
@@ -71,7 +71,7 @@ impl State {
 
 impl State {
     /// Applies a connection's activity (§4.6). typing is relayed to the
-    /// room's other members, at most MAX_TYPING_SECONDS and within
+    /// room's other connections, at most MAX_TYPING_SECONDS and within
     /// ACTIVITY_RELAYS_PER_MINUTE. A read cursor must name a message and only
     /// advances; an account's is kept, sent after the room is listed, and
     /// relayed to its other connections, or with Config.read_receipts to the
@@ -178,8 +178,9 @@ impl State {
                 typed = true;
             }
         }
-        // Typing goes to the room's other members only, as on Cloudflare;
-        // a read receipt also to the user's own connections.
+        // The relay goes to every connection in the room but this one, the
+        // user's other devices included, as on Cloudflare; a read receipt
+        // also comes back to this connection.
         let rooms = [room_id.clone()];
         if read && self.rooms[&room_id].members.contains(&user_id) {
             let mut own = params.clone();
@@ -187,14 +188,14 @@ impl State {
             if let Some(frame) =
                 super::client::render(&obj! {"method" => "activity", "params" => own})
             {
-                self.send_to_user(&user_id, &frame);
+                c.enqueue_frame(frame);
             }
         }
         if typed || read {
             if let Some(frame) =
                 super::client::render(&obj! {"method" => "activity", "params" => params})
             {
-                self.deliver_except_locked(&frame, &rooms, &user_id);
+                self.deliver_except_locked(&frame, &rooms, Some(c.id));
             }
         }
         Ok((result.into(), false))
