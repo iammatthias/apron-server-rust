@@ -11,6 +11,7 @@ use rust_stdlib_crypto::sha256;
 
 use super::email::web_socket_url;
 use super::protocol::*;
+use super::remap::{Fate, Remap};
 use super::server::{Client, ClientId, State};
 use super::webauthn::SessionKey;
 
@@ -64,27 +65,30 @@ impl DeviceTokens {
         Some(token)
     }
 
-    /// Removes an account's tokens and returns their keys.
-    pub fn remove_user(&mut self, user_id: &str) -> Vec<SessionKey> {
-        let keys = self.by_user.remove(user_id).unwrap_or_default();
-        for key in &keys {
-            self.by_key.remove(key);
-        }
-        keys
-    }
-
-    /// Moves an account's tokens to a new user_id and returns their keys.
-    pub fn move_user(&mut self, from: &str, to: &str) -> Vec<SessionKey> {
-        let keys = self.by_user.remove(from).unwrap_or_default();
-        for key in &keys {
-            if let Some(token) = self.by_key.get_mut(key) {
-                token.user = to.to_owned();
+    /// Removes the tokens of the accounts `remap` drops, or moves the
+    /// renamed account's, and returns their keys.
+    pub(super) fn remap(&mut self, remap: &Remap) -> Vec<SessionKey> {
+        let mut changed = Vec::new();
+        for from in remap.sources() {
+            let keys = self.by_user.remove(from).unwrap_or_default();
+            changed.extend(keys.iter().copied());
+            match remap.fate(from) {
+                Fate::Rename(to) if !keys.is_empty() => {
+                    for key in &keys {
+                        if let Some(token) = self.by_key.get_mut(key) {
+                            token.user = to.to_owned();
+                        }
+                    }
+                    self.by_user.insert(to.to_owned(), keys);
+                }
+                _ => {
+                    for key in &keys {
+                        self.by_key.remove(key);
+                    }
+                }
             }
         }
-        if !keys.is_empty() {
-            self.by_user.insert(to.to_owned(), keys.clone());
-        }
-        keys
+        changed
     }
 
     /// An account's tokens, oldest first.

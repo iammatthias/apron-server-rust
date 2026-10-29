@@ -13,6 +13,7 @@ use rust_stdlib_crypto::{rand, sha256};
 use super::bots::{BOT_SIGNS_IN_WITH_TOKEN, BOT_TOKEN_PREFIX};
 use super::devices::DEVICE_TOKEN_PREFIX;
 use super::protocol::*;
+use super::remap::{Fate, Remap};
 use super::rooms::room_update;
 use super::server::{Client, State};
 use super::users::{candidate_user_id, normalize_name};
@@ -142,6 +143,21 @@ impl Sessions {
         let session = self.by_key.remove(key)?;
         self.by_expiry.remove(&(session.expires.unix_nano(), *key));
         Some(session)
+    }
+
+    /// Removes the sessions of every user `remap` drops or renames, so a
+    /// renamed user signs in again, and returns their keys.
+    pub(super) fn remap(&mut self, remap: &Remap) -> Vec<SessionKey> {
+        let keys: Vec<SessionKey> = self
+            .by_key
+            .iter()
+            .filter(|(_, s)| remap.fate(&s.user) != Fate::Keep)
+            .map(|(key, _)| *key)
+            .collect();
+        for key in &keys {
+            self.remove(key);
+        }
+        keys
     }
 
     pub fn renew(&mut self, key: &SessionKey, expires: Time) {

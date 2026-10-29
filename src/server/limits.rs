@@ -13,6 +13,7 @@ use rust_stdlib::net;
 use rust_stdlib::time;
 
 use super::protocol::{RpcError, CODE_RETRY_AFTER};
+use super::remap::{Fate, Remap};
 use crate::obj;
 
 const MINUTE_MS: f64 = 60_000.0;
@@ -455,24 +456,25 @@ impl LimitTable {
             .collect()
     }
 
-    pub fn forget_user(&mut self, user_id: &str) {
-        self.rows
-            .retain(|(_, principal), _| *principal != Principal::User(user_id.to_owned()));
-    }
-
-    /// Moves a user's rows to a new user_id, so a rename spends nothing.
-    pub fn move_user(&mut self, from: &str, to: &str) {
-        let from = Principal::User(from.to_owned());
-        let moved: Vec<_> = self
+    /// Forgets the rows of the users `remap` drops, or moves the renamed
+    /// user's, so a rename spends nothing.
+    pub(super) fn remap(&mut self, remap: &Remap) {
+        let keys: Vec<_> = self
             .rows
             .keys()
-            .filter(|(_, principal)| *principal == from)
+            .filter(|(_, principal)| {
+                matches!(principal, Principal::User(id) if remap.fate(id) != Fate::Keep)
+            })
             .cloned()
             .collect();
-        for key in moved {
+        for key in keys {
             let row = self.rows.remove(&key).expect("listed above");
-            self.rows
-                .insert((key.0, Principal::User(to.to_owned())), row);
+            if let (scope, Principal::User(id)) = &key {
+                if let Fate::Rename(to) = remap.fate(id) {
+                    self.rows
+                        .insert((*scope, Principal::User(to.to_owned())), row);
+                }
+            }
         }
     }
 }

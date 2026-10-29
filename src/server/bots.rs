@@ -17,6 +17,7 @@ use rust_stdlib_crypto::sha256;
 
 use super::email::web_socket_url;
 use super::protocol::*;
+use super::remap::{Fate, Remap};
 use super::server::{Client, ClientId, State};
 use super::users::{normalize_name, UserState};
 use super::webauthn::SessionKey;
@@ -76,13 +77,28 @@ impl BotTokens {
             .collect()
     }
 
-    /// Gives the tokens `from` minted to `to`, and returns their keys.
-    pub fn move_owner(&mut self, from: &str, to: &str) -> Vec<SessionKey> {
-        let keys = self.owned_by(from);
-        for key in &keys {
-            self.by_key.get_mut(key).expect("listed").owner = to.to_owned();
+    /// Removes the tokens of the bots `remap` drops and the tokens their
+    /// owners minted, or gives the tokens the renamed owner minted to the
+    /// new user_id, and returns their keys.
+    pub(super) fn remap(&mut self, remap: &Remap) -> Vec<SessionKey> {
+        let mut changed = Vec::new();
+        for from in remap.sources() {
+            match remap.fate(from) {
+                Fate::Rename(to) => {
+                    for key in self.owned_by(from) {
+                        self.by_key.get_mut(&key).expect("listed").owner = to.to_owned();
+                        changed.push(key);
+                    }
+                }
+                _ => {
+                    for key in self.of_bot(from).into_iter().chain(self.owned_by(from)) {
+                        self.remove(&key);
+                        changed.push(key);
+                    }
+                }
+            }
         }
-        keys
+        changed
     }
 
     pub fn remove(&mut self, key: &SessionKey) -> Option<BotToken> {
