@@ -20,8 +20,10 @@
 // private room named livecheck_<random> that the admin makes, and its
 // thread; both go when the script empties them. The emoji checks add a
 // :livecheck_<random>: custom emoji and remove it again, so every connection
-// gets two new server frames.
-import { randomBytes } from "node:crypto";
+// gets two new server frames. The push checks make one more livecheck_
+// account, which registers an fcm.googleapis.com endpoint and unregisters it
+// at once; nothing mentions that account, so no push is ever sent.
+import { createECDH, randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 const base = (process.env.APRON_PUBLIC_URL ?? "https://apron.farfield.systems").replace(/\/$/, "");
@@ -234,6 +236,19 @@ await check("guest: you says it may not write, keeps its name, and cannot react"
   }
 });
 
+await check("guest: push.wake has no joined, and push_register is denied", async () => {
+  const c = await connect();
+  try {
+    const wake = JSON.stringify((await c.server()).params.push?.wake);
+    if (wake !== '["mentions","replies","private","badge"]') return `push.wake ${wake}`;
+    await c.call("auth", { scheme: "guest" });
+    const r = await c.call("push_register", { kind: "relay", url: "https://fcm.googleapis.com/fcm/send/livecheck" });
+    return (r.error?.code === -32001 && r.error.message === "Sign in to receive push notifications") || `reply ${JSON.stringify(r.error ?? r.result)}`;
+  } finally {
+    c.close();
+  }
+});
+
 // Oversized frame.
 await check("17 KiB frame closes with 1009", async () => {
   const c = await connect();
@@ -314,6 +329,13 @@ if (!tokenFile) {
     return (!revoke.error && /revoked/.test(noticeText(revoke.frames))) || `revoke ${JSON.stringify(revoke.error ?? noticeText(revoke.frames))}`;
   });
 
+  await check("admin: a server frame listing wake scope joined follows the sign-in", async () => {
+    const frame = await admin.until(() => admin.frames.filter((f) => f.method === "server")[1], 8000, "a second server frame");
+    return same(JSON.stringify(frame.params.push?.wake), '["mentions","replies","private","joined","badge"]');
+  });
+
+  await pushChecks(run, linkToken);
+
   await trackC(admin);
 
   for (const [command, usage] of [
@@ -328,6 +350,49 @@ if (!tokenFile) {
     });
   }
   admin.close();
+}
+
+// Push (Track D) with a new livecheck_ account: a host outside --push.hosts
+// is refused, and an endpoint on fcm.googleapis.com registers and is
+// unregistered at once, so no push goes to it.
+async function pushChecks(run, linkToken) {
+  const accountID = `livecheck_push_${suffix}`;
+  const { frames, error } = await run(`/invite-token ${accountID}`);
+  const token = !error && linkToken(noticeText(frames));
+  if (!token) {
+    report("push: a livecheck_ account for the push checks", false, `error ${JSON.stringify(error)}`);
+    return;
+  }
+  const c = await connect();
+  const ecdh = createECDH("prime256v1");
+  ecdh.generateKeys();
+  const keys = { p256dh: ecdh.getPublicKey().toString("base64url"), auth: randomBytes(16).toString("base64url") };
+  const endpoint = `https://fcm.googleapis.com/fcm/send/livecheck-${suffix}`;
+  try {
+    await c.server();
+    const signIn = await c.call("auth", { scheme: "token", token });
+    if (signIn.error) {
+      report("push: the account signs in", false, JSON.stringify(signIn.error));
+      return;
+    }
+    await check("push: an account's sign-in sends no new server frame", async () => {
+      await new Promise((r) => setTimeout(r, 500));
+      return same(c.frames.filter((f) => f.method === "server").length, 1);
+    });
+    await check("push: a host outside --push.hosts is refused", async () => {
+      const r = await c.call("push_register", { kind: "webpush", url: "https://push.example.net/livecheck", keys });
+      return (r.error?.code === -32602 && r.error.message === "push service not allowed here") || `reply ${JSON.stringify(r.error ?? r.result)}`;
+    });
+    await check("push: an fcm.googleapis.com endpoint registers, then unregisters", async () => {
+      const r = await c.call("push_register", { kind: "webpush", url: endpoint, keys, wake: ["mentions"] });
+      if (r.error) return `register ${JSON.stringify(r.error)}`;
+      const off = await c.call("push_unregister", { url: endpoint });
+      return !off.error || `unregister ${JSON.stringify(off.error)}`;
+    });
+  } finally {
+    await c.call("push_unregister", { url: endpoint }).catch(() => {});
+    c.close();
+  }
 }
 
 // Track C (rooms, messages, permissions), as the admin and the account

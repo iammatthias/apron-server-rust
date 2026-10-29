@@ -250,17 +250,12 @@ impl UserState {
 pub const GUEST_READ_ONLY: &str = "Guests can only read here; sign in to post or join rooms";
 
 /// Reports whether a read-only guest is denied the method outright;
-/// `command` and `activity` decide per request.
+/// `command` and `activity` decide per request, and push registration
+/// refuses every guest with its own message.
 pub fn guest_write(method: &str) -> bool {
     matches!(
         method,
-        "message"
-            | "reactions"
-            | "room_set"
-            | "room_join"
-            | "room_leave"
-            | "push_register"
-            | "push_unregister"
+        "message" | "reactions" | "room_set" | "room_join" | "room_leave"
     )
 }
 

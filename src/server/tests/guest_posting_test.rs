@@ -65,11 +65,6 @@ fn test_read_only_guest_writes_are_denied() {
         ),
         ("room_join", obj! {"room_id" => room_id.as_str()}),
         ("room_leave", obj! {"room_id" => "general"}),
-        (
-            "push_register",
-            obj! {"kind" => "relay", "url" => "https://push.example/x"},
-        ),
-        ("push_unregister", obj! {"url" => "https://push.example/x"}),
         ("command", obj! {"body" => obj! {"text" => "/avatar"}}),
         (
             "command",
@@ -84,6 +79,27 @@ fn test_read_only_guest_writes_are_denied() {
             error.map(|e| (e["code"].clone(), e["message"].clone())),
             Some((Json::from(CODE_DENIED), Json::from(GUEST_READ_ONLY))),
             "{method} {params:?}: {frame:?}"
+        );
+    }
+    // Push registration refuses every guest, read-only or not, as
+    // Cloudflare does.
+    for (method, params) in [
+        (
+            "push_register",
+            obj! {"kind" => "relay", "url" => "https://fcm.googleapis.com/x"},
+        ),
+        (
+            "push_unregister",
+            obj! {"url" => "https://fcm.googleapis.com/x"},
+        ),
+    ] {
+        let frame = g.call(method, method, params);
+        assert_eq!(
+            frame["error"],
+            Json::from(
+                obj! {"code" => CODE_DENIED, "message" => "Sign in to receive push notifications"}
+            ),
+            "{method}"
         );
     }
     g.write(

@@ -127,7 +127,6 @@ impl PushHosts {
         }
     }
 
-    /// Whether an endpoint URL names an allowed host.
     pub fn allows_url(&self, endpoint: &str) -> bool {
         url::parse(endpoint).is_ok_and(|u| self.allows(&u.hostname().to_ascii_lowercase()))
     }
@@ -1139,7 +1138,6 @@ impl Server {
 }
 
 impl State {
-    /// The caller of push_register or push_unregister: an account or a bot.
     fn push_user(&self, c: &Connection) -> Result<String, RpcError> {
         let Some(user_id) = self.client_user(c) else {
             return Err(RpcError::new(CODE_DENIED, "Not authenticated"));
