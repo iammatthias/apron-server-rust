@@ -608,8 +608,6 @@ fn test_room_list_filters_and_order() {
 
     // members: true lists every member of every room, joined or not, with
     // each user's current object once in users.
-    a.result("me", "name", obj! {"name" => "Ada"});
-    b.notification("user");
     let with_members = list_rooms(&mut a, obj! {"members" => true});
     let general = nth(&with_members, "joined", 2);
     assert!(
@@ -625,7 +623,7 @@ fn test_room_list_filters_and_order() {
         "unjoined room members: {random_entry:?}"
     );
     let want_users = vec![
-        Json::from(obj! {"user_id" => "guest_1", "name" => "Ada", "status" => "online"}),
+        Json::from(obj! {"user_id" => "guest_1", "name" => "Guest 1", "status" => "online"}),
         Json::from(obj! {"user_id" => "guest_2", "name" => "Guest 2", "status" => "online"}),
     ];
     assert_eq!(
@@ -1552,8 +1550,26 @@ fn test_read_cursors() {
 
 #[test]
 fn test_profiles_and_user_notifications() {
+    // An account's own `you` also carries its permissions.
+    let yours = |profile: &Object| {
+        let mut you = profile.clone();
+        let mut ext = you
+            .get("ext")
+            .and_then(Json::as_object)
+            .cloned()
+            .unwrap_or_default();
+        ext.insert(
+            "permissions".into(),
+            strings(&["add_members", "push_joined"]),
+        );
+        you.insert("ext".into(), ext.into());
+        you
+    };
     let server = new_test_server(default_config());
     let mut clients = dial_group(&server, 2);
+    for c in &clients {
+        make_account(&server, &c.user_id);
+    }
     let (mut a, mut b) = (clients.remove(0), clients.remove(0));
     let ext = obj! {"example.org" => obj! {"pronouns" => "she/her"}};
     let you = a.result(
@@ -1562,8 +1578,8 @@ fn test_profiles_and_user_notifications() {
         obj! {"name" => "  Ada  ", "avatar" => "data:image/png;base64,iVBORw0KGgo=", "ext" => ext.clone()},
     )["you"]
         .clone();
-    let want = obj! {"user_id" => "guest_1", "name" => "Ada", "avatar" => "data:image/png;base64,iVBORw0KGgo=", "ext" => ext.clone(), "status" => "online"};
-    assert_eq!(you, Json::from(want.clone()), "you");
+    let want = obj! {"user_id" => "guest_1", "name" => "Ada", "avatar" => "data:image/png;base64,iVBORw0KGgo=", "ext" => ext.clone(), "status" => "online", "roles" => strings(&[])};
+    assert_eq!(you, Json::from(yours(&want)), "you");
     assert_eq!(
         b.notification("user"),
         obj! {"new" => want.clone()},
@@ -1601,7 +1617,7 @@ fn test_profiles_and_user_notifications() {
     let kept = a.result("me", "keep", Object::new())["you"].clone();
     assert_eq!(
         kept,
-        Json::from(want.clone()),
+        Json::from(yours(&want)),
         "empty me changed the profile"
     );
     b.expect_quiet();
@@ -1609,7 +1625,7 @@ fn test_profiles_and_user_notifications() {
     let kept = a.result("me", "empty-ext", obj! {"ext" => Object::new()})["you"].clone();
     assert_eq!(
         kept,
-        Json::from(want.clone()),
+        Json::from(yours(&want)),
         "ext {{}} changed the profile"
     );
     b.expect_quiet();
@@ -1626,7 +1642,7 @@ fn test_profiles_and_user_notifications() {
         "ext".into(),
         obj! {"example.org" => obj! {"pronouns" => "she/her"}, "example.net" => Json::Null}.into(),
     );
-    assert_eq!(you, Json::from(merged.clone()), "merge result");
+    assert_eq!(you, Json::from(yours(&merged)), "merge result");
     assert_eq!(
         b.notification("user"),
         obj! {"new" => merged},
@@ -1641,9 +1657,8 @@ fn test_profiles_and_user_notifications() {
         obj! {"ext" => obj! {"example.org" => "", "example.net" => empty(), "absent.example" => Object::new()}, "avatar" => ""},
     )["you"]
         .clone();
-    let cleared =
-        obj! {"user_id" => "guest_1", "name" => "Ada", "avatar" => "", "status" => "online"};
-    assert_eq!(you, Json::from(cleared.clone()), "removal result");
+    let cleared = obj! {"user_id" => "guest_1", "name" => "Ada", "avatar" => "", "status" => "online", "roles" => strings(&[])};
+    assert_eq!(you, Json::from(yours(&cleared)), "removal result");
     let mut announced = cleared.clone();
     announced.insert(
         "ext".into(),
@@ -1659,13 +1674,17 @@ fn test_profiles_and_user_notifications() {
         .to_vec();
     assert_eq!(
         users[0],
-        Json::from(obj! {"user_id" => "guest_1", "name" => "Ada", "status" => "online"}),
+        Json::from(
+            obj! {"user_id" => "guest_1", "name" => "Ada", "status" => "online", "roles" => strings(&[])}
+        ),
         "profile after removal"
     );
     let you = a.result("me", "clear-name", obj! {"name" => ""})["you"].clone();
     assert_eq!(
         you,
-        Json::from(obj! {"user_id" => "guest_1", "name" => "", "status" => "online"}),
+        Json::from(yours(
+            &obj! {"user_id" => "guest_1", "name" => "", "status" => "online", "roles" => strings(&[])}
+        )),
         "clearing the name"
     );
     b.notification("user");

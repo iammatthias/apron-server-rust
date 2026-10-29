@@ -1398,6 +1398,9 @@ fn test_after_auth_statuses_are_bounded() {
 fn test_me_status_changes_are_limited() {
     let server = new_test_server(default_config());
     let mut clients = dial_group(&server, 2);
+    for c in &clients {
+        make_account(&server, &c.user_id);
+    }
     let mut b = clients.pop().unwrap();
     let mut a = clients.pop().unwrap();
     watching(&mut [&mut a]);

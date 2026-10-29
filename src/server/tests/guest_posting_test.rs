@@ -179,3 +179,34 @@ fn test_server_frame_advertises_guest_posting() {
         );
     }
 }
+
+/// A guest keeps its assigned name, its own included, and may not start a
+/// top-level room, whether or not guests post (apron-server-cloudflare's
+/// "rejects operations guests may not perform").
+#[test]
+fn test_guests_keep_their_name() {
+    let server = new_test_server(default_config());
+    let mut guest = dial_test_client(&server);
+    for (id, name) in [("rename", "Ada"), ("same", "Guest 1"), ("clear", "")] {
+        let frame = reply(&mut guest, "me", id, obj! {"name" => name});
+        assert_eq!(
+            frame["error"]
+                .as_object()
+                .map(|e| (e["code"].clone(), e["message"].clone())),
+            Some((
+                Json::from(CODE_DENIED),
+                Json::from("Only registered users may change their name")
+            )),
+            "{id}"
+        );
+    }
+    let frame = reply(
+        &mut guest,
+        "room_set",
+        "top-level",
+        obj! {"title" => "Top level"},
+    );
+    assert_eq!(error_code(&frame), Some(CODE_DENIED));
+    let you = you_of(&guest.result("me", "status", obj! {"status" => "dnd"}));
+    assert_eq!(you["name"], Json::from("Guest 1"));
+}

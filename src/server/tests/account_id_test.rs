@@ -270,13 +270,16 @@ fn test_unusable_names_register_random_user_ids() {
     let server = passkey_test_server();
     let (mut c, _) = dial_origin(&server, TEST_PASSKEY_ORIGIN);
     guest_auth(&mut c);
-    c.result("me", "name", obj! {"name" => "Grace"});
     let (user, _) = begin_registration(&mut c, Object::new());
     assert!(
         random.match_string(user["name"].as_str().unwrap()),
         "offered {user:?}"
     );
-    assert_eq!(user["displayName"], Json::from("Grace"), "offered {user:?}");
+    assert_eq!(
+        user["displayName"],
+        Json::from("Guest 1"),
+        "offered {user:?}"
+    );
 }
 
 /// Eight taken `<slug>_<digits>` ids, here every one, fall back to a
