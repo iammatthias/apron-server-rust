@@ -205,7 +205,7 @@ fn test_invite_device_denied_to_guests() {
         command_error(&mut guest, "/invite-device phone"),
         Json::from(obj! {
             "code" => CODE_DENIED,
-            "message" => "Sign in with a passkey or email to use /invite-device",
+            "message" => "Sign in with a passkey to use /invite-device",
         }),
         "guest"
     );

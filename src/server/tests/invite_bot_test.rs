@@ -290,7 +290,7 @@ fn test_invite_bot_denied_to_guests_and_bots() {
     let denied = |command: &str| {
         Json::from(obj! {
             "code" => CODE_DENIED,
-            "message" => format!("Sign in with a passkey or email to use {command}"),
+            "message" => format!("Sign in with a passkey to use {command}"),
         })
     };
     assert_eq!(

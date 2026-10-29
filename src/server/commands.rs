@@ -44,7 +44,7 @@ impl Audience {
             Audience::Everyone => return None,
             Audience::Accounts if u.account() => return None,
             Audience::Accounts if u.bot() => format!("A bot can't use /{name}"),
-            Audience::Accounts => format!("Sign in with a passkey or email to use /{name}"),
+            Audience::Accounts => format!("Sign in with a passkey to use /{name}"),
             Audience::Admins if u.account() && u.has_role(ADMIN_ROLE) => return None,
             Audience::Admins => format!("Only an admin can use /{name}"),
         };

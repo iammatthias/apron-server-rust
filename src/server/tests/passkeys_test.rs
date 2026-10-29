@@ -187,7 +187,7 @@ fn test_passkeys_without_one() {
         command_error(&mut guest, "/passkeys"),
         (
             CODE_DENIED,
-            "Sign in with a passkey or email to use /passkeys".into()
+            "Sign in with a passkey to use /passkeys".into()
         ),
     );
 }
