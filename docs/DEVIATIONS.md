@@ -85,9 +85,11 @@ ext`.
 **This server.** Says `Guests can only read here; sign in to post or join
 rooms` and `Only registered users may change their profile`. The switch is
 `--guest.posting` (`[guest] posting = true`) instead of `GUEST_POSTING`. A
-malformed requested `user_id` is still `invalid_params`.
+malformed requested `user_id` is still `invalid_params`. A guest may mute
+with `status`, which Cloudflare denies with `Only registered users can
+mute`.
 
-**Why.** The texts predate the reference.
+**Why.** The texts and guest mutes predate the reference.
 
 ### Passkey attestation formats
 
@@ -116,10 +118,12 @@ these times were kept.
 ### Session tokens (§3.2)
 
 **Reference.** apron-server-cloudflare denies an expired or unknown passkey
-session token with `Session expired; sign in with your passkey`.
+session token with `Session expired; sign in with your passkey`, and one
+presented from an origin not configured for passkeys with `Frontend origin
+is not configured for passkeys`.
 
 **This server.** Has the same 30-day lifetime and renewal, and says
-`Session expired; sign in again`.
+`Session expired; sign in again` in both cases.
 
 **Why.** An email sign-in makes the same sessions here
 ([Email sign-in](#email-sign-in-411)), so the text names no passkey.
@@ -747,8 +751,8 @@ minute. The 10 requests are a bucket that refills one every 6 seconds, so a
 user can make about 20 in the first minute. `retry_after` names the wait
 for the next one.
 
-**Why.** The bucket is the limiter shape the server uses for every
-per-user allowance (`crate::rate`).
+**Why.** The bucket is the limiter shape the server uses for its other
+per-user allowances (`crate::rate`).
 
 ### Push wakes (§4.9)
 
