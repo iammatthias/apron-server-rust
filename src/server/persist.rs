@@ -39,7 +39,7 @@ use rust_stdlib::path;
 use rust_stdlib::time::{self, Time};
 use rust_stdlib_derive::{MarshalTo, UnmarshalFrom};
 
-use super::bots::BotToken;
+use super::bots::{BotToken, BOT_ROLE};
 use super::devices::DeviceToken;
 use super::embeds::{EmbedState, StreamBuffer};
 use super::invites::{InviteToken, JoinInvite};
@@ -121,6 +121,9 @@ pub struct StoredMeta {
     /// The features `/toggle` turned off, by name.
     #[json("features_off,omitzero")]
     pub features_off: Vec<String>,
+    /// `State.bot_sweep_at`.
+    #[json("bot_sweep,omitzero")]
+    pub bot_sweep: i64,
 }
 
 #[derive(Clone, Debug, Default, MarshalTo, UnmarshalFrom)]
@@ -221,6 +224,9 @@ pub struct StoredUser {
     /// `UserState.invited`. Go's decoder skips the member.
     #[json("invited,omitzero")]
     pub invited: bool,
+    /// `UserState.active`. Go's decoder skips the member.
+    #[json("active,omitzero")]
+    pub active: i64,
     /// The chosen status (§4.5.1), absent for online.
     #[json("status,omitzero")]
     pub status: Option<String>,
@@ -402,6 +408,7 @@ impl State {
                 .iter()
                 .map(|f| f.name().to_owned())
                 .collect(),
+            bot_sweep: self.bot_sweep_at,
         }
     }
 
@@ -667,6 +674,7 @@ pub fn stored_user_of(u: &UserState) -> StoredUser {
         bot: u.owner.clone().unwrap_or_default(),
         roles: u.roles.clone(),
         invited: u.invited,
+        active: u.active,
         status: if u.chosen != STATUS_ONLINE {
             Some(u.chosen.clone())
         } else {
@@ -742,6 +750,7 @@ impl Server {
             st.history_floor = st.stored_meta.history_floor;
             st.rooms_removed_at = st.stored_meta.rooms_removed_at;
             st.role_grants = st.stored_meta.role_grants.iter().cloned().collect();
+            st.bot_sweep_at = st.stored_meta.bot_sweep;
             st.features_off = st
                 .stored_meta
                 .features_off
@@ -887,6 +896,7 @@ impl Server {
                 u.owner = Some(stored.bot.clone());
             }
             u.invited = stored.invited;
+            u.active = stored.active;
             for role in &stored.roles {
                 if valid_role(role) && !u.has_role(role) && u.roles.len() < MAX_ROLES {
                     u.roles.push(role.clone());
@@ -1150,6 +1160,16 @@ impl Server {
                 continue;
             }
             st.grant_roles_locked(&id);
+            // A bot stored before activity was kept counts as active now,
+            // unless the sweep signed it out, taking its tokens.
+            let u = &st.users[&id];
+            if u.roles == [BOT_ROLE]
+                && u.active == 0
+                && (st.bots.of_bot(&id).is_some() || st.invites.of_user(&id).is_some())
+            {
+                st.users.get_mut(&id).expect("user exists").active = now.unix_milli();
+                st.touch_user(&id);
+            }
             st.schedule_mute_locked(&id);
             let room_ids: Vec<String> = st.users[&id].room_mutes.keys().cloned().collect();
             for room_id in room_ids {

@@ -565,6 +565,7 @@ impl State {
     /// each user may send a burst of messages_per_minute, refilled evenly
     /// over a minute.
     pub fn admit_post_locked(&mut self, user_id: &str) -> Result<(), RpcError> {
+        self.note_bot_active_locked(user_id);
         let limit = self.config.messages_per_minute;
         if limit <= 0 {
             return Ok(());
@@ -611,6 +612,7 @@ impl State {
                 "Sign in before sending requests",
             ));
         };
+        self.note_bot_active_locked(&user_id);
         let Some(m) = self.visible_message_locked(&user_id, &message_id) else {
             return Err(invalid_params(format!(
                 "Unknown message {}",

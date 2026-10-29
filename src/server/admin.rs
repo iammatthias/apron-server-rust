@@ -216,6 +216,8 @@ impl State {
         } else {
             u.roles.retain(|r| r != role);
         }
+        // A user just made a bot is not idle (bots.rs).
+        u.active = rust_stdlib::time::now().unix_milli();
         self.touch_user(user_id);
         self.notify_profile_locked(user_id, None, &ExtObject::new(), &[]);
         change.changed = true;

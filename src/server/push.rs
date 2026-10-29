@@ -1000,6 +1000,7 @@ impl Server {
                 st.expire_pushes_locked(&id, &now);
             }
             st.expire_history_locked(&now);
+            st.sweep_idle_bots_locked(&now);
         });
     }
 

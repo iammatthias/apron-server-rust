@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use rust_stdlib::encoding::base64::URL_SAFE_NO_PAD;
-use rust_stdlib::time::{self, Time};
+use rust_stdlib::time::{self, Duration, Time};
 use rust_stdlib_crypto::{rand, sha256};
 
 use super::email::web_socket_url;
@@ -232,5 +232,98 @@ impl State {
         Ok(self
             .switch_user_locked(c, req, &bot_id, Object::new(), sign_in, false)
             .into())
+    }
+}
+
+/// How long a bot may go without signing in, posting or reacting before
+/// the idle bot sweep signs it out, and how often the sweep runs.
+pub const BOT_IDLE: Duration = Duration::from_hours(7 * 24);
+pub const BOT_SWEEP_INTERVAL: Duration = Duration::from_hours(24);
+/// Bots one sweep signs out; a full batch makes the next sweep due at once.
+pub const BOT_SWEEP_BATCH: usize = 4;
+/// A bot's activity is noted at most this often.
+const BOT_ACTIVE_WRITE: Duration = Duration::from_hours(1);
+
+impl State {
+    /// Notes that a user whose only role is `bot` signed in, posted or
+    /// reacted, for the idle bot sweep; at most hourly. Anyone else is left
+    /// as is.
+    pub fn note_bot_active_locked(&mut self, user_id: &str) {
+        let now = time::now().unix_milli();
+        let Some(u) = self.users.get_mut(user_id) else {
+            return;
+        };
+        if u.roles != [BOT_ROLE] || now - u.active < BOT_ACTIVE_WRITE.milliseconds() {
+            return;
+        }
+        u.active = now;
+        self.touch_user(user_id);
+    }
+
+    /// The idle bot sweep, apron-server-cloudflare's: once due, signs out up
+    /// to BOT_SWEEP_BATCH users whose only role is `bot` and that have been
+    /// inactive for BOT_IDLE, oldest first. Each is closed, leaves its rooms
+    /// with logged leaves, and loses its tokens; its account and what it
+    /// posted stay, and its owner's next `/invite-bot` brings it back. The
+    /// first sweep after a start with none due only sets one a week out, so
+    /// bots active before are not taken for idle.
+    pub fn sweep_idle_bots_locked(&mut self, now: &Time) {
+        let now = now.unix_milli();
+        if self.bot_sweep_at == 0 {
+            self.bot_sweep_at = now + BOT_IDLE.milliseconds();
+            return;
+        }
+        if now < self.bot_sweep_at {
+            return;
+        }
+        let before = now - BOT_IDLE.milliseconds();
+        let mut idle: Vec<(i64, String)> = self
+            .users
+            .values()
+            .filter(|u| u.roles == [BOT_ROLE] && u.active > 0 && u.active < before)
+            .map(|u| (u.active, u.id.clone()))
+            .collect();
+        idle.sort();
+        idle.truncate(BOT_SWEEP_BATCH);
+        self.bot_sweep_at = if idle.len() == BOT_SWEEP_BATCH {
+            now
+        } else {
+            now + BOT_SWEEP_INTERVAL.milliseconds()
+        };
+        for (_, user_id) in idle {
+            self.sign_out_bot_locked(&user_id);
+        }
+    }
+
+    fn sign_out_bot_locked(&mut self, user_id: &str) {
+        let clients: Vec<ClientId> = self.users[user_id].clients.iter().copied().collect();
+        for id in clients {
+            self.revoke_connection_locked(
+                id,
+                RpcError::new(
+                    CODE_DENIED,
+                    "Signed out after a week without signing in or posting",
+                ),
+            );
+        }
+        let rooms: Vec<String> = self.users[user_id].joined.iter().cloned().collect();
+        for room_id in rooms {
+            self.leave_locked(user_id, &room_id);
+        }
+        if let Some(key) = self.bots.of_bot(user_id) {
+            self.bots.remove(&key);
+            self.touch_bot(key);
+        }
+        if let Some(key) = self.invites.of_user(user_id) {
+            self.invites.remove(&key);
+            self.touch_invite(key);
+        }
+        for key in self.sorted_pushes(user_id) {
+            self.remove_push_locked(&key);
+        }
+        if let Some(u) = self.users.get_mut(user_id) {
+            u.active = 0;
+        }
+        self.touch_user(user_id);
     }
 }

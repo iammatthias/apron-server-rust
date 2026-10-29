@@ -75,8 +75,13 @@ pub struct UserState {
     /// every other user.
     pub owner: Option<String>,
     /// An account that signs in with a token alone, with no passkey or
-    /// email address needed (admin.rs): the user `admin`.
+    /// email address needed: the user `admin` (admin.rs) and those an admin
+    /// invites (invites.rs).
     pub invited: bool,
+    /// For a user whose only role is `bot`: when it last signed in, posted
+    /// or reacted, in Unix milliseconds, for the idle bot sweep; 0 once the
+    /// sweep signed it out (bots.rs).
+    pub active: i64,
     /// Limits the user's new messages, room_set requests, and /avatar
     /// commands to messages_per_minute; `None` when unlimited.
     pub posts: Option<Limiter>,
@@ -130,6 +135,7 @@ impl UserState {
             passkey: None,
             owner: None,
             invited: false,
+            active: 0,
             posts: None,
             unfurls: None,
             chosen: STATUS_ONLINE.into(),
@@ -528,6 +534,7 @@ impl State {
         sign_in: bool,
         join_default: bool,
     ) -> Object {
+        self.note_bot_active_locked(user_id);
         let mut result = obj! {"you" => self.users[user_id].you()};
         result.extend(extra);
         c.send_result(req, result.clone().into());

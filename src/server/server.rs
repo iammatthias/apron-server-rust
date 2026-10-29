@@ -669,6 +669,9 @@ pub struct State {
     pub join_invite: Option<JoinInvite>,
     /// The features an admin turned off with `/toggle` (toggles.rs).
     pub features_off: BTreeSet<Feature>,
+    /// When the idle bot sweep is next due, in Unix milliseconds; 0 until
+    /// the first sweep sets it (bots.rs).
+    pub bot_sweep_at: i64,
     pub email: EmailState,
     /// The webpush key (§4.9); vapid_stored reports that it is the store's,
     /// rather than Config's, so a flush keeps it there.
@@ -853,6 +856,7 @@ pub fn open(config: Config) -> Result<Arc<Server>, store::StoreError> {
                 invites: InviteTokens::default(),
                 join_invite: None,
                 features_off: BTreeSet::new(),
+                bot_sweep_at: 0,
                 email: EmailState::default(),
                 vapid,
                 vapid_stored: false,
