@@ -140,7 +140,6 @@ impl State {
         self.publish_emoji_locked(replaced.map(|old| old.embed));
     }
 
-    /// Whether the catalog has a key.
     pub fn has_custom_emoji(&self, key: &str) -> bool {
         self.emoji.entries.contains_key(key)
     }
