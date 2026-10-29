@@ -18,6 +18,7 @@ use rust_stdlib_crypto::{rand, subtle};
 
 use super::protocol::*;
 use super::server::{Client, Server, State};
+use super::toggles::{Feature, UPLOADS_OFF};
 use super::unfurl::Preview;
 use crate::obj;
 
@@ -258,6 +259,17 @@ impl State {
             }
         }
 
+        let new_upload = submitted.iter().any(|value| {
+            embed_id(value).is_none()
+                && value
+                    .as_object()
+                    .and_then(|e| e.get("kind"))
+                    .and_then(Json::as_str)
+                    == Some("upload")
+        });
+        if new_upload && !self.feature_on(Feature::Uploads) {
+            return Err(RpcError::new(CODE_DENIED, UPLOADS_OFF));
+        }
         let mut embeds: Vec<Json> = Vec::with_capacity(submitted.len());
         let mut written: Vec<Json> = Vec::new();
         for value in submitted {

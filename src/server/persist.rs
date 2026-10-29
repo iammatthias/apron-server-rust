@@ -49,6 +49,7 @@ use super::push::{parse_wake_names, PushRegistration};
 use super::rooms::{ReadCursor, RoomState};
 use super::server::{LogRecord, RecordKind, Server, State};
 use super::status::*;
+use super::toggles::Feature;
 use super::users::{valid_role, UserState, MAX_ROLES};
 use super::webauthn::{PasskeyTimes, PasskeyUser, Session};
 use super::webpush::{decode_base64_url, encode_base64_url, parse_push_keys, VapidKey};
@@ -117,6 +118,9 @@ pub struct StoredMeta {
     pub join_remaining: i64,
     #[json("join_expires,omitzero")]
     pub join_expires: i64,
+    /// The features `/toggle` turned off, by name.
+    #[json("features_off,omitzero")]
+    pub features_off: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, MarshalTo, UnmarshalFrom)]
@@ -393,6 +397,11 @@ impl State {
                 .join_invite
                 .as_ref()
                 .map_or(0, |invite| invite.expires_ms),
+            features_off: self
+                .features_off
+                .iter()
+                .map(|f| f.name().to_owned())
+                .collect(),
         }
     }
 
@@ -733,6 +742,12 @@ impl Server {
             st.history_floor = st.stored_meta.history_floor;
             st.rooms_removed_at = st.stored_meta.rooms_removed_at;
             st.role_grants = st.stored_meta.role_grants.iter().cloned().collect();
+            st.features_off = st
+                .stored_meta
+                .features_off
+                .iter()
+                .filter_map(|name| Feature::named(name))
+                .collect();
             st.join_invite = hex::decode(&st.stored_meta.join_invite)
                 .ok()
                 .and_then(|key| <[u8; 32]>::try_from(key).ok())
@@ -1140,9 +1155,8 @@ impl Server {
             for room_id in room_ids {
                 st.schedule_room_mute_locked(&id, &room_id);
             }
-            let attended = st.attended(&st.users[&id]);
+            st.note_shown_locked(&id);
             let u = st.users.get_mut(&id).expect("user exists");
-            u.shown = u.shown_status(attended);
             u.status = u.shown.clone();
             if stored_users[&id].shown && u.shown == STATUS_OFFLINE {
                 u.seen = now.unix_milli();

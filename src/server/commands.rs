@@ -8,6 +8,7 @@ use super::messages::{mentions, parse_message_ref, validate_body, MessageState};
 use super::protocol::*;
 use super::rooms::RoomState;
 use super::server::{Client, Server, State, DEFAULT_ROOM_ID};
+use super::toggles::{Feature, UPLOADS_OFF};
 use super::users::{UserState, ADMIN_ROLE, GUEST_READ_ONLY};
 use crate::obj;
 
@@ -154,6 +155,14 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         writes: true,
         run: State::invite_command,
     },
+    ServerCommand {
+        name: "toggle",
+        usage: "/toggle <activity|uploads|presence|addmember>",
+        help: "turn typing activity, uploads, user status (presence), or users adding others to rooms (addmember) off or on for everyone",
+        audience: Audience::Admins,
+        writes: true,
+        run: State::toggle_command,
+    },
 ];
 
 /// Renders a notice for the one connection it is queued on: unlogged,
@@ -279,6 +288,7 @@ impl State {
             .iter()
             .filter(|command| !(command.writes && read_only))
             .filter(|command| command.audience.lists(u, r))
+            .filter(|command| command.name != "avatar" || self.feature_on(Feature::Uploads))
             .map(|command| format!("- `{}`: {}", command.usage, command.help))
             .collect();
         c.enqueue(&private_notice(r, &lines.join("\n")));
@@ -301,6 +311,9 @@ impl State {
                 .and_then(|e| e.get("kind"))
                 .and_then(Json::as_str)
                 == Some("upload");
+        if !self.feature_on(Feature::Uploads) {
+            return Err(RpcError::new(CODE_DENIED, UPLOADS_OFF));
+        }
         if !one_upload {
             return Err(invalid_params(
                 "/avatar takes exactly one upload embed: attach an image",

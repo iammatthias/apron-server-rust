@@ -27,6 +27,7 @@ use super::protocol::*;
 use super::push::{PushDeliverer, PushRegistration};
 use super::rooms::RoomState;
 use super::status::optional_statuses;
+use super::toggles::Feature;
 use super::unfurl::{self, Fetcher, Unfurler};
 use super::users::{guest_write, DedupEntry, UserState, GUEST_READ_ONLY};
 use super::webauthn::{PasskeyCeremony, Sessions, WebAuthn};
@@ -666,6 +667,8 @@ pub struct State {
     pub invites: InviteTokens,
     /// The live `/invite` sign-up invite, if any (invites.rs).
     pub join_invite: Option<JoinInvite>,
+    /// The features an admin turned off with `/toggle` (toggles.rs).
+    pub features_off: BTreeSet<Feature>,
     pub email: EmailState,
     /// The webpush key (§4.9); vapid_stored reports that it is the store's,
     /// rather than Config's, so a flush keeps it there.
@@ -849,6 +852,7 @@ pub fn open(config: Config) -> Result<Arc<Server>, store::StoreError> {
                 bots: BotTokens::default(),
                 invites: InviteTokens::default(),
                 join_invite: None,
+                features_off: BTreeSet::new(),
                 email: EmailState::default(),
                 vapid,
                 vapid_stored: false,
@@ -1425,7 +1429,13 @@ impl Server {
                 }
                 return;
             };
-            let Some(op) = self.ops.get(req.method.as_str()).copied() else {
+            // Activity turned off takes the unsupported-method path.
+            let op = self
+                .ops
+                .get(req.method.as_str())
+                .copied()
+                .filter(|_| req.method != "activity" || st.feature_on(Feature::Activity));
+            let Some(op) = op else {
                 drop(st);
                 if req.has_id {
                     c.send_error(
@@ -1625,42 +1635,50 @@ impl State {
         // always offered.
         let mut auth_schemes = schemes;
         auth_schemes.push("guest".into());
+        let (activity, uploads) = (
+            self.feature_on(Feature::Activity),
+            self.feature_on(Feature::Uploads),
+        );
+        // A connection is offered what is on as it connects, and keeps it.
         let mut capabilities: Vec<String> = [
-            "history",
-            "edit",
-            "rooms",
-            "reactions",
-            "activity",
-            "embed:upload",
-            "embed:stream",
-            "command",
-            "status",
-            "ext",
+            ("history", true),
+            ("edit", true),
+            ("rooms", true),
+            ("reactions", true),
+            ("activity", activity),
+            ("embed:upload", uploads),
+            ("embed:stream", true),
+            ("command", true),
+            ("status", true),
+            ("ext", true),
         ]
         .iter()
-        .map(|s| s.to_string())
+        .filter(|(_, on)| *on)
+        .map(|(s, _)| s.to_string())
         .collect();
         let mut params = obj! {
             "apron" => 9i64,
             "agent" => "apron-rust/9",
             "auth" => auth_schemes.clone(),
             "ping" => (self.config.ping_interval.as_nanos() / time::SECOND.as_nanos()).max(1),
-            // The optional statuses accepted with `me` (§4.5); online and ""
-            // always are, and are not listed.
-            "status" => optional_statuses(),
         };
+        // The optional statuses accepted with `me` (§4.5), only while others
+        // are shown them; online and "" always are, and are not listed.
+        if self.feature_on(Feature::Presence) {
+            params.insert("status".into(), optional_statuses().into());
+        }
         if !self.config.disable_push {
             params.insert("push".into(), super::push::server_push_params(self).into());
         }
         params.insert("welcome".into(), self.welcome(origin).into());
         // ext:settings, the extension apron-web defines (its EXT.md §3),
-        // always with every key apron-server-cloudflare sends. Activity is
-        // always on, so read cursors are kept, and any member may add others.
-        // private_rooms is left out when unlimited, as an absent key says.
+        // always with every key apron-server-cloudflare sends: read cursors
+        // are kept with activity. private_rooms is left out when unlimited,
+        // as an absent key says.
         let mut settings = obj! {
             "guest_posting" => self.config.guest_posting,
-            "read_cursors" => true,
-            "add_members" => true,
+            "read_cursors" => activity,
+            "add_members" => self.feature_on(Feature::AddMember),
         };
         if self.config.max_private_rooms > 0 {
             settings.insert("private_rooms".into(), self.config.max_private_rooms.into());
@@ -1673,10 +1691,14 @@ impl State {
             .iter()
             .map(|t| (t.to_string(), sized(self.config.max_avatar_bytes)))
             .collect();
-        let media = obj! {
-            "upload" => obj! {"*/*" => sized(self.config.max_upload_bytes)},
-            "avatar" => avatar,
-        };
+        let mut media = Object::new();
+        if uploads {
+            media.insert(
+                "upload".into(),
+                obj! {"*/*" => sized(self.config.max_upload_bytes)}.into(),
+            );
+            media.insert("avatar".into(), avatar.into());
+        }
         capabilities.extend(["ext:settings".into(), "ext:media".into()]);
         params.insert(
             "ext".into(),

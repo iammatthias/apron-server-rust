@@ -19,6 +19,7 @@ pub mod rooms;
 #[allow(clippy::module_inception)]
 pub mod server;
 pub mod status;
+pub mod toggles;
 pub(crate) mod unfurl;
 pub mod unread;
 pub mod users;
