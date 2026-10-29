@@ -1027,3 +1027,36 @@ pub fn revoke_role(server: &TestServer, user_id: &str, role: &str) {
         .roles
         .retain(|r| r != role);
 }
+
+/// Makes the guest user_id an account in memory only, one that signs in
+/// with a token it was never given, so a test guest can do what only
+/// accounts may.
+pub fn make_account(server: &TestServer, user_id: &str) {
+    server
+        .app
+        .lock()
+        .users
+        .get_mut(user_id)
+        .expect("user exists")
+        .invited = true;
+}
+
+/// Sends a request and returns its reply, result or error, skipping the
+/// notifications before it.
+pub fn reply(c: &mut TestClient, method: &str, id: &str, params: Object) -> Object {
+    c.write(&obj! {"method" => method, "id" => id, "params" => params});
+    loop {
+        let frame = c.read();
+        if frame.contains_key("id") {
+            return frame;
+        }
+    }
+}
+
+/// The error code of a reply, if it is an error.
+pub fn error_code(frame: &Object) -> Option<i64> {
+    match frame.get("error")?.as_object()?.get("code")? {
+        Json::Number(code) => Some(*code as i64),
+        _ => None,
+    }
+}

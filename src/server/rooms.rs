@@ -11,7 +11,7 @@ use super::server::{
     MAX_HISTORY_REPLY_BYTES,
 };
 use super::toggles::Feature;
-use super::users::{UserState, ADMIN_ROLE, MOD_ROLE, ROOM_CREATOR_ROLES};
+use super::users::{UserState, ADMIN_ROLE, ROOM_CREATOR_ROLES};
 use crate::obj;
 
 pub const MAX_THREAD_TITLE_RUNES: usize = 60;
@@ -65,11 +65,11 @@ pub struct ReadCursor {
 }
 
 impl RoomState {
-    /// Reports whether u may remove others from r, with /kick or
-    /// room_leave's user_id (§4.2.2, §4.1): the room's creator, or a user
-    /// with the admin or mod role.
-    pub fn may_remove(&self, u: &UserState) -> bool {
-        self.creator == u.id || u.has_role(ADMIN_ROLE) || u.has_role(MOD_ROLE)
+    /// Reports whether u may remove target from r with room_leave's
+    /// user_id (§4.2.2): an admin anyone, an account its own bot, and the
+    /// room's creator, if an account, anyone.
+    pub fn may_remove(&self, u: &UserState, target: &str) -> bool {
+        u.has_role(ADMIN_ROLE) || (u.account() && (self.creator == u.id || owns_bot(u, target)))
     }
 
     /// The inclusive lower bound of the room's retained history (§4.3.3):
@@ -105,6 +105,11 @@ impl RoomState {
         params.extend(self.delivery_fields(floor));
         params
     }
+}
+
+/// Reports whether target is u's `/invite-bot` bot.
+fn owns_bot(u: &UserState, target: &str) -> bool {
+    target.strip_prefix(BOT_ID_PREFIX) == Some(u.id.as_str())
 }
 
 /// Renders a room_update notification (§4.2.3) with one field.
@@ -733,6 +738,11 @@ impl State {
             if created >= MAX_CREATED_ROOMS {
                 return Err(RpcError::new(CODE_DENIED, "room_limit"));
             }
+        } else if !self.users[&user_id].account() {
+            return Err(RpcError::new(
+                CODE_DENIED,
+                "Sign in to start a private room",
+            ));
         } else if self.private_rooms_full_locked(&self.users[&user_id]) {
             return Err(RpcError::new(
                 CODE_DENIED,
@@ -982,11 +992,22 @@ impl State {
         };
         let mut target = user_id.clone();
         if has_target && target_id != user_id {
-            // With addmember off, only an admin adds others, and an
-            // account its own bot.
-            let may_add = self.feature_on(Feature::AddMember)
-                || self.users[&user_id].has_role(ADMIN_ROLE)
-                || target_id == format!("{BOT_ID_PREFIX}{user_id}");
+            // An admin adds anyone, an account its own bot, and, while
+            // addmember is on, any account anyone. Adding is the only way
+            // into a private room, so there any member but a guest or bot
+            // may.
+            let u = &self.users[&user_id];
+            if r.private && !u.account() {
+                return Err(RpcError::new(
+                    CODE_DENIED,
+                    "Only a signed-in member who is not a bot can add someone to a private room",
+                ));
+            }
+            let may_add = u.has_role(ADMIN_ROLE)
+                || (u.account()
+                    && (r.private
+                        || self.feature_on(Feature::AddMember)
+                        || owns_bot(u, &target_id)));
             if !may_add {
                 return Err(RpcError::new(
                     CODE_DENIED,
@@ -999,10 +1020,9 @@ impl State {
                     format!("Join {} before adding others to it", r.title()),
                 ));
             }
-            let Some(t) = self.users.get(&target_id) else {
+            let Some(t) = self.users.get(&target_id).filter(|t| t.persists()) else {
                 return Err(invalid_params(format!(
-                    "Unknown user {}",
-                    quote(&target_id)
+                    "{target_id} is not a registered user"
                 )));
             };
             // Adding someone to a thread of a private room takes adding them
@@ -1040,8 +1060,7 @@ impl State {
     }
 
     /// Leaves a room (§4.2.2). With the user_id of another user, it removes
-    /// that user, which the room's creator and users with the admin or
-    /// moderator role may do.
+    /// that user, as `RoomState::may_remove` allows.
     pub fn leave_room_locked(
         &mut self,
         c: &Arc<Client>,
@@ -1054,19 +1073,15 @@ impl State {
         };
         let mut target = user_id.clone();
         if has_target && target_id != user_id {
-            if !r.may_remove(&self.users[&user_id]) {
+            if !r.may_remove(&self.users[&user_id], &target_id) {
                 return Err(RpcError::new(
                     CODE_DENIED,
-                    format!(
-                        "Only the creator of {} or a moderator can remove people from it",
-                        r.title()
-                    ),
+                    "Only an admin, the room's creator, or a bot's owner, can remove someone else",
                 ));
             }
             if !self.users.contains_key(&target_id) {
                 return Err(invalid_params(format!(
-                    "Unknown user {}",
-                    quote(&target_id)
+                    "No user has the user_id {target_id}"
                 )));
             }
             target = target_id;

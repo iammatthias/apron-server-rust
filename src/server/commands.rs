@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use super::messages::{mentions, parse_message_ref, validate_body, MessageState};
+use super::messages::{parse_message_ref, validate_body, MessageState};
 use super::protocol::*;
 use super::rooms::RoomState;
 use super::server::{Client, Server, State, DEFAULT_ROOM_ID};
@@ -18,8 +18,6 @@ pub const ROOM_NOTICE_ID: &str = "~room";
 pub const PRIVATE_NOTICE_ID: &str = "~private";
 pub const PRIVATE_NOTICE_NAME: &str = "System message to you";
 
-pub const MAX_KICK_REASON_RUNES: usize = 200;
-
 /// Executes a command for the sender in a room, with the message body and
 /// the arguments after the command word.
 type CommandFn = fn(&mut State, &Arc<Client>, &str, &Object, &str) -> Result<Object, RpcError>;
@@ -32,24 +30,18 @@ enum Audience {
     Accounts,
     /// Accounts with the admin role.
     Admins,
-    /// Those who may remove others from the room (`RoomState::may_remove`);
-    /// the command itself refuses everyone else.
-    Removers,
 }
 
 impl Audience {
-    /// Reports whether /help lists the command for u in r.
-    fn lists(self, u: &UserState, r: &RoomState) -> bool {
-        match self {
-            Audience::Removers => r.may_remove(u),
-            _ => self.refusal(u, "").is_none(),
-        }
+    /// Reports whether /help lists the command for u.
+    fn lists(self, u: &UserState) -> bool {
+        self.refusal(u, "").is_none()
     }
 
     /// The error that refuses u the command `name`, if any.
     fn refusal(self, u: &UserState, name: &str) -> Option<RpcError> {
         let message = match self {
-            Audience::Everyone | Audience::Removers => return None,
+            Audience::Everyone => return None,
             Audience::Accounts if u.account() => return None,
             Audience::Accounts if u.bot() => format!("A bot can't use /{name}"),
             Audience::Accounts => format!("Sign in with a passkey or email to use /{name}"),
@@ -117,9 +109,9 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
     },
     ServerCommand {
         name: "kick",
-        usage: "/kick @user [reason]",
-        help: "remove someone from this room (its creator or a moderator)",
-        audience: Audience::Removers,
+        usage: "/kick <user_id>",
+        help: "remove a user from this room",
+        audience: Audience::Admins,
         writes: true,
         run: State::kick_command,
     },
@@ -287,7 +279,7 @@ impl State {
         let lines: Vec<String> = SERVER_COMMANDS
             .iter()
             .filter(|command| !(command.writes && read_only))
-            .filter(|command| command.audience.lists(u, r))
+            .filter(|command| command.audience.lists(u))
             .filter(|command| command.name != "avatar" || self.feature_on(Feature::Uploads))
             .map(|command| format!("- `{}`: {}", command.usage, command.help))
             .collect();
@@ -330,72 +322,34 @@ impl State {
         })
     }
 
-    /// Removes the one mentioned user from the room: the room's members, the
-    /// target included, receive the logged leave membership (§4.2.2), the
-    /// target room_update left, and the remaining members a ~room notice with
-    /// the reason. Only the room's creator and admins or moderators may kick.
+    /// `/kick <user_id>` removes a user, an account or a guest, from the
+    /// room of the command, as if they had left it (§4.2.2), and tells the
+    /// admin who ran it with a ~private notice.
     fn kick_command(
         &mut self,
         c: &Arc<Client>,
         room_id: &str,
-        body: &Object,
+        _body: &Object,
         args: &str,
     ) -> Result<Object, RpcError> {
         let user_id = self.client_user(c).unwrap_or_default();
-        let targets = mentions(Some(body));
-        if targets.len() != 1 {
-            return Err(invalid_params(
-                "Usage: /kick @user [reason], mentioning exactly one user",
-            ));
-        }
-        let r = &self.rooms[room_id];
-        if !r.may_remove(&self.users[&user_id]) {
-            return Err(RpcError::new(
-                CODE_DENIED,
-                format!(
-                    "Only the creator of {} or a moderator can remove people from it",
-                    r.title()
-                ),
-            ));
-        }
-        let target = targets[0].clone();
-        if !r.members.contains(&target) {
-            return Err(invalid_params(format!("@{target} is not in {}", r.title())));
+        let target = args.strip_prefix('@').unwrap_or(args);
+        if target.is_empty() || target.contains(char::is_whitespace) {
+            return Err(invalid_params("Usage: /kick <user_id>"));
         }
         if target == user_id {
-            return Err(invalid_params(
-                "You cannot remove yourself; leave the room instead",
+            return Err(RpcError::new(
+                CODE_DENIED,
+                "You can't kick yourself; leave the room instead",
             ));
         }
-        // The first argument names the target as the user typed it. Only
-        // body.mentions says who it is (§3.5.5); a user_id has no whitespace
-        // (§2.4), so the typed mention ends with the first word at the
-        // latest.
-        let mut reason = args;
-        if let Some((first, rest)) = args.split_once(' ').or(Some((args, ""))) {
-            if first.starts_with('@') {
-                reason = rest.trim();
-            }
+        if !self.leave_locked(target, room_id) {
+            return Err(invalid_params(format!("{target} is not in this room")));
         }
-        // The reason is one plain line inside a system notice.
-        let mut reason = reason.split('\n').next().unwrap_or("").trim().to_owned();
-        if reason.chars().count() > MAX_KICK_REASON_RUNES {
-            reason = format!(
-                "{}…",
-                reason
-                    .chars()
-                    .take(MAX_KICK_REASON_RUNES)
-                    .collect::<String>()
-                    .trim()
-            );
-        }
-        self.leave_locked(&target, room_id);
-        let mut text = format!("@{target} was removed by @{user_id}");
-        if !reason.is_empty() {
-            text.push_str(": ");
-            text.push_str(&reason);
-        }
-        self.post_room_notice_locked(room_id, &text);
+        c.enqueue(&private_notice(
+            &self.rooms[room_id],
+            &format!("Removed `{target}` from this room."),
+        ));
         Ok(Object::new())
     }
 }
