@@ -190,3 +190,27 @@ fn test_fractional_typing_is_floored() {
         ]
     );
 }
+
+/// A read cursor need not name a message, as on Cloudflare: one naming an
+/// unknown id is kept and relayed in its canonical spelling, and only one
+/// that is not a positive decimal string is refused.
+#[test]
+fn test_read_cursor_naming_an_unknown_message_is_relayed() {
+    let server = super::helpers::admin_test_server();
+    let mut first = super::helpers::admin(&server);
+    let mut second = super::helpers::admin(&server);
+    for id in ["0", "-1", "x1", "9007199254740992", "0042"] {
+        read(&first, id);
+    }
+    first.drain();
+    assert_eq!(
+        activities(&second.drain()),
+        vec![
+            obj! {"room_id" => "general", "from" => obj! {"user_id" => "admin", "name" => "Admin"}, "read_message_id" => "42"}
+        ]
+    );
+    assert_eq!(
+        server.app.lock().rooms["general"].reads["admin"].message_id,
+        "42"
+    );
+}
