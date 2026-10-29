@@ -229,6 +229,23 @@ handshake would wait on a peer that may not be reading, behind up to 128
 queued batches. Ignoring later frames means a revoked token stops working
 at once, even for a request already read.
 
+### Liveness (§1; SPEC §3, Socket lifecycle)
+
+**Reference.** apron-server-cloudflare advertises `server.ping` as 45
+seconds and closes a connection that pinged and then sent nothing for 150
+seconds. It cannot send WebSocket pings.
+
+**This server.** Advertises 30 seconds and closes a connection that pinged
+and then sent nothing for three intervals and the 10-second WebSocket ping
+timeout, 100 seconds. It also sends WebSocket pings every interval and
+closes a connection that misses a pong. A connection that never pings is
+closed after 15 minutes without a frame, after the same `~private` notice
+as Cloudflare's, and both closes use 1001 as Cloudflare's do.
+
+**Why.** The interval and timeouts are Go's defaults, kept from the port.
+WebSocket pings find a vanished peer that the protocol ping alone would
+miss.
+
 ### Roles (§3.3), `--role`
 
 **Reference.** apron-server-cloudflare stores roles with the identity and
@@ -589,6 +606,27 @@ are no leases, no daily budget and no pending-frame bound.
 **Why.** A connection's frames are read one at a time and each runs to
 completion, so at most one is pending. Leases and the daily budget save
 Cloudflare's SQL writes.
+
+### Budget stops, storage failures and admin alerts (SPEC §6)
+
+**Reference.** apron-server-cloudflare closes when its budget guard or
+flood trip turns on Cloudflare's edge stop, or when an operation overruns
+its storage reservation. Either posts a message in `general` as the
+`admin` user that mentions every admin, pushed at once past the usual
+wait, coalescing and allowances. A failed budget read or write refuses
+work with `Server storage is unavailable; try again shortly` until storage
+works again. Every 503 for a failure or overload carries `Retry-After`,
+60 seconds unless it has its own.
+
+**This server.** Has no edge stop, flood trip, daily budget or storage
+accounting, so it never closes for these reasons and posts no alert. A
+failed store write is logged and the server keeps serving from memory. The
+batch that failed is not written again until those entries change. Its
+only 503 is while shutting down, without `Retry-After`.
+
+**Why.** The stops and the accounting guard Cloudflare's bill. A
+self-hosted server has no bill to stop, and its restart takes seconds, so
+a 60-second retry would only delay clients.
 
 ### Request deduplication (§1.2; SPEC §8)
 
