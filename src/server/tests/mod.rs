@@ -24,6 +24,7 @@ mod permissions_test;
 mod persist_test;
 mod push_fixture_test;
 mod push_test;
+mod reactions_test;
 mod reference_test;
 mod retention_test;
 mod server_test;

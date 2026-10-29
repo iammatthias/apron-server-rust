@@ -5,6 +5,7 @@ use rust_stdlib::encoding::json::jsontext::Value;
 use rust_stdlib::time;
 
 use super::embeds::MAX_EMBEDS_PER_MESSAGE;
+use super::emoji::{is_emoji_key, normalize_entries, same_entries};
 use super::protocol::*;
 use super::server::{Client, Frame, LogRecord, RecordKind, Server, State, DEFAULT_ROOM_ID};
 use super::users::{json_equal, MODERATOR_ROLES};
@@ -219,10 +220,11 @@ fn parse_emojis(params: &Params) -> Result<Vec<String>, RpcError> {
                 format!("An emoji is at most {MAX_EMOJI_BYTES} bytes"),
             ));
         }
-        if !emojis.contains(&emoji) {
-            emojis.push(emoji);
-        }
+        emojis.push(emoji);
     }
+    // Stored fully qualified, and entries that differ only in U+FE0F are one
+    // (§4.7).
+    let emojis = normalize_entries(emojis);
     if emojis.len() > MAX_DISTINCT_EMOJI {
         // A count limit the server sets is denied (§1.1).
         return Err(RpcError::new(
@@ -231,10 +233,6 @@ fn parse_emojis(params: &Params) -> Result<Vec<String>, RpcError> {
         ));
     }
     Ok(emojis)
-}
-
-fn same_emoji_set(a: &[String], b: &[String]) -> bool {
-    a.len() == b.len() && a.iter().all(|emoji| b.contains(emoji))
 }
 
 /// The message_id a snapshot's reply_to names.
@@ -683,7 +681,17 @@ impl State {
                 "reaction limit reached for this message",
             ));
         }
-        if !same_emoji_set(&current, &emojis) {
+        // A custom emoji key must be one the server has, or already in the
+        // user's set on the message: a request carries the whole set, so a
+        // removed emoji must not stop the user changing their other
+        // reactions (ext:emoji).
+        if let Some(key) = emojis
+            .iter()
+            .find(|entry| is_emoji_key(entry) && !current.contains(entry))
+        {
+            return Err(invalid_params(format!("{key} is not a custom emoji here")));
+        }
+        if !same_entries(&current, &emojis) {
             self.touch_message(&message_id);
             let from = self.users[&user_id].from();
             let log_id = self.commit_reactions_locked(
