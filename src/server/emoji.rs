@@ -49,7 +49,7 @@ pub fn qualify_emoji(entry: &str) -> String {
 
 /// A reaction entry as the server stores it: a key as written, an emoji
 /// sequence fully qualified.
-pub fn stored_entry(entry: &str) -> String {
+fn stored_entry(entry: &str) -> String {
     if is_emoji_key(entry) {
         entry.to_owned()
     } else {

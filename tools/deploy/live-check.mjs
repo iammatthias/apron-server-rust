@@ -18,7 +18,9 @@
 // /invite sign-up. There is no /purge yet, so they stay until B8's /purge
 // removes the livecheck_ accounts. The Track C checks post only in a
 // private room named livecheck_<random> that the admin makes, and its
-// thread; both go when the script empties them.
+// thread; both go when the script empties them. The emoji checks add a
+// :livecheck_<random>: custom emoji and remove it again, so every connection
+// gets two new server frames.
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 
@@ -151,6 +153,23 @@ await check("server frame: settings, welcome, ext:media, signup, auth", async ()
     if (!p.signup?.includes("token")) problems.push(`signup ${JSON.stringify(p.signup)}`);
     if (!p.auth?.includes("token") || !p.auth?.includes("guest")) problems.push(`auth ${JSON.stringify(p.auth)}`);
     if (p.auth?.includes("webauthn")) problems.push("webauthn offered with no Origin");
+    return problems.length === 0 || problems.join("; ");
+  } finally {
+    c.close();
+  }
+});
+
+await check("server frame: title, description, and ext.media.emoji", async () => {
+  const c = await connect();
+  try {
+    const p = (await c.server()).params;
+    const problems = [];
+    if (typeof p.title !== "string" || !p.title) problems.push(`title ${JSON.stringify(p.title)}`);
+    if (typeof p.description !== "string" || !p.description) problems.push(`description ${JSON.stringify(p.description)}`);
+    const emoji = Object.keys(p.ext?.media?.emoji ?? {}).sort().join(",");
+    if (emoji !== "image/gif,image/jpeg,image/png,image/webp") problems.push(`ext.media.emoji ${emoji}`);
+    const listed = p.capabilities?.includes("ext:emoji");
+    if (listed !== (p.ext?.emoji?.catalog_url !== undefined)) problems.push("ext:emoji and ext.emoji.catalog_url disagree");
     return problems.length === 0 || problems.join("; ");
   } finally {
     c.close();
@@ -374,6 +393,7 @@ async function trackC(admin) {
     if (denied.error?.code !== -32001) return `nine ${JSON.stringify(denied.error ?? denied.result)}`;
     return ok(await acct.call("reactions", { message_id: accountMessage, emojis: nine.slice(0, 8) }));
   });
+  await customEmoji(admin, acct, roomID, accountMessage);
   await check("C6: a tombstone takes no reactions", async () => {
     const posted = await admin.call("message", { room_id: roomID, body: { text: "livecheck to delete" } });
     const adminMessage = posted.result?.message_id;
@@ -394,10 +414,12 @@ async function trackC(admin) {
     const from = admin.frames.length;
     acct.ws.send(JSON.stringify({ method: "activity", params: { room_id: roomID, typing: 600 } }));
     acct.ws.send(JSON.stringify({ method: "activity", params: { room_id: roomID, read_message_id: accountMessage } }));
+    const own = acct.frames.length;
     const typing = await admin.until(() => admin.frames.slice(from).find((f) => f.method === "activity" && f.params?.typing !== undefined), 8000, "typing");
     await new Promise((r) => setTimeout(r, 1000));
     const reads = admin.frames.slice(from).filter((f) => f.method === "activity" && f.params?.read_message_id);
-    return (typing.params.typing === 30 && reads.length === 0) || `typing ${typing.params.typing}, ${reads.length} read cursors`;
+    const echoed = acct.frames.slice(own).filter((f) => f.method === "activity" && f.params?.typing !== undefined);
+    return (typing.params.typing === 30 && reads.length === 0 && echoed.length === 0) || `typing ${typing.params.typing}, ${reads.length} read cursors, ${echoed.length} typing echoes`;
   });
   await check("C10: an upload that is not an image or audio is 415", async () => {
     const r = await acct.call("message", { room_id: roomID, body: { text: "livecheck upload", embeds: [{ kind: "upload", title: "livecheck.txt" }] } });
@@ -418,6 +440,61 @@ async function trackC(admin) {
       if (left.error) return `leave ${JSON.stringify(left.error)}`;
     }
     return code(await admin.call("room_join", { room_id: roomID }), -32602);
+  });
+}
+
+// ext:emoji: the admin adds a livecheck_ emoji, the account reacts with it in
+// the private livecheck room, and the admin removes it.
+async function customEmoji(admin, acct, roomID, messageID) {
+  const key = `:livecheck_${suffix}:`;
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
+  const catalogWith = async (from, present) => {
+    const frame = await admin.until(() => admin.frames.slice(from).find((f) => {
+      if (f.method !== "server") return false;
+      return present ? f.params.ext?.emoji?.catalog_url !== undefined : true;
+    }), 8000, "a new server frame");
+    return frame.params;
+  };
+  let added = false;
+  await check("emoji: /emoji add publishes a catalog in a new server frame", async () => {
+    const started = await admin.call("command", { room_id: roomID, body: { text: `/emoji add ${key}`, embeds: [{ kind: "upload" }] } });
+    const url = started.result?.embeds?.[0]?.write_url;
+    if (!url) return `no write_url ${JSON.stringify(started.error ?? started.result)}`;
+    const from = admin.frames.length;
+    const put = await fetch(url, { method: "PUT", headers: { "Content-Type": "image/png" }, body: png });
+    if (put.status !== 201) return `PUT ${put.status}`;
+    added = true;
+    const p = await catalogWith(from, true);
+    if (!p.capabilities?.includes("ext:emoji")) return "no ext:emoji capability";
+    const catalogURL = p.ext.emoji.catalog_url;
+    if (!catalogURL.startsWith(`${base}/emoji/`)) return `catalog_url ${catalogURL}`;
+    const r = await fetch(catalogURL);
+    if (r.status !== 200) return `catalog ${r.status}`;
+    if (!/immutable/.test(r.headers.get("cache-control") ?? "")) return `catalog cache ${r.headers.get("cache-control")}`;
+    const catalog = JSON.parse(await r.text());
+    const entry = catalog[key];
+    if (!entry?.url) return `catalog ${JSON.stringify(catalog)}`;
+    const image = await fetch(entry.url);
+    if (image.status !== 200) return `image ${image.status}`;
+    return /immutable/.test(image.headers.get("cache-control") ?? "") || `image cache ${image.headers.get("cache-control")}`;
+  });
+  await check("emoji: the account reacts with the key in the private room", async () => {
+    const r = await acct.call("reactions", { message_id: messageID, emojis: [key, "\u2764"] });
+    if (r.error) return `error ${JSON.stringify(r.error)}`;
+    const sent = r.frames.find((f) => f.method === "reactions" && f.params?.message_id === messageID);
+    return same(JSON.stringify(sent?.params?.reactions?.[0]?.emojis), JSON.stringify([key, "\u2764\uFE0F"]));
+  });
+  if (!added) return;
+  await check("emoji: /emoji remove takes the key out of the catalog", async () => {
+    const from = admin.frames.length;
+    const r = await admin.call("command", { room_id: roomID, body: { text: `/emoji remove ${key}` } });
+    if (r.error) return `error ${JSON.stringify(r.error)}`;
+    if (noticeText(r.frames) !== `Removed the custom emoji \`${key}\`.`) return `notice ${noticeText(r.frames)}`;
+    const p = await catalogWith(from, false);
+    const url = p.ext?.emoji?.catalog_url;
+    if (!url) return true;
+    const catalog = JSON.parse(await (await fetch(url)).text());
+    return !(key in catalog) || "the key is still in the catalog";
   });
 }
 
