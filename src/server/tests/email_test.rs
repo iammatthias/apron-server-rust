@@ -151,14 +151,6 @@ fn code_of(frame: &Object) -> Option<Json> {
         .cloned()
 }
 
-fn strings(values: &[&str]) -> Json {
-    values
-        .iter()
-        .map(|s| s.to_string())
-        .collect::<Vec<String>>()
-        .into()
-}
-
 #[test]
 fn test_email_sign_in() {
     let (server, mailbox) =
@@ -168,7 +160,7 @@ fn test_email_sign_in() {
     let params = frame["params"].as_object().unwrap();
     assert!(
         params.get("auth") == Some(&strings(&["email", "token", "guest"]))
-            && params.get("signup") == Some(&strings(&["email", "guest"])),
+            && params.get("signup") == Some(&strings(&["email"])),
         "auth schemes: {:?}, signup {:?}",
         params.get("auth"),
         params.get("signup")
@@ -802,11 +794,12 @@ fn test_email_proposals_expire_and_are_invalidated() {
         obj! {"scheme" => "email", "email" => "ada@example.com"},
         CODE_UNSUPPORTED,
     );
+    // Token is offered everywhere, for bots and devices.
     guest.expect_error(
         "auth",
         "token",
         obj! {"scheme" => "token", "token" => "x"},
-        CODE_UNSUPPORTED,
+        CODE_DENIED,
     );
     guest.expect_error(
         "auth",
@@ -815,7 +808,7 @@ fn test_email_proposals_expire_and_are_invalidated() {
         CODE_UNSUPPORTED,
     );
     // A scheme not offered is unsupported before its user_id is read.
-    for scheme in ["email", "token", "webauthn", "external"] {
+    for scheme in ["email", "webauthn", "external"] {
         guest.expect_error(
             "auth",
             &format!("bad-id-{scheme}"),

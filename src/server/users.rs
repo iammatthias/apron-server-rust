@@ -896,6 +896,12 @@ impl Server {
                 if self.config.web_authn.is_none() {
                     return Err(RpcError::new(CODE_UNSUPPORTED, "Passkeys are disabled"));
                 }
+                if !st.passkeys_offered(&c.origin) {
+                    return Err(RpcError::new(
+                        CODE_UNSUPPORTED,
+                        "Passkeys are not offered to this origin",
+                    ));
+                }
             }
             "email" => {
                 if self.config.email_sender.is_none() {
@@ -909,15 +915,7 @@ impl Server {
                     "External sign-in is not offered",
                 ));
             }
-            "token" => {
-                if self.config.web_authn.is_none() && self.config.email_sender.is_none() {
-                    return Err(RpcError::new(
-                        CODE_UNSUPPORTED,
-                        "This server has no sign-in sessions; use guest",
-                    ));
-                }
-            }
-            "guest" => {}
+            "token" | "guest" => {}
             _ => {
                 // A request that depends on a name the server does not know
                 // is invalid_params (§1).

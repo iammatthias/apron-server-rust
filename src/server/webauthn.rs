@@ -190,9 +190,6 @@ impl State {
         if action.is_empty() {
             return Err(invalid_params("action must be a non-empty string"));
         }
-        if !wa::is_origin_in_haystack(&c.origin, &w.config.rp_origins) {
-            return Err(denied("Frontend origin is not configured for passkeys"));
-        }
         let now = time::now();
         self.prune_sessions_locked(&now);
         match action.as_str() {
