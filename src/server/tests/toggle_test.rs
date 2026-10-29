@@ -214,6 +214,7 @@ fn test_toggle_addmember() {
     let (_, frame) = dial_raw(&server);
     assert_eq!(settings(&frame)["add_members"], Json::Bool(false));
     ada.drain();
+    grant_role(&server, &ada.user_id, "mod");
     let (room, _) = save_room(&mut ada, "room", obj! {"title" => "Ada's"});
     let id = ada.next_id("add");
     let refused = ada.call(

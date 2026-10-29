@@ -211,6 +211,7 @@ fn test_concurrent_saves_of_different_ext_keys_both_survive() {
 fn test_room_set_merges_ext() {
     let server = new_test_server(default_config());
     let mut a = dial_test_client(&server);
+    grant_role(&server, &a.user_id, "mod");
     let (room_id, created) = save_room(
         &mut a,
         "create",

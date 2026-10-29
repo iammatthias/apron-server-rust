@@ -890,3 +890,44 @@ fn test_invite_persists() {
         "a third use"
     );
 }
+
+/// An admin creates a top-level room that a guest, who may not, finds with
+/// room_list and joins, and in which a thread may start (Cloudflare's
+/// "an admin creates a top-level room that others find with room_list").
+#[test]
+fn test_admin_creates_a_top_level_room() {
+    let server = admin_test_server();
+    let mut admin = admin(&server);
+    let mut guest = dial_test_client(&server);
+    admin.drain();
+    guest.expect_error(
+        "room_set",
+        "guest-room",
+        obj! {"title" => "Mine"},
+        CODE_DENIED,
+    );
+
+    let (room_id, record) = save_room(
+        &mut admin,
+        "room",
+        obj! {"title" => "Random", "description" => "Off topic"},
+    );
+    assert!(
+        record["title"] == Json::from("Random")
+            && record["description"] == Json::from("Off topic")
+            && !record.contains_key("parent_room_id"),
+        "{record:?}"
+    );
+    let browse = list_rooms(&mut guest, obj! {"filter" => "not_joined"});
+    assert_eq!(room_ids(browse.get("not_joined")), vec![room_id.clone()]);
+    join_room(&mut guest, &room_id);
+    let browse = list_rooms(&mut guest, obj! {"filter" => "not_joined"});
+    assert!(room_ids(browse.get("not_joined")).is_empty(), "{browse:?}");
+    admin.drain();
+    let (thread, _) = save_room(
+        &mut guest,
+        "thread",
+        obj! {"parent_room_id" => room_id.as_str(), "title" => "Side"},
+    );
+    assert!(!thread.is_empty());
+}

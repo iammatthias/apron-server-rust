@@ -452,7 +452,12 @@ fn test_roles_and_welcome() {
     );
     ada.drain();
     // An admin may remove others from any room they can see.
-    let (room, _) = save_room(&mut guest, "room", obj! {"title" => "Mine"});
+    let (room, _) = save_room(
+        &mut guest,
+        "room",
+        obj! {"title" => "Mine", "parent_room_id" => "general"},
+    );
+    ada.drain();
     ada.result(
         "room_leave",
         "remove",

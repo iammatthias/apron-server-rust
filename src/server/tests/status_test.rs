@@ -590,6 +590,7 @@ fn test_invisible_privacy() {
         expect_membership(&a, "general", &c.user_id, true);
         expect_status(&a, &c.user_id, "online");
         // Joining a room announces nothing either.
+        grant_role(&server, &c.user_id, "mod");
         let (ops, _) = save_room(&mut c, &format!("ops-{status}"), obj! {"title" => "Ops"});
         b.drain();
         join_room(&mut b, &ops);
@@ -788,6 +789,7 @@ fn test_after_auth_mutes_and_statuses() {
     for c in &mut clients {
         c.drain();
     }
+    grant_role(&server, &owner.user_id, "mod");
     let (ops, _) = save_room(&mut owner, "ops", obj! {"title" => "Ops"});
     owner.status(obj! {"mute" => true});
     owner.status(obj! {"room_id" => ops.as_str(), "mute" => true});
@@ -1333,6 +1335,7 @@ fn test_listings_carry_status() {
         listed["users"].as_list(),
     );
 
+    grant_role(&server, &none.user_id, "mod");
     let (room, _) = save_room(&mut none, "room", obj! {"title" => "Room"});
     join_room(&mut invisible, &room);
     server.app.lock().add_member_locked("away", &room);
@@ -1441,6 +1444,7 @@ fn test_me_status_changes_are_limited() {
 fn test_room_mutes_are_bounded() {
     let server = new_test_server(default_config());
     let mut c = dial_test_client(&server);
+    grant_role(&server, &c.user_id, "mod");
     let (room, _) = save_room(&mut c, "room", obj! {"title" => "Room"});
     expect_echo(
         &mut c,
@@ -1902,6 +1906,7 @@ fn test_listings_carry_seen() {
     register_test_passkey(&mut b, &mut new_test_authenticator());
     let user_id = b.user_id.clone();
     expect_registered(&a, &user_id);
+    grant_role(&server, &b.user_id, "mod");
     let (room, _) = save_room(&mut b, "room", obj! {"title" => "Room"});
     watching(&mut [&mut a]);
     a.drain();

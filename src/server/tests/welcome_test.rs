@@ -78,6 +78,7 @@ fn test_welcome_is_generals_description_else_a_summary() {
     );
 
     let mut c = dial_test_client(&server);
+    grant_role(&server, &c.user_id, "admin");
     let description = "Be **kind**.";
     c.request(
         "room_set",
@@ -100,6 +101,7 @@ fn test_welcome_flag_overrides_generals_description() {
     config.welcome = "Configured.".into();
     let server = new_test_server(config);
     let mut c = dial_test_client(&server);
+    grant_role(&server, &c.user_id, "admin");
     c.request(
         "room_set",
         "describe",
