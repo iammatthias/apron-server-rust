@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Arc, Condvar, Mutex};
 
 use rust_stdlib::encoding::base64::URL_SAFE_NO_PAD;
+use rust_stdlib::encoding::json::jsontext::Value;
 use rust_stdlib::regexp::Regexp;
 use rust_stdlib::time::Timer;
 use rust_stdlib::unicode;
@@ -29,9 +30,17 @@ pub const ADMIN_ROLE: &str = "admin";
 /// The role that lets a user create and edit top-level rooms and move
 /// others' messages, as `admin` does.
 pub const MOD_ROLE: &str = "mod";
+/// The role that lets a user move others' messages, and nothing else.
+pub const THREADER_ROLE: &str = "threader";
 /// The roles whose accounts create and edit top-level rooms besides
 /// `general` (apron-server-cloudflare's ROOM_CREATOR_ROLES).
 pub const ROOM_CREATOR_ROLES: &[&str] = &[ADMIN_ROLE, MOD_ROLE];
+/// The roles whose accounts move others' messages between rooms
+/// (apron-server-cloudflare's MODERATOR_ROLES).
+pub const MODERATOR_ROLES: &[&str] = &[ADMIN_ROLE, MOD_ROLE, THREADER_ROLE];
+/// The key of `you`'s ext that lists what the user may do to others'
+/// messages and memberships (apron-web EXT.md §7, `ext:permissions`).
+pub const PERMISSIONS_KEY: &str = "permissions";
 pub const INVALID_ROLE: &str =
     "A role is 1 to 24 lowercase letters, digits, _ or -, starting with a letter";
 
@@ -196,8 +205,11 @@ impl UserState {
         self.roles.iter().any(|r| r == role)
     }
 
+    /// Reports whether the user holds one of `roles` and is no bot, whose
+    /// roles grant nothing. Guests hold no roles: seeding and `/role` both
+    /// refuse them.
     pub fn has_any_role(&self, roles: &[&str]) -> bool {
-        roles.iter().any(|role| self.has_role(role))
+        !self.bot() && roles.iter().any(|role| self.has_role(role))
     }
 
     /// The complete current user object for user and users (§3.3), with the
@@ -481,6 +493,59 @@ fn random_digits<const N: usize>() -> String {
 }
 
 impl State {
+    /// What u may do beyond their own messages (`ext:permissions`):
+    /// `move_any` with a moderator role, `add_members` for an admin or while
+    /// addmember is on, and `push_joined` while push is on, since this
+    /// server wakes everyone for `joined`; none for a bot.
+    pub fn permissions_locked(&self, u: &UserState) -> Vec<&'static str> {
+        let mut permissions = Vec::new();
+        if u.bot() {
+            return permissions;
+        }
+        if u.has_any_role(MODERATOR_ROLES) {
+            permissions.push("move_any");
+        }
+        if u.has_role(ADMIN_ROLE) || self.feature_on(super::toggles::Feature::AddMember) {
+            permissions.push("add_members");
+        }
+        if !self.config.disable_push {
+            permissions.push("push_joined");
+        }
+        permissions
+    }
+
+    /// The `ext` of u's `you` holding only their permissions; `None` for a
+    /// guest, who has none.
+    pub fn permissions_ext_locked(&self, u: &UserState) -> Option<ExtObject> {
+        if !u.persists() {
+            return None;
+        }
+        let list: Vec<String> = self
+            .permissions_locked(u)
+            .iter()
+            .map(|p| format!("\"{p}\""))
+            .collect();
+        let raw = format!("[{}]", list.join(","));
+        Some(ExtObject::from([(
+            PERMISSIONS_KEY.to_owned(),
+            Value::from(raw.into_bytes()),
+        )]))
+    }
+
+    /// The user's own current object, `you` (§3.3), with their permissions
+    /// in its ext.
+    pub fn you_locked(&self, u: &UserState) -> Object {
+        let mut you = u.you();
+        if let Some(permissions) = self.permissions_ext_locked(u) {
+            let mut ext = ext_of(you.get("ext"));
+            ext.extend(permissions);
+            you.insert("ext".into(), Json::Ext(ext));
+        }
+        you
+    }
+}
+
+impl State {
     /// Honors a requested user_id when it is requestable and was never
     /// assigned, ignoring case, nor names a room; otherwise assigns the next
     /// unused guest_<n> (§3.2).
@@ -543,7 +608,7 @@ impl State {
         join_default: bool,
     ) -> Object {
         self.note_bot_active_locked(user_id);
-        let mut result = obj! {"you" => self.users[user_id].you()};
+        let mut result = obj! {"you" => self.you_locked(&self.users[user_id])};
         result.extend(extra);
         c.send_result(req, result.clone().into());
         self.attach_locked(c, user_id);
@@ -730,7 +795,7 @@ impl State {
         let profile = with_cleared(with_removed(u.profile(), removed), cleared);
         let you = Frame::from(notification(
             "user",
-            obj! {"you" => with_cleared(with_removed(u.you(), removed), cleared)},
+            obj! {"you" => with_cleared(with_removed(self.you_locked(u), removed), cleared)},
         ));
         for id in &u.clients {
             if except.is_some_and(|c| c.id == *id) {
@@ -774,7 +839,9 @@ impl State {
     ) -> Result<(Json, bool), RpcError> {
         let name = parse_string(&req.params, "name", false)?;
         let avatar = parse_string(&req.params, "avatar", false)?;
-        let (ext_write, has_ext) = parse_ext(&req.params, "ext")?;
+        let (mut ext_write, has_ext) = parse_ext(&req.params, "ext")?;
+        // The server owns the permissions it sends in `you` (EXT.md §7).
+        ext_write.remove(PERMISSIONS_KEY);
         let mut status = parse_string(&req.params, "status", false)?;
         let has_name = req.params.contains_key("name");
         let has_avatar = req.params.contains_key("avatar");
@@ -831,7 +898,7 @@ impl State {
             admit_status_locked(self.users.get_mut(&user_id).expect("user exists"))?;
         }
         let u = &self.users[&user_id];
-        let (before, before_you) = (u.profile(), u.you());
+        let (before, before_you) = (u.profile(), self.you_locked(u));
         self.touch_user(&user_id);
         let mut removed: Vec<&str> = Vec::new();
         if has_name {
@@ -857,8 +924,9 @@ impl State {
             self.publish_locked(&user_id);
         }
         let u = &self.users[&user_id];
-        let result = obj! {"you" => with_removed(u.you(), &removed)};
-        if !json_equal(&before, &u.profile()) || !json_equal(&before_you, &u.you()) {
+        let you = self.you_locked(u);
+        let result = obj! {"you" => with_removed(you.clone(), &removed)};
+        if !json_equal(&before, &u.profile()) || !json_equal(&before_you, &you) {
             self.notify_profile_locked(&user_id, Some(c), &cleared, &removed);
         }
         c.send_result(req, result.clone().into());
@@ -1000,7 +1068,7 @@ impl Server {
             // Guest auth on a signed-in connection answers with the identity
             // it has. It signs the connection in as no other user, so it is
             // no sign-in and sends nothing after its result (§4.5).
-            let result = obj! {"you" => st.users[&user_id].you()};
+            let result = obj! {"you" => st.you_locked(&st.users[&user_id])};
             c.send_result(req, result.clone().into());
             return Ok(result.into());
         }

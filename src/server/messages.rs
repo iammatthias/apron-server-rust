@@ -7,6 +7,7 @@ use rust_stdlib::time;
 use super::embeds::MAX_EMBEDS_PER_MESSAGE;
 use super::protocol::*;
 use super::server::{Client, Frame, LogRecord, RecordKind, Server, State, DEFAULT_ROOM_ID};
+use super::users::{json_equal, MODERATOR_ROLES};
 use crate::obj;
 use crate::rate::{every, Limiter};
 
@@ -299,6 +300,7 @@ impl State {
         }
         let mut from = self.users[&user_id].from();
         let mut current: Option<String> = None;
+        let mut moving = false;
         if replacing {
             let Some(m) = self.visible_message_locked(&user_id, &message_id) else {
                 return Err(invalid_params(format!(
@@ -306,12 +308,17 @@ impl State {
                     quote(&message_id)
                 )));
             };
-            if m.owner != user_id {
+            // Someone else's message may only be moved, and only by a
+            // moderator (MODERATOR_ROLES), who keeps its content as it was.
+            if m.owner != user_id
+                && (m.room_id == room_id || !self.users[&user_id].has_any_role(MODERATOR_ROLES))
+            {
                 return Err(RpcError::new(
                     CODE_DENIED,
                     "Only the author may edit, move, or delete this message",
                 ));
             }
+            moving = m.owner != user_id;
             // A move snapshot is logged in both rooms and names both, so a
             // message may not move to a room that some who see its room
             // cannot see, such as a private room.
@@ -371,6 +378,12 @@ impl State {
                     format!("The message's ext would be over {MAX_MESSAGE_EXT_BYTES} bytes"),
                 ));
             }
+        }
+        if moving && !same_content(previous.as_ref(), deleted, body.as_ref(), &reply_id, &ext) {
+            return Err(RpcError::new(
+                CODE_DENIED,
+                "An admin, mod or threader may move someone else's message but not change it",
+            ));
         }
         if !replacing {
             let body_ref = body.as_ref().expect("a creation has a body");
@@ -687,4 +700,28 @@ impl Server {
     ) -> Result<(Json, bool), RpcError> {
         self.lock().react_locked(c, req)
     }
+}
+
+/// Reports whether a save keeps the content of previous, the snapshot it
+/// replaces: its deletion, body, reply_to and merged ext.
+fn same_content(
+    previous: Option<&Object>,
+    deleted: bool,
+    body: Option<&Object>,
+    reply_id: &Option<String>,
+    ext: &ExtObject,
+) -> bool {
+    let Some(previous) = previous else {
+        return false;
+    };
+    let was_deleted = previous.get("deleted").is_some_and(Json::is_true);
+    let previous_body = previous.get("body").and_then(Json::as_object);
+    deleted == was_deleted
+        && match (body, previous_body) {
+            (Some(body), Some(previous_body)) => json_equal(body, previous_body),
+            (None, None) => true,
+            _ => false,
+        }
+        && reply_id.as_deref() == reply_to_of(previous)
+        && *ext == ext_of(previous.get("ext"))
 }

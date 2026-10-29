@@ -7,7 +7,9 @@ use std::sync::Arc;
 
 use super::commands::private_notice;
 use super::protocol::*;
-use super::server::{Client, State};
+use super::server::{Client, Frame, State};
+use super::users::ADMIN_ROLE;
+use crate::obj;
 
 /// A feature `/toggle` turns off and on. Each is on by default.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -91,11 +93,32 @@ impl State {
         } else {
             self.features_off.insert(feature);
         }
-        if feature == Feature::Presence {
-            self.republish_statuses_locked();
+        match feature {
+            Feature::Presence => self.republish_statuses_locked(),
+            Feature::AddMember => self.send_add_members_locked(),
+            _ => {}
         }
         c.enqueue(&private_notice(&self.rooms[room_id], feature.notice(on)));
         Ok(Object::new())
+    }
+
+    /// Sends each connected account whose `add_members` follows the toggle,
+    /// every one but admins and bots, `user` with `you` carrying only its
+    /// user_id and new permissions (EXT.md §7).
+    fn send_add_members_locked(&self) {
+        for u in self.users.values() {
+            if u.clients.is_empty() || u.has_role(ADMIN_ROLE) {
+                continue;
+            }
+            let Some(ext) = self.permissions_ext_locked(u).filter(|_| !u.bot()) else {
+                continue;
+            };
+            let frame = Frame::from(notification(
+                "user",
+                obj! {"you" => obj! {"user_id" => u.id.as_str(), "ext" => Json::Ext(ext)}},
+            ));
+            self.send_to_user(&u.id, &frame);
+        }
     }
 
     /// Publishes every user's shown status at once, past the coalescing,

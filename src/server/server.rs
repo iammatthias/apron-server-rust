@@ -1703,7 +1703,11 @@ impl State {
             );
             media.insert("avatar".into(), avatar.into());
         }
-        capabilities.extend(["ext:settings".into(), "ext:media".into()]);
+        capabilities.extend([
+            "ext:settings".into(),
+            "ext:media".into(),
+            "ext:permissions".into(),
+        ]);
         params.insert(
             "ext".into(),
             obj! {"settings" => settings, "media" => media}.into(),
@@ -1805,7 +1809,7 @@ impl State {
     pub fn current_result_locked(&self, user_id: &str, method: &str, result: Json) -> Json {
         match method {
             "me" => match self.users.get(user_id) {
-                Some(u) => obj! {"you" => u.you()}.into(),
+                Some(u) => obj! {"you" => self.you_locked(u)}.into(),
                 None => result,
             },
             "message" | "command" => {
