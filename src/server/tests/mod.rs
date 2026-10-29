@@ -3,6 +3,7 @@
 //! do with `app.mu`.
 
 mod account_id_test;
+mod connection_status_test;
 mod email_test;
 mod ext_test;
 mod guest_posting_test;

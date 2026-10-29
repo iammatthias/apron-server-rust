@@ -971,6 +971,58 @@ impl Server {
         let _ = std::io::Write::write_all(w, br#"{"status":"ok"}"#);
     }
 
+    /// Says over plain HTTP whether a WebSocket would be admitted now, since
+    /// a browser hides why a handshake failed (apron-web EXT.md §5): 403
+    /// for a refused origin, 429 at the connection cap, 503 while shutting
+    /// down, and otherwise `{"available": true}`, admitting no connection.
+    fn connection_status(&self, w: &mut dyn ResponseWriter, r: &HttpRequest) {
+        let refused = if !self.config.allow_any_origin
+            && ws::authenticate_origin(r, self.config.origin_patterns.as_deref().unwrap_or(&[]))
+                .is_err()
+        {
+            Some((http::STATUS_FORBIDDEN, "Origin not allowed", None))
+        } else {
+            let st = self.lock();
+            if st.closed {
+                Some((
+                    http::STATUS_SERVICE_UNAVAILABLE,
+                    "Server is shutting down",
+                    None,
+                ))
+            } else if self.config.max_connections > 0
+                && st.clients.len() >= self.config.max_connections
+            {
+                Some((
+                    http::STATUS_TOO_MANY_REQUESTS,
+                    "Server at capacity; try again shortly",
+                    Some(RETRY_AFTER_SECONDS),
+                ))
+            } else {
+                None
+            }
+        };
+        let header = w.header();
+        header.set("Content-Type", "application/json");
+        header.set("Cache-Control", "no-store");
+        header.set("Access-Control-Allow-Origin", "*");
+        header.set(
+            "Access-Control-Expose-Headers",
+            "Retry-After, Apron-Connection-Status",
+        );
+        header.set("Apron-Connection-Status", "1");
+        let body = match refused {
+            Some((status, message, retry_after)) => {
+                if let Some(seconds) = retry_after {
+                    header.set("Retry-After", &seconds.to_string());
+                }
+                w.write_header(status);
+                obj! {"error" => message}
+            }
+            None => obj! {"available" => true},
+        };
+        let _ = std::io::Write::write_all(w, &encode_json(&body).expect("encodes"));
+    }
+
     /// Tells active WebSockets to retry later, closes them, and waits for
     /// the connection handlers to finish.
     pub fn shutdown(self: &Arc<Self>, ctx: &Context) -> Result<(), rust_stdlib::context::Error> {
@@ -1028,6 +1080,13 @@ impl Server {
     }
 
     fn handle_web_socket(self: &Arc<Self>, w: &mut dyn ResponseWriter, r: &mut HttpRequest) {
+        if r.method == http::METHOD_GET
+            && r.url.query().get("apron_connection_status") == "1"
+            && r.header.get("Upgrade").is_none()
+        {
+            self.connection_status(w, r);
+            return;
+        }
         if self.lock().closed {
             http::http_error(
                 w,
