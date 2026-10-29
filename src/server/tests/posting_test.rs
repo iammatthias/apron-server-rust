@@ -36,7 +36,7 @@ fn account_from(server: &TestServer, ip: &str) -> TestClient {
 
 fn post(c: &mut TestClient) -> Object {
     let id = c.next_id("post");
-    reply_to(
+    reply(
         c,
         "message",
         &id,
@@ -153,7 +153,7 @@ fn test_every_change_is_a_post_and_no_change_is_none() {
     let mut a = account_from(&server, "198.51.100.9");
     grant_role(&server, &a.user_id, "mod");
     let message_id = posted(&mut a);
-    let room = reply_to(&mut a, "room_set", "room", obj! {"title" => "Quota"});
+    let room = reply(&mut a, "room_set", "room", obj! {"title" => "Quota"});
     let room_id = room["result"].as_object().unwrap()["room_id"]
         .as_str()
         .unwrap()
@@ -176,31 +176,31 @@ fn test_every_change_is_a_post_and_no_change_is_none() {
         ("me", obj! {"name" => "Renamed"}),
     ];
     for (i, (method, params)) in charged.into_iter().chain(free).enumerate() {
-        let frame = reply_to(&mut a, method, &format!("r{i}"), params);
+        let frame = reply(&mut a, method, &format!("r{i}"), params);
         assert!(frame.contains_key("result"), "{method}: {frame:?}");
     }
     // A post, a room and four changes of seven: one post is left, and its
     // retry is free.
     let retry = obj! {"room_id" => "general", "body" => obj! {"text" => "once"}};
     for _ in 0..2 {
-        let frame = reply_to(&mut a, "message", "same-id", retry.clone());
+        let frame = reply(&mut a, "message", "same-id", retry.clone());
         assert!(frame.contains_key("result"), "{frame:?}");
     }
-    let (message, _) = refused(&reply_to(
+    let (message, _) = refused(&reply(
         &mut a,
         "reactions",
         "over",
         obj! {"message_id" => message_id.as_str(), "emojis" => strings(&["🎉"])},
     ));
     assert_eq!(message, "Posting limit reached");
-    let (message, _) = refused(&reply_to(
+    let (message, _) = refused(&reply(
         &mut a,
         "room_leave",
         "leave",
         obj! {"room_id" => room_id.as_str()},
     ));
     assert_eq!(message, "Posting limit reached");
-    let (message, _) = refused(&reply_to(&mut a, "me", "name", obj! {"name" => "Again"}));
+    let (message, _) = refused(&reply(&mut a, "me", "name", obj! {"name" => "Again"}));
     assert_eq!(message, "Posting limit reached");
 }
 

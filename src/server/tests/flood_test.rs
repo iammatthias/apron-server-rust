@@ -37,7 +37,7 @@ fn close_code(c: &TestClient) -> u16 {
 }
 
 fn list(c: &mut TestClient, id: &str) -> Object {
-    reply_to(c, "room_list", id, obj! {"filter" => "joined"})
+    reply(c, "room_list", id, obj! {"filter" => "joined"})
 }
 
 #[test]
@@ -111,7 +111,7 @@ fn test_three_violations_in_a_minute_close_with_1008() {
     let mut c = guest_from(&server, "198.51.100.7");
     // A denial is no violation.
     for i in 0..3 {
-        let frame = reply_to(
+        let frame = reply(
             &mut c,
             "room_set",
             &format!("d{i}"),
@@ -140,9 +140,9 @@ fn test_mistyped_commands_are_not_violations() {
             policy_violations: 3,
             ..Limits::unlimited()
         },
-        ..super::admin_test::admin_config()
+        ..super::helpers::admin_config()
     });
-    let mut admin = super::admin_test::account(&server);
+    let mut admin = super::helpers::account(&server);
     grant_role(&server, &admin.user_id.clone(), "admin");
     for (i, text) in [
         "/nope",
@@ -161,7 +161,7 @@ fn test_mistyped_commands_are_not_violations() {
     .into_iter()
     .enumerate()
     {
-        let frame = reply_to(
+        let frame = reply(
             &mut admin,
             "command",
             &format!("c{i}"),
@@ -181,7 +181,7 @@ fn test_mistyped_commands_are_not_violations() {
     .into_iter()
     .enumerate()
     {
-        let frame = reply_to(&mut admin, "command", &format!("v{i}"), params);
+        let frame = reply(&mut admin, "command", &format!("v{i}"), params);
         assert!(frame.contains_key("error"), "{frame:?}");
     }
     admin.write_raw(r#"{"method":"command","id":"v2","params":{"body":{"text":"/avatar"}}}"#);

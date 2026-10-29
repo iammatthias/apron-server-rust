@@ -29,7 +29,7 @@ pub(super) fn account(server: &TestServer, name: &str) -> (TestClient, String) {
 
 /// Runs a command and returns the frames before its ~private notice, and
 /// the notice's text; the notice comes last, just before the empty result.
-fn private_reply(c: &mut TestClient, text: &str) -> (Vec<Object>, String) {
+fn notice_after(c: &mut TestClient, text: &str) -> (Vec<Object>, String) {
     let id = c.next_id("command");
     let (mut before, result) = c.request("command", &id, obj! {"body" => obj! {"text" => text}});
     assert!(result.is_empty(), "{text} result {result:?}");
@@ -53,7 +53,7 @@ fn private_reply(c: &mut TestClient, text: &str) -> (Vec<Object>, String) {
 /// Runs /invite-bot and returns the token its notice carries and the frames
 /// before the notice, after checking the whole notice text.
 fn invite_bot(c: &mut TestClient, bot_id: &str, name: &str, server: &str) -> (String, Vec<Object>) {
-    let (before, text) = private_reply(c, "/invite-bot");
+    let (before, text) = notice_after(c, "/invite-bot");
     let token = text
         .split("```\n")
         .nth(1)
@@ -377,13 +377,13 @@ fn test_help_lists_invite_bot_for_accounts() {
     let mut guest = dial_test_client(&server);
     ada.drain();
     let listed = "- `/invite-bot`: get a token that signs in as your bot, named after you; again, it replaces the token and renames the bot";
-    let (_, help) = private_reply(&mut ada, "/help");
+    let (_, help) = notice_after(&mut ada, "/help");
     assert!(help.contains(listed), "account's help: {help:?}");
-    let (_, help) = private_reply(&mut guest, "/help");
+    let (_, help) = notice_after(&mut guest, "/help");
     assert!(!help.contains("/invite-bot"), "guest's help: {help:?}");
     let (token, _) = invite_bot(&mut ada, &format!("bot_{ada_id}"), "Bot of Ada", NO_URL);
     let (mut b, _) = bot(&server, "", &token);
-    let (_, help) = private_reply(&mut b, "/help");
+    let (_, help) = notice_after(&mut b, "/help");
     assert!(!help.contains("/invite-"), "bot's help: {help:?}");
 }
 
@@ -546,7 +546,7 @@ fn test_invite_bot_denied_for_a_role_holders_id() {
     let upload_dir = format!("{dir}/uploads");
     let mut server = start_with_store(kept.clone(), &upload_dir);
     let (mut ada, ada_id) = account(&server, "Ada");
-    let (_, laptop) = private_reply(&mut ada, "/invite-device laptop");
+    let (_, laptop) = notice_after(&mut ada, "/invite-device laptop");
     let laptop = laptop.split("```\n").nth(1).unwrap().trim_end().to_owned();
     drop(ada);
     server.stop();

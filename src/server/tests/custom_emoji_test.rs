@@ -3,7 +3,6 @@
 
 use std::sync::Arc;
 
-use super::admin_test::*;
 use super::helpers::*;
 use super::metadata_test::{command_with, next_server, upload_embed, write_url};
 use super::persist_test::start_with;
@@ -245,7 +244,7 @@ fn test_mods_and_friends_use_emoji() {
     let id = user.user_id.clone();
     let denied = |c: &mut TestClient, text: &str| {
         let request_id = c.next_id("denied");
-        let frame = reply_to(
+        let frame = reply(
             c,
             "command",
             &request_id,

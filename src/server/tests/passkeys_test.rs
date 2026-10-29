@@ -3,7 +3,6 @@
 
 use rust_stdlib::time;
 
-use super::admin_test::{command_error, private_reply};
 use super::helpers::*;
 use super::webauthn_test::*;
 use crate::obj;
@@ -176,8 +175,8 @@ fn test_passkeys_list_and_remove() {
 /// An account with no passkey is told so; a guest may not run /passkeys.
 #[test]
 fn test_passkeys_without_one() {
-    let server = super::admin_test::admin_test_server();
-    let mut admin = super::admin_test::admin(&server);
+    let server = super::helpers::admin_test_server();
+    let mut admin = super::helpers::admin(&server);
     assert_eq!(
         private_reply(&mut admin, "/passkeys"),
         "Your account has no passkey. Register one while signed in to add it."

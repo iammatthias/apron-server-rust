@@ -5,7 +5,6 @@
 
 use std::sync::Arc;
 
-use super::admin_test::*;
 use super::helpers::*;
 use super::persist_test::start_with;
 use crate::obj;

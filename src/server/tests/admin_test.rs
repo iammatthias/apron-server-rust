@@ -5,7 +5,6 @@
 use std::sync::Arc;
 
 use rust_stdlib::regexp::Regexp;
-use rust_stdlib_crypto::sha256;
 
 use super::helpers::*;
 use super::persist_test::start_with;
@@ -14,102 +13,6 @@ use crate::obj;
 use crate::server::config::Config;
 use crate::server::protocol::*;
 use crate::store::{self, Store};
-
-pub const ADMIN_TOKEN: &str = "admin-token-for-tests-0123456789";
-
-/// A passkey server whose admin token is ADMIN_TOKEN.
-pub fn admin_test_server() -> TestServer {
-    new_test_server(admin_config())
-}
-
-pub fn admin_config() -> Config {
-    Config {
-        web_authn: Some(test_web_authn()),
-        admin_token: Some(sha256::sum256(ADMIN_TOKEN.as_bytes())),
-        ..default_config()
-    }
-}
-
-/// Signs c in with `token` through the token scheme and returns the reply,
-/// skipping the notifications before it.
-pub fn token_auth(c: &mut TestClient, token: &str) -> Object {
-    let id = c.next_id("token");
-    reply_to(c, "auth", &id, obj! {"scheme" => "token", "token" => token})
-}
-
-/// Connects with no origin and signs in as the admin user.
-pub fn admin(server: &TestServer) -> TestClient {
-    admin_on(server, "")
-}
-
-/// Connects from origin and signs in as the admin user.
-pub fn admin_on(server: &TestServer, origin: &str) -> TestClient {
-    let (mut c, _) = dial_origin(server, origin);
-    let frame = token_auth(&mut c, ADMIN_TOKEN);
-    assert_eq!(user_id_of(&passkey_result(&frame)), "admin", "{frame:?}");
-    c.user_id = "admin".into();
-    c.drain();
-    c
-}
-
-/// Connects on the passkey origin and registers a new passkey account.
-pub fn account(server: &TestServer) -> TestClient {
-    let (mut c, _) = dial_origin(server, TEST_PASSKEY_ORIGIN);
-    let registered = register_test_passkey(&mut c, &mut new_test_authenticator());
-    c.user_id = user_id_of(&registered);
-    c.drain();
-    c
-}
-
-pub fn user_id_of(result: &Object) -> String {
-    you_of(result)["user_id"].as_str().unwrap().to_owned()
-}
-
-/// Runs a command and returns the text of the one ~private notice before
-/// its empty result; other notifications it causes are skipped.
-pub fn private_reply(c: &mut TestClient, text: &str) -> String {
-    let id = c.next_id("command");
-    let (before, result) = c.request("command", &id, obj! {"body" => obj! {"text" => text}});
-    let private = obj! {"user_id" => "~private", "name" => "System message to you"};
-    let notices: Vec<Object> = before
-        .iter()
-        .filter(|frame| frame.get("method") == Some(&Json::from("message")))
-        .map(|frame| notification_params(frame, "message"))
-        .filter(|notice| notice.get("from") == Some(&Json::from(private.clone())))
-        .collect();
-    assert!(
-        result.is_empty() && notices.len() == 1,
-        "{text} result {result:?} after {before:?}"
-    );
-    notices[0]["body"].as_object().unwrap()["text"]
-        .as_str()
-        .unwrap()
-        .to_owned()
-}
-
-/// How the admin commands' notices name a user: `**name** (`user_id`)`.
-pub fn who(server: &TestServer, user_id: &str) -> String {
-    let name = server.app.lock().users[user_id].name.clone();
-    format!("**{name}** (`{user_id}`)")
-}
-
-/// Runs a command that fails and returns its error, skipping the
-/// notifications before it.
-pub fn command_error(c: &mut TestClient, text: &str) -> (i64, String) {
-    let id = c.next_id("command");
-    let frame = reply_to(c, "command", &id, obj! {"body" => obj! {"text" => text}});
-    let error = frame
-        .get("error")
-        .and_then(Json::as_object)
-        .unwrap_or_else(|| panic!("{text}: {frame:?}"));
-    (
-        match error["code"] {
-            Json::Number(code) => code as i64,
-            ref other => panic!("code {other:?}"),
-        },
-        error["message"].as_str().unwrap().to_owned(),
-    )
-}
 
 /// The admin token signs in as the user admin from any origin, without a
 /// session token, making it on first use with the admin role and a join of
@@ -474,15 +377,6 @@ fn test_roles_persist_and_seed_once() {
         private_reply(&mut boss, &format!("/role {ada_id}")),
         format!("{who} has the roles `friend`.")
     );
-}
-
-/// The token in a notice's first code block.
-pub fn token_in(text: &str) -> String {
-    text.split("```\n")
-        .nth(1)
-        .and_then(|block| block.split('\n').next())
-        .unwrap_or_else(|| panic!("no token block in {text:?}"))
-        .to_owned()
 }
 
 /// /invite-token makes an account that signs in with the token from any

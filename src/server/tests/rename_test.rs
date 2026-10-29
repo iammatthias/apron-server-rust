@@ -6,7 +6,6 @@ use std::collections::BTreeSet;
 use std::io::Write;
 use std::sync::Arc;
 
-use super::admin_test::*;
 use super::helpers::*;
 use super::persist_test::start_with;
 use super::purge_test::{account_config, entangle, named_account, stored_traces, traces};
@@ -644,7 +643,7 @@ fn test_rename_during_an_avatar_upload() {
     let mut admin = admin(&server);
     let (mut dave, _) = named_account(&server, "Dave");
     let from = dave.user_id.clone();
-    let reply = reply_to(
+    let reply = reply(
         &mut dave,
         "command",
         "avatar",

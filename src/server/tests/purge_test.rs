@@ -8,7 +8,6 @@ use std::sync::Arc;
 
 use rust_stdlib::time;
 
-use super::admin_test::*;
 use super::helpers::*;
 use super::persist_test::start_with;
 use super::push_test::{add_push, go_idle, relay_push};
@@ -112,7 +111,7 @@ pub(super) fn entangle(
     );
     c.drain();
 
-    let avatar = reply_to(
+    let avatar = reply(
         c,
         "command",
         "avatar",
