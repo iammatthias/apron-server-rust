@@ -621,8 +621,10 @@ works again. Every 503 for a failure or overload carries `Retry-After`,
 **This server.** Has no edge stop, flood trip, daily budget or storage
 accounting, so it never closes for these reasons and posts no alert. A
 failed store write is logged and the server keeps serving from memory. The
-batch that failed is not written again until those entries change. Its
-only 503 is while shutting down, without `Retry-After`.
+writer keeps the failed entries and writes them again, merged with any
+later changes, with the next batch or after a backoff of 100 ms doubling
+to 30 seconds. Shutdown makes a last attempt and logs what is still
+unwritten. Its only 503 is while shutting down, without `Retry-After`.
 
 **Why.** The stops and the accounting guard Cloudflare's bill. A
 self-hosted server has no bill to stop, and its restart takes seconds, so

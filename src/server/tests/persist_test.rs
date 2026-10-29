@@ -635,3 +635,96 @@ fn test_deduplication_survives_restart() {
         .count();
     assert_eq!(texts, 1);
 }
+
+/// A `Memory` whose next `failures` applies fail, as a full disk would.
+struct FlakyStore {
+    inner: store::Memory,
+    failures: std::sync::atomic::AtomicUsize,
+}
+
+impl Store for FlakyStore {
+    fn load(
+        &self,
+        visit: &mut dyn FnMut(Entry) -> Result<(), store::StoreError>,
+    ) -> Result<(), store::StoreError> {
+        self.inner.load(visit)
+    }
+
+    fn apply(&self, batch: &[Entry]) -> Result<(), store::StoreError> {
+        use std::sync::atomic::Ordering;
+        let fail = self
+            .failures
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+            .is_ok();
+        if fail {
+            return Err("disk full".into());
+        }
+        self.inner.apply(batch)
+    }
+
+    fn close(&self) -> Result<(), store::StoreError> {
+        Ok(())
+    }
+}
+
+/// A batch the store refuses is written again once the store recovers, so
+/// a message saved during the failure survives a restart.
+#[test]
+fn test_failed_write_is_retried() {
+    let dir = TempDir::new("apron-retry-");
+    let flaky = Arc::new(FlakyStore {
+        inner: store::Memory::new(),
+        failures: Default::default(),
+    });
+    let server = start_with_store(flaky.clone(), &format!("{dir}/before"));
+    let mut c = dial_test_client(&server);
+    flaky.failures.store(1, std::sync::atomic::Ordering::SeqCst);
+    let (id, _) = save(
+        &mut c,
+        "kept",
+        obj! {"body" => obj! {"text" => "written on retry"}},
+    );
+    wait_for(|| load(&flaky.inner).contains_key(&format!("message/{id}")));
+    drop((c, server));
+
+    let restored = start_with_store(flaky.clone(), &format!("{dir}/after"));
+    let mut c = dial_test_client(&restored);
+    let page = history_page(&mut c, "general", Object::new());
+    let kept = records(&page, "messages")
+        .into_iter()
+        .find(|m| m["message_id"] == Json::from(id.as_str()))
+        .map(|m| m["body"].as_object().unwrap()["text"].clone());
+    assert_eq!(kept, Some(Json::from("written on retry")));
+}
+
+/// Batches refused until shutdown are written then, merged in order: the
+/// later delete and put of an entry win over the refused ones.
+#[test]
+fn test_refused_batches_are_written_at_shutdown() {
+    let flaky = Arc::new(FlakyStore {
+        inner: store::Memory::new(),
+        failures: 2.into(),
+    });
+    flaky
+        .inner
+        .apply(&[Entry::put("record", "1", "old")])
+        .unwrap();
+    let (tx, rx) = std::sync::mpsc::sync_channel(2);
+    tx.send(vec![
+        Entry::put("room", "a", "first"),
+        Entry::put("record", "1", "refused"),
+    ])
+    .unwrap();
+    tx.send(vec![
+        Entry::delete("record", "1"),
+        Entry::put("room", "a", "second"),
+    ])
+    .unwrap();
+    drop(tx);
+    let writer_store: Arc<dyn Store> = flaky.clone();
+    std::thread::spawn(move || crate::server::persist::write_store(writer_store, rx))
+        .join()
+        .unwrap();
+    let want: BTreeMap<String, String> = [("room/a".to_owned(), "second".to_owned())].into();
+    assert_eq!(load(&flaky.inner), want);
+}

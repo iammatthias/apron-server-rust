@@ -30,6 +30,8 @@
 //! ```
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::mpsc::{Receiver, RecvTimeoutError};
+use std::sync::Arc;
 
 use rust_stdlib::encoding::hex;
 use rust_stdlib::encoding::json::jsontext::Value;
@@ -51,7 +53,7 @@ use super::server::State;
 use super::status::*;
 use super::users::UserState;
 use super::webpush::encode_base64_url;
-use crate::store::Entry;
+use crate::store::{Entry, Store, StoreError};
 use crate::webauthn::Credential;
 
 pub const ENTRY_META: &str = "meta";
@@ -396,6 +398,93 @@ pub struct StoredEmbed {
     pub content_type: String,
     #[json("seq,omitzero")]
     pub seq: i64,
+}
+
+/// The wait after a write the store refused, doubled after each further
+/// refusal up to `STORE_RETRY_MAX`.
+const STORE_RETRY_MIN: std::time::Duration = std::time::Duration::from_millis(100);
+const STORE_RETRY_MAX: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Applies the batches from `rx` to `store` in order until the sender is
+/// dropped. A refused write is kept, keyed by kind and ID, and the next
+/// batch is merged over it, so a later put or delete of the same entry
+/// wins. What is kept is written again with the next batch, after a backoff,
+/// or at shutdown, and logged if even that last write fails.
+pub(super) fn write_store(store: Arc<dyn Store>, rx: Receiver<Vec<Entry>>) {
+    let mut pending: BTreeMap<(String, String), Option<Vec<u8>>> = BTreeMap::new();
+    let mut retry: Option<std::time::Duration> = None;
+    loop {
+        let batch = match retry {
+            None => rx.recv().map_err(|_| RecvTimeoutError::Disconnected),
+            Some(wait) => rx.recv_timeout(wait),
+        };
+        match batch {
+            Ok(batch) => {
+                for e in batch {
+                    pending.insert((e.kind, e.id), e.value);
+                }
+            }
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => break,
+        }
+        match write_pending(store.as_ref(), &mut pending) {
+            Ok(()) => retry = None,
+            Err(e) => {
+                let wait = retry.map_or(STORE_RETRY_MIN, |r| (r * 2).min(STORE_RETRY_MAX));
+                retry = Some(wait);
+                slog::error(
+                    "cannot write to the store; will retry",
+                    &[
+                        "error".into(),
+                        slog::Value::from(e.to_string()).into(),
+                        "entries".into(),
+                        slog::Value::from(pending.len()).into(),
+                        "retry".into(),
+                        slog::Value::from(format!("{wait:?}")).into(),
+                    ],
+                );
+            }
+        }
+    }
+    if let Err(e) = write_pending(store.as_ref(), &mut pending) {
+        let mut kinds: BTreeMap<&str, usize> = BTreeMap::new();
+        for (kind, _) in pending.keys() {
+            *kinds.entry(kind).or_default() += 1;
+        }
+        let kinds: Vec<String> = kinds.iter().map(|(k, n)| format!("{k}={n}")).collect();
+        slog::error(
+            "cannot write to the store at shutdown; changes lost",
+            &[
+                "error".into(),
+                slog::Value::from(e.to_string()).into(),
+                "entries".into(),
+                slog::Value::from(pending.len()).into(),
+                "kinds".into(),
+                slog::Value::from(kinds.join(" ")).into(),
+            ],
+        );
+    }
+}
+
+/// Writes `pending` as one batch and empties it, or keeps it on failure.
+fn write_pending(
+    store: &dyn Store,
+    pending: &mut BTreeMap<(String, String), Option<Vec<u8>>>,
+) -> Result<(), StoreError> {
+    if pending.is_empty() {
+        return Ok(());
+    }
+    let batch: Vec<Entry> = pending
+        .iter()
+        .map(|((kind, id), value)| Entry {
+            kind: kind.clone(),
+            id: id.clone(),
+            value: value.clone(),
+        })
+        .collect();
+    store.apply(&batch)?;
+    pending.clear();
+    Ok(())
 }
 
 /// The entries of one write to the store.
