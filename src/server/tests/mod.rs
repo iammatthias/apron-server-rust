@@ -15,6 +15,7 @@ mod persist_test;
 mod push_fixture_test;
 mod push_test;
 mod reference_test;
+mod retention_test;
 mod server_test;
 mod status_test;
 mod unfurl_test;

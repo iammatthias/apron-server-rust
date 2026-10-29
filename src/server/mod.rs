@@ -11,6 +11,7 @@ pub mod outbound;
 pub mod persist;
 pub mod protocol;
 pub mod push;
+pub mod retention;
 pub mod rooms;
 #[allow(clippy::module_inception)]
 pub mod server;

@@ -66,13 +66,22 @@ impl RoomState {
         self.creator == u.id || u.has_role("admin") || u.has_role("moderator")
     }
 
-    /// The room's log head and the inclusive lower bound of retained
-    /// history. The server retains every record, so history always starts at
-    /// the room's creation record.
-    pub fn delivery_fields(&self) -> Object {
+    /// The inclusive lower bound of the room's retained history (§4.3.3):
+    /// its creation record, or the server's history floor once retention
+    /// passed it, and `None` once retention discarded the whole log.
+    pub fn history_log_id(&self, floor: i64) -> Option<i64> {
+        let start = floor.max(self.created_id);
+        (start <= self.latest_id).then_some(start)
+    }
+
+    /// The room's log head and the start of its retained history.
+    pub fn delivery_fields(&self, floor: i64) -> Object {
         obj! {
             "latest_log_id" => format_id(self.latest_id),
-            "history_log_id" => format_id(self.created_id),
+            "history_log_id" => match self.history_log_id(floor) {
+                Some(start) => Json::from(format_id(start)),
+                None => Json::Null,
+            },
         }
     }
 
@@ -85,9 +94,9 @@ impl RoomState {
     }
 
     /// The room's current record with delivery fields.
-    pub fn params(&self) -> Object {
+    pub fn params(&self, floor: i64) -> Object {
         let mut params = self.record.clone();
-        params.extend(self.delivery_fields());
+        params.extend(self.delivery_fields(floor));
         params
     }
 }
@@ -389,7 +398,7 @@ impl State {
     /// and the membership that joined the user, if any (§4.2.3).
     pub fn joined_update_locked(&self, room_id: &str, membership: Option<&Value>) -> Frame {
         let r = &self.rooms[room_id];
-        let mut record = r.params();
+        let mut record = r.params(self.history_floor);
         let listed = self.add_members_locked(&mut record, r);
         let mut params =
             obj! {"joined" => vec![Json::from(record)], "users" => profiles(self, &listed)};
@@ -591,7 +600,7 @@ impl State {
         if let Some(editor) = editor {
             audience.insert(editor.to_owned());
         }
-        let frame = room_update("updated", vec![r.params().into()]);
+        let frame = room_update("updated", vec![r.params(self.history_floor).into()]);
         for member in audience {
             self.send_to_user(&member, &frame);
         }
@@ -727,7 +736,7 @@ impl State {
                 .filter(|_| !r.private)
                 .and_then(|p| self.rooms.get(p))
             {
-                let frame = room_update("updated", vec![r.params().into()]);
+                let frame = room_update("updated", vec![r.params(self.history_floor).into()]);
                 for id in &parent.members {
                     if *id != user_id {
                         self.send_to_user(id, &frame);
@@ -764,7 +773,13 @@ impl State {
         let has_room = req.params.contains_key("room_id");
         let only_user = parse_string(&req.params, "user_id", false)?;
         let has_user = req.params.contains_key("user_id");
-        let since = parse_bound(&req.params, "latest_log_id")?;
+        let mut since = parse_bound(&req.params, "latest_log_id")?;
+        // A delta cannot name the threads retention removed since then
+        // (§4.2.1 asks that it list deleted rooms in left), so the listing
+        // is then full, which a server may always send.
+        if since.is_some_and(|since| since <= self.rooms_removed_at) {
+            since = None;
+        }
 
         let user_id = self.user_of(c)?;
         let u = &self.users[&user_id];
@@ -831,7 +846,7 @@ impl State {
             rooms
                 .iter()
                 .map(|r| {
-                    let mut entry = r.params();
+                    let mut entry = r.params(self.history_floor);
                     if with_members && has_user {
                         let mut refs: Vec<Json> = Vec::new();
                         if r.members.contains(&only_user) {
@@ -1051,7 +1066,8 @@ impl State {
         // With room_id, the room's log starts at its creation. Without it,
         // the log of the joined rooms starts where the server's does, at the
         // default room's creation (§4.3.3); for a user in no rooms it is
-        // empty, ending just before.
+        // empty, ending just before. Retention moves either start up to the
+        // history floor, and a log retention emptied has none.
         let mut created = self
             .rooms
             .get(DEFAULT_ROOM_ID)
@@ -1060,8 +1076,9 @@ impl State {
         if has_room {
             created = rooms[0].created_id;
         }
+        let start = created.max(self.history_floor);
         if rooms.is_empty() {
-            latest = created - 1;
+            latest = start - 1;
         }
         let mut more = matching.len() > limit;
         if more {
@@ -1092,7 +1109,8 @@ impl State {
             .iter()
             .filter_map(|id| self.records.get(id))
             .collect();
-        let result = render_history(latest, created, !rooms.is_empty(), &records, more, size);
+        let has_history = !rooms.is_empty() && start <= latest;
+        let result = render_history(latest, start, has_history, &records, more, size);
         // The records are already JSON: the reply is assembled from them
         // without decoding or re-encoding.
         c.enqueue_frame(Frame::from(raw_response(&req.id, &result)));
@@ -1207,7 +1225,7 @@ impl State {
 
 /// Assembles a history result (§4.3) from a window of records, with the
 /// queried log's head and the start of its history, which is null for a log
-/// of no rooms.
+/// of no rooms or one retention emptied.
 pub fn render_history(
     latest: i64,
     created: i64,
