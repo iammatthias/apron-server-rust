@@ -4,7 +4,7 @@ use std::sync::Arc;
 use rust_stdlib::encoding::json::jsontext::Value;
 
 use super::bots::BOT_ID_PREFIX;
-use super::limits::{refused, Allowance, Category, Charge, Principal, Scope};
+use super::limits::{refused, Allowance, Category, Charge, Principal, Rate, Scope};
 use super::messages::MessageState;
 use super::protocol::*;
 use super::server::{
@@ -203,6 +203,10 @@ pub fn parse_bound(params: &Params, name: &str) -> Result<Option<i64>, RpcError>
         ))),
     }
 }
+
+/// A history reply's bytes besides its records: its id, `more`, the
+/// partition keys, and the log_id bounds.
+const HISTORY_ENVELOPE_BYTES: usize = 256;
 
 fn parse_limit(params: &Params, default_limit: usize) -> Result<usize, RpcError> {
     let Some(raw) = params.get("limit") else {
@@ -969,6 +973,42 @@ impl State {
     /// recently active first; MAX_THREADS and MAX_CREATED_ROOMS bound both.
     /// The result is followed by the read cursors kept for the listed rooms
     /// (§4.6).
+    /// Charges a history page to the user's and the IP's minute and day, and
+    /// the server's day, or to none.
+    fn charge_history_locked(&mut self, c: &Client, user_id: &str) -> Result<(), RpcError> {
+        let limits = &self.config.limits;
+        let (user, ip) = (
+            Principal::User(user_id.to_owned()),
+            Principal::Ip(c.ip_key.clone()),
+        );
+        let charges = [
+            Charge {
+                scope: Scope::History,
+                principal: &user,
+                allowance: Allowance::rate(limits.user_history, limits.user_history_day),
+            },
+            Charge {
+                scope: Scope::History,
+                principal: &ip,
+                allowance: Allowance::rate(limits.ip_history, limits.ip_history_day),
+            },
+            Charge {
+                scope: Scope::History,
+                principal: &Principal::Server,
+                allowance: Allowance::rate(Rate::per_minute(0), limits.server_history_day),
+            },
+        ];
+        self.limits.charge(&charges, 1).map_err(|refusal| {
+            let message = match (refusal.row, refusal.daily) {
+                (_, false) => "History request limit reached",
+                (0, true) => "Daily history limit reached",
+                (1, true) => "Daily history limit reached for this network",
+                (_, true) => "Daily history limit reached for the server",
+            };
+            refused(message, refusal.retry_after(), Some(Category::Read))
+        })
+    }
+
     /// Charges a `room_list` to the user's minute, except the first
     /// `joined` listing after a sign-in, which is how a client learns its
     /// rooms.
@@ -1261,7 +1301,11 @@ impl State {
     /// the log of every room the user joined, as one log. limit counts
     /// records of every kind; the slice is partitioned into rooms, messages,
     /// reactions, and membership, each omitted when empty.
-    pub fn history_locked(&self, c: &Arc<Client>, req: &Request) -> Result<(Json, bool), RpcError> {
+    pub fn history_locked(
+        &mut self,
+        c: &Arc<Client>,
+        req: &Request,
+    ) -> Result<(Json, bool), RpcError> {
         let room_id = parse_string(&req.params, "room_id", false)?;
         let has_room = req.params.contains_key("room_id");
         let after = parse_bound(&req.params, "after")?;
@@ -1354,13 +1398,16 @@ impl State {
                 matching.remove(0);
             }
         }
-        // A page also stops at MAX_HISTORY_REPLY_BYTES of records, keeping
-        // at least one, so one request cannot hold the lock to render an
-        // unbounded reply.
-        let mut size = 0usize;
+        // A page also stops at MAX_HISTORY_REPLY_BYTES with its envelope,
+        // keeping at least one record, so one request cannot hold the lock
+        // to render an unbounded reply.
+        let mut size = HISTORY_ENVELOPE_BYTES + req.id.len();
         for i in 0..matching.len() {
             let k = if has_after { i } else { matching.len() - 1 - i };
-            size += self.records.get(&matching[k]).map_or(0, |r| r.raw.len());
+            size += self
+                .records
+                .get(&matching[k])
+                .map_or(0, |r| r.raw.len() + 1);
             if size > MAX_HISTORY_REPLY_BYTES && i > 0 {
                 if has_after {
                     matching.truncate(k);
@@ -1377,6 +1424,8 @@ impl State {
             .collect();
         let has_history = !rooms.is_empty() && start <= latest;
         let result = render_history(latest, start, has_history, &records, more, size);
+        // Only a request that serves a page is counted.
+        self.charge_history_locked(c, &user_id)?;
         // The records are already JSON: the reply is assembled from them
         // without decoding or re-encoding.
         c.enqueue_frame(Frame::from(raw_response(&req.id, &result)));

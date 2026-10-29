@@ -150,6 +150,13 @@ pub struct LimitOptions {
     pub policy_violations: i64,
     pub status_coalesce_seconds: i64,
     pub offline_grace_seconds: i64,
+    pub history_per_minute: i64,
+    pub history_burst: i64,
+    pub history_per_day: i64,
+    pub ip_history_per_minute: i64,
+    pub ip_history_burst: i64,
+    pub ip_history_per_day: i64,
+    pub server_history_per_day: i64,
 }
 
 /// An extension Go lacks (docs/DEVIATIONS.md).
@@ -361,6 +368,13 @@ pub static GROUPS: &[Group] = &[
             spec!("server-frames-per-minute", Int, limit.server_frames_per_minute, ["600"], [], "WebSocket messages everyone may send a minute, past which requests get retry_after and notifications are dropped; 0 is unlimited (not in the Go aprond)"),
             spec!("policy-violations", Int, limit.policy_violations, ["3"], [], "Malformed or invalid requests within a minute that close a connection with 1008; 0 never closes (not in the Go aprond)"),
             spec!("status-coalesce-seconds", Int, limit.status_coalesce_seconds, ["60"], [], "Seconds between the status changes of one user that others are sent, the latest winning; a change made with me goes at once; 0 to 60 (not in the Go aprond)"),
+            spec!("history-per-minute", Int, limit.history_per_minute, ["20"], [], "History pages one user may request a minute, after a burst of --limit.history-burst; 0 is unlimited (not in the Go aprond)"),
+            spec!("history-burst", Int, limit.history_burst, ["60"], [], "History pages a quiet user may request at once (not in the Go aprond)"),
+            spec!("history-per-day", Int, limit.history_per_day, ["3000"], [], "History pages one user may request a UTC day; 0 is unlimited (not in the Go aprond)"),
+            spec!("ip-history-per-minute", Int, limit.ip_history_per_minute, ["60"], [], "History pages one client address may request a minute, after a burst of --limit.ip-history-burst; 0 is unlimited (not in the Go aprond)"),
+            spec!("ip-history-burst", Int, limit.ip_history_burst, ["120"], [], "History pages a quiet client address may request at once (not in the Go aprond)"),
+            spec!("ip-history-per-day", Int, limit.ip_history_per_day, ["6000"], [], "History pages one client address may request a UTC day; 0 is unlimited (not in the Go aprond)"),
+            spec!("server-history-per-day", Int, limit.server_history_per_day, ["40000"], [], "History pages everyone may request a UTC day; 0 is unlimited (not in the Go aprond)"),
             spec!("offline-grace-seconds", Int, limit.offline_grace_seconds, ["60"], [], "Seconds a status change a closed connection caused waits, so a reconnect within them shows others nothing; 0 to 60 (not in the Go aprond)"),
         ],
     },

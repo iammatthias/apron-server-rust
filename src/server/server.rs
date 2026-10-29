@@ -43,8 +43,9 @@ use crate::store::{self, Entry, Store};
 use crate::ws;
 
 pub const DEFAULT_OUTGOING_QUEUE: usize = 128;
-pub const DEFAULT_HISTORY_PAGE_SIZE: usize = 100;
-pub const MAX_HISTORY_PAGE_SIZE: usize = 1000;
+/// apron-server-cloudflare's history_default_limit and history_max_limit.
+pub const DEFAULT_HISTORY_PAGE_SIZE: usize = 20;
+pub const MAX_HISTORY_PAGE_SIZE: usize = 50;
 pub const DEFAULT_PING_INTERVAL: Duration = Duration::from_secs(30);
 pub const DEFAULT_PING_TIMEOUT: Duration = Duration::from_secs(10);
 pub const DEFAULT_WRITE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -53,9 +54,10 @@ pub const DEFAULT_MAX_UPLOAD_BYTES: i64 = 5 << 20;
 pub const DEFAULT_MAX_AVATAR_BYTES: i64 = 256 << 10;
 pub const DEFAULT_MAX_MESSAGE_UPLOADS: i64 = 20 << 20;
 pub const DEFAULT_MAX_UPLOAD_STORAGE: i64 = 1000 << 20;
-/// Bounds the records in one history page; a page always holds at least one
-/// record.
-pub const MAX_HISTORY_REPLY_BYTES: usize = 4 << 20;
+/// Bounds one history reply, its envelope included (apron-server-
+/// cloudflare's history_max_response_bytes); a page always holds at least
+/// one record.
+pub const MAX_HISTORY_REPLY_BYTES: usize = 256 << 10;
 pub const DEFAULT_UPLOAD_START_TIMEOUT: Duration = Duration::from_mins(5);
 pub const DEFAULT_STREAM_KEEP_BYTES: usize = 64 << 10;
 pub const DEFAULT_STREAM_MAX_BYTES: i64 = 16 << 20;

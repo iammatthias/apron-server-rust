@@ -211,8 +211,9 @@ fn test_history_pages_are_bounded_and_records_unescaped() {
         "stored record escapes markup: {raw}"
     );
 
-    let large = "x".repeat(200 << 10);
-    const POSTS: u8 = 30;
+    // 100 KiB texts: two fit the 256 KiB reply, three do not.
+    let large = "x".repeat(100 << 10);
+    const POSTS: u8 = 6;
     for i in 0..POSTS {
         save(
             &mut a,
@@ -220,15 +221,12 @@ fn test_history_pages_are_bounded_and_records_unescaped() {
             obj! {"body" => obj! {"text" => large.as_str()}},
         );
     }
-    let page = history_page(&mut a, "general", obj! {"limit" => 1000i64});
+    let page = history_page(&mut a, "general", obj! {"limit" => 50i64});
     let newest = log_ids(&page, "messages");
-    assert!(
-        page.get("more") == Some(&Json::from(true))
-            && newest.len() < POSTS as usize
-            && !newest.is_empty(),
-        "page of {} messages, more={:?}",
-        newest.len(),
-        page.get("more")
+    assert_eq!(
+        (newest.len(), page.get("more")),
+        (2, Some(&Json::from(true))),
+        "first page"
     );
     assert!(
         page.get("last_log_id") == Some(&Json::from(newest.last().unwrap().as_str()))
@@ -241,13 +239,61 @@ fn test_history_pages_are_bounded_and_records_unescaped() {
     let rest = history_page(
         &mut a,
         "general",
-        obj! {"limit" => 1000i64, "before" => format_id(before)},
+        obj! {"limit" => 50i64, "before" => format_id(before)},
     );
-    let got = log_ids(&rest, "messages").len() + newest.len();
-    assert!(
-        got >= POSTS as usize,
-        "two pages hold {got} of {POSTS} large messages"
+    assert_eq!(log_ids(&rest, "messages").len(), 2, "second page");
+}
+
+/// Pages hold 20 records by default and at most 50 (apron-server-
+/// cloudflare's history_default_limit and history_max_limit).
+#[test]
+fn test_history_page_sizes() {
+    let server = new_test_server(default_config());
+    let mut a = dial_test_client(&server);
+    for i in 0..60 {
+        save(
+            &mut a,
+            &format!("m{i}"),
+            obj! {"body" => obj! {"text" => "x"}},
+        );
+    }
+    let count = |page: &Object| -> usize {
+        ["rooms", "messages", "reactions", "memberships"]
+            .iter()
+            .map(|key| log_ids(page, key).len())
+            .sum()
+    };
+    assert_eq!(count(&history_page(&mut a, "general", Object::new())), 20);
+    assert_eq!(
+        count(&history_page(&mut a, "general", obj! {"limit" => 1000i64})),
+        50
     );
+}
+
+/// History pages count against the user's minute, past which a request
+/// is refused with the `read` category; a request that serves no page is
+/// not counted.
+#[test]
+fn test_history_rate_limit_names_read() {
+    let mut config = default_config();
+    config.limits.user_history = crate::server::limits::Rate {
+        per_minute: 1,
+        burst: 2,
+    };
+    let server = new_test_server(config);
+    let mut a = dial_test_client(&server);
+    a.expect_error(
+        "history",
+        "unknown",
+        obj! {"room_id" => "nowhere"},
+        CODE_INVALID_PARAMS,
+    );
+    history_page(&mut a, "general", Object::new());
+    history_page(&mut a, "general", Object::new());
+    let frame = a.call("history", "over", obj! {"room_id" => "general"});
+    let (message, data) = retry_after_of(&frame);
+    assert_eq!(message, "History request limit reached");
+    assert_eq!(data["ext"], Json::from(obj! {"limits" => "read"}));
 }
 
 #[test]
