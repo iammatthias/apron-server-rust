@@ -3,7 +3,7 @@
 //! `read-only-guests.integration.test.ts`).
 
 use super::helpers::*;
-use super::webauthn_test::test_web_authn;
+use super::webauthn_test::{test_web_authn, TEST_PASSKEY_ORIGIN};
 use crate::obj;
 use crate::server::protocol::*;
 use crate::server::Config;
@@ -16,9 +16,14 @@ fn welcome_of(frame: &Object) -> String {
         .to_owned()
 }
 
-/// The server frame's welcome and the welcome notice that follows it.
+/// The server frame's welcome and the welcome notice that follows it, on a
+/// connection from the passkey origin.
 fn greeting(server: &TestServer) -> (String, String) {
-    let (c, frame) = dial_server_frame(server, &[]);
+    greeting_from(server, TEST_PASSKEY_ORIGIN)
+}
+
+fn greeting_from(server: &TestServer, origin: &str) -> (String, String) {
+    let (c, frame) = dial_server_frame(server, &[("Origin", origin)]);
     (welcome_of(&frame), welcome_text(&c.read()))
 }
 
@@ -62,6 +67,15 @@ fn test_welcome_is_generals_description_else_a_summary() {
     let server = new_test_server(config);
     let summary = "Guests can post under a new name each visit. **Create a passkey** to post, react, and start threads; it signs you in on your next visit too. Bots sign in with a token their owner gets from `/invite-bot`. Messages are kept for 7 days.";
     assert_eq!(greeting(&server).0, summary, "without a description");
+    // An origin not offered passkeys is told where they work.
+    assert_eq!(
+        greeting_from(&server, "http://localhost:9999"),
+        (
+            "Guests can post under a new name each visit. Passkeys work on this server's own site. Bots sign in with a token their owner gets from `/invite-bot`. Messages are kept for 7 days.".to_owned(),
+            VERSION_LINE.to_owned()
+        ),
+        "another origin"
+    );
 
     let mut c = dial_test_client(&server);
     let description = "Be **kind**.";

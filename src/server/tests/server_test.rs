@@ -16,10 +16,6 @@ fn f(n: i64) -> Json {
     Json::from(n)
 }
 
-fn strings(values: &[&str]) -> Json {
-    Json::Array(values.iter().map(|v| Json::from(*v)).collect())
-}
-
 fn sorted_keys(o: &Object) -> Vec<String> {
     o.keys().cloned().collect()
 }
@@ -96,7 +92,7 @@ fn test_server_frame() {
     // accepted (§4.5).
     assert_eq!(params["status"], strings(&["dnd", "invisible"]), "status");
     assert!(
-        params["auth"] == strings(&["guest"]) && !params.contains_key("signup"),
+        params["auth"] == strings(&["token", "guest"]) && params["signup"] == strings(&[]),
         "auth: {:?}, signup: {:?}",
         params["auth"],
         params.get("signup")
@@ -148,11 +144,11 @@ fn test_server_frame() {
     let mut config = default_config();
     config.web_authn = Some(super::webauthn_test::test_web_authn());
     let passkeys = new_test_server(config);
-    let (_, frame) = dial_raw(&passkeys);
+    let (_, frame) = dial_origin(&passkeys, super::webauthn_test::TEST_PASSKEY_ORIGIN);
     let params = frame["params"].as_object().unwrap();
     assert!(
         params["auth"] == strings(&["webauthn", "token", "guest"])
-            && params["signup"] == strings(&["webauthn", "guest"]),
+            && params["signup"] == strings(&["webauthn"]),
         "passkey schemes: {params:?}"
     );
 
@@ -323,7 +319,7 @@ fn test_guest_auth_ignores_requested_identity() {
         "auth",
         "bad-token",
         obj! {"scheme" => "token", "token" => "x", "user_id" => "a b"},
-        CODE_UNSUPPORTED,
+        CODE_INVALID_PARAMS,
     );
     assert_eq!(
         auth("after", Object::new()),

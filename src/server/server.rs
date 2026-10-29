@@ -1164,7 +1164,9 @@ impl Server {
             }
             if self.config.max_connections > 0 && st.clients.len() >= self.config.max_connections {
                 // An error about the connection as a whole omits id (§1.1).
-                client.enqueue(&obj! {"method" => "server", "params" => st.server_params()});
+                client.enqueue(
+                    &obj! {"method" => "server", "params" => st.server_params(&client.origin)},
+                );
                 client.close_with_error(RpcError::with_data(
                     CODE_RETRY_AFTER,
                     "Server at capacity; try again shortly",
@@ -1189,8 +1191,10 @@ impl Server {
             );
             // The server announcement and the welcome are queued before the
             // reader starts accepting auth.
-            client.enqueue(&obj! {"method" => "server", "params" => st.server_params()});
-            client.enqueue(&st.welcome_notice());
+            client.enqueue(
+                &obj! {"method" => "server", "params" => st.server_params(&client.origin)},
+            );
+            client.enqueue(&st.welcome_notice(&client.origin));
         }
         let auth_deadline = {
             let server = Arc::downgrade(self);
@@ -1581,25 +1585,29 @@ impl State {
     }
 
     /// The `server` frame (PROTOCOL.md §3.1).
-    pub fn server_params(&self) -> Object {
-        let mut auth_schemes: Vec<String> = Vec::new();
-        if self.config.web_authn.is_some() {
-            auth_schemes.push("webauthn".into());
+    /// Whether `origin` is offered passkeys: it is configured for them, as
+    /// apron-server-cloudflare offers them only there.
+    pub fn passkeys_offered(&self, origin: &str) -> bool {
+        self.config.web_authn.as_ref().is_some_and(|w| {
+            crate::webauthn::protocol::is_origin_in_haystack(origin, &w.config.rp_origins)
+        })
+    }
+
+    /// The `server` frame's params (§3.1) for a connection from `origin`.
+    pub fn server_params(&self, origin: &str) -> Object {
+        // signup (§3.2) lists the schemes that can create an account; a
+        // token only signs in to one, and a guest is no account.
+        let mut signup: Vec<String> = Vec::new();
+        if self.passkeys_offered(origin) {
+            signup.push("webauthn".into());
         }
         if self.config.email_sender.is_some() {
-            auth_schemes.push("email".into());
+            signup.push("email".into());
         }
-        if !auth_schemes.is_empty() {
-            auth_schemes.push("token".into());
-        }
-        auth_schemes.push("guest".into());
-        // signup (§3.2) lists the schemes that can create an account: every
-        // one but token, which only resumes one.
-        let signup: Vec<String> = auth_schemes
-            .iter()
-            .filter(|s| *s != "token")
-            .cloned()
-            .collect();
+        // Bot and device tokens sign in from anywhere, so token is always
+        // offered.
+        let mut auth_schemes = signup.clone();
+        auth_schemes.extend(["token".into(), "guest".into()]);
         let mut capabilities: Vec<String> = [
             "history",
             "edit",
@@ -1627,7 +1635,7 @@ impl State {
         if !self.config.disable_push {
             params.insert("push".into(), super::push::server_push_params(self).into());
         }
-        params.insert("welcome".into(), self.welcome().into());
+        params.insert("welcome".into(), self.welcome(origin).into());
         // ext:settings, the extension apron-web defines (its EXT.md §3),
         // always with every key apron-server-cloudflare sends. Activity is
         // always on, so read cursors are kept, and any member may add others.
@@ -1658,16 +1666,14 @@ impl State {
             obj! {"settings" => settings, "media" => media}.into(),
         );
         params.insert("capabilities".into(), capabilities.into());
-        if signup != auth_schemes {
-            params.insert("signup".into(), signup.into());
-        }
+        params.insert("signup".into(), signup.into());
         params
     }
 
     /// `server.welcome` (§3.2): `--welcome` when set, else `general`'s
     /// description, which its members edit, as apron-server-cloudflare
     /// shows, else a summary of how guests and sign-in fit together here.
-    fn welcome(&self) -> String {
+    fn welcome(&self, origin: &str) -> String {
         if !self.config.welcome.is_empty() {
             return self.config.welcome.clone();
         }
@@ -1677,24 +1683,26 @@ impl State {
             .and_then(Json::as_str)
         {
             Some(description) if !description.is_empty() => description.to_owned(),
-            _ => self.sign_in_summary(),
+            _ => self.sign_in_summary(origin),
         }
     }
 
-    fn sign_in_summary(&self) -> String {
+    fn sign_in_summary(&self, origin: &str) -> String {
         let mut parts = vec![if self.config.guest_posting {
             "Guests can post under a new name each visit."
         } else {
             "Guests can read along."
         }
         .to_owned()];
-        let passkeys = self.config.web_authn.is_some();
+        let passkeys = self.passkeys_offered(origin);
         let email = self.config.email_sender.is_some();
         if passkeys {
             parts.push(
                 "**Create a passkey** to post, react, and start threads; it signs you in on your next visit too."
                     .into(),
             );
+        } else if self.config.web_authn.is_some() {
+            parts.push("Passkeys work on this server's own site.".into());
         }
         if email {
             parts.push(
@@ -1706,7 +1714,7 @@ impl State {
                 .into(),
             );
         }
-        if passkeys || email {
+        if self.config.web_authn.is_some() || email {
             parts.push("Bots sign in with a token their owner gets from `/invite-bot`.".into());
         }
         if let Some(retention) = self.config.retention {
@@ -1724,14 +1732,14 @@ impl State {
     /// frame, before any auth (§3.5, Appendix B): with no room_id, since the
     /// client knows no rooms yet, and the server version. Where guests only
     /// read, it says how to participate.
-    pub fn welcome_notice(&self) -> Object {
+    pub fn welcome_notice(&self, origin: &str) -> Object {
         let mut lines = vec![format!(
             "Welcome to Apron Chat. Server version: `{}`",
             env!("CARGO_PKG_VERSION")
         )];
         if !self.config.guest_posting {
             lines.push(
-                if self.config.web_authn.is_some() {
+                if self.passkeys_offered(origin) {
                     "Guests can read. *Sign in with passkey* to participate."
                 } else if self.config.email_sender.is_some() {
                     "Guests can read. *Sign in with email* to participate."

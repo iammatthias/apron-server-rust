@@ -377,6 +377,11 @@ pub fn guest_auth(c: &mut TestClient) -> Object {
     result
 }
 
+/// A JSON array of strings.
+pub fn strings(values: &[&str]) -> Json {
+    Json::Array(values.iter().map(|v| Json::from(*v)).collect())
+}
+
 pub fn you_of(result: &Object) -> Object {
     result["you"].as_object().cloned().unwrap()
 }

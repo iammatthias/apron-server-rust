@@ -749,14 +749,18 @@ fn test_passkey_rejects_invalid_proofs() {
         "begin",
         Object::new(),
     ));
-    let (mut wrong_origin, _) = dial_origin(&server, "http://localhost:9999");
-    passkey_denied(&passkey_call(
-        &mut wrong_origin,
-        "origin",
-        "login",
-        "begin",
-        Object::new(),
-    ));
+    // An origin not configured for passkeys is not offered them.
+    let (mut wrong_origin, frame) = dial_origin(&server, "http://localhost:9999");
+    assert_eq!(
+        notification_params(&frame, "server")["auth"],
+        strings(&["token", "guest"])
+    );
+    let refused = passkey_call(&mut wrong_origin, "origin", "login", "begin", Object::new());
+    assert_eq!(
+        refused["error"].as_object().unwrap()["code"],
+        Json::from(CODE_UNSUPPORTED),
+        "{refused:?}"
+    );
 }
 
 #[test]
