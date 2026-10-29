@@ -389,7 +389,7 @@ fn test_email_additions() {
     let (diary, _) = save_room(
         &mut victim,
         "diary",
-        obj! {"title" => "Diary", "private" => true},
+        obj! {"title" => "Diary", "parent_room_id" => "general"},
     );
     let (secret, _) = save(
         &mut victim,
@@ -417,12 +417,6 @@ fn test_email_additions() {
         "the attacker became the victim: {result:?}"
     );
     expect_joined_default(&later, &user_id_of(&result));
-    later.expect_error(
-        "history",
-        "diary",
-        obj! {"room_id" => diary.as_str()},
-        CODE_INVALID_PARAMS,
-    );
     victim.drain();
 
     // Nor can an account take another account's address: nothing is sent,

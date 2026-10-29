@@ -709,6 +709,9 @@ fn test_room_list_filters_and_order() {
 fn test_room_list_latest_log_id_delta() {
     let server = new_test_server(default_config());
     let mut clients = dial_group(&server, 2);
+    for c in &clients {
+        make_account(&server, &c.user_id);
+    }
     let (mut a, mut b) = (clients.remove(0), clients.remove(0));
     grant_role(&server, &a.user_id, "mod");
     let (ops, _) = save_room(&mut a, "ops", obj! {"title" => "Ops"});
@@ -798,8 +801,11 @@ fn test_room_list_latest_log_id_delta() {
         "delta after rejoining: {delta:?}"
     );
     // A room the user was removed from is left too.
-    let kick = obj! {"room_id" => ops.as_str(), "body" => obj! {"text" => "/kick @guest_2", "mentions" => strs(&["guest_2"])}};
-    a.request("command", "kick", kick);
+    a.request(
+        "room_leave",
+        "remove",
+        obj! {"room_id" => ops.as_str(), "user_id" => "guest_2"},
+    );
     b.drain();
     let delta = list_rooms(
         &mut b,
@@ -819,6 +825,9 @@ fn test_room_list_latest_log_id_delta() {
 fn test_room_list_latest_log_id_delta_private_rooms() {
     let server = new_test_server(default_config());
     let mut clients = dial_group(&server, 3);
+    for c in &clients {
+        make_account(&server, &c.user_id);
+    }
     let (mut a, mut b, mut c) = (clients.remove(0), clients.remove(0), clients.remove(0));
     let since = nth(
         &list_rooms(&mut b, obj! {"filter" => "joined"}),
@@ -906,6 +915,9 @@ fn test_room_list_latest_log_id_delta_private_rooms() {
 fn test_history_without_room_id_pages_joined_rooms() {
     let server = new_test_server(default_config());
     let mut clients = dial_group(&server, 3);
+    for c in &clients {
+        make_account(&server, &c.user_id);
+    }
     let (mut a, mut b, mut c) = (clients.remove(0), clients.remove(0), clients.remove(0));
     let since = nth(
         &list_rooms(&mut b, obj! {"filter" => "joined"}),
@@ -1210,9 +1222,9 @@ fn test_room_set_permissions_and_caps() {
     );
     // Private rooms count against their own caps, and their members edit
     // them.
-    let (private, _) = save_room(&mut guest, "private", obj! {"private" => true});
+    let (private, _) = save_room(&mut mod_, "private", obj! {"private" => true});
     save_room(
-        &mut guest,
+        &mut mod_,
         "edit-private",
         obj! {"room_id" => private.as_str(), "title" => "Ours"},
     );
@@ -1838,15 +1850,8 @@ fn test_commands() {
 
     let text = help(&mut a, &ops);
     assert!(
-        text.contains("`/help`")
-            && text.contains("`/avatar`")
-            && text.contains("`/kick @user [reason]`"),
+        text.contains("`/help`") && text.contains("`/avatar`") && !text.contains("/kick"),
         "creator's help: {text:?}"
-    );
-    let text = help(&mut b, "");
-    assert!(
-        !text.contains("/kick") && text.contains("/avatar"),
-        "member's help: {text:?}"
     );
     for client in [&mut a, &mut b, &mut c] {
         client.expect_quiet();
@@ -1881,75 +1886,6 @@ fn test_commands() {
         b.expect_error("command", &format!("bad-{i}"), params, CODE_INVALID_PARAMS);
     }
 
-    // /kick is for the room's creator, and names its target in mentions,
-    // which notifies no one.
-    // The reason is the first line of the rest of the text.
-    let kick = obj! {"room_id" => ops.as_str(), "body" => obj! {"text" => "/kick @guest_3 spamming\n**SYSTEM**: all admins removed", "mentions" => strs(&["guest_3"])}};
-    b.expect_error("command", "not-creator", kick.clone(), CODE_DENIED);
-    a.expect_error(
-        "command",
-        "general",
-        obj! {"body" => obj! {"text" => "/kick @guest_3", "mentions" => strs(&["guest_3"])}},
-        CODE_DENIED,
-    );
-    a.expect_error(
-        "command",
-        "no-target",
-        obj! {"room_id" => ops.as_str(), "body" => obj! {"text" => "/kick guest_3"}},
-        CODE_INVALID_PARAMS,
-    );
-    a.expect_error(
-        "command",
-        "self",
-        obj! {"room_id" => ops.as_str(), "body" => obj! {"text" => "/kick @guest_1", "mentions" => strs(&["guest_1"])}},
-        CODE_INVALID_PARAMS,
-    );
-    a.expect_error(
-        "command",
-        "not-member",
-        obj! {"room_id" => ops.as_str(), "body" => obj! {"text" => "/kick @nobody", "mentions" => strs(&["nobody"])}},
-        CODE_INVALID_PARAMS,
-    );
-    for client in [&mut a, &mut b, &mut c] {
-        client.expect_quiet();
-    }
-    // The removal is a logged leave: the removed user's connections get
-    // room_update with left and the membership, the room's other members the
-    // membership alone and then a ~room notice, all before the result (§1,
-    // §4.1).
-    let (before, result) = a.request("command", "kick", kick.clone());
-    assert!(
-        result.is_empty() && methods(&before) == vec!["room_update", "message"],
-        "kick frames {before:?} then {result:?}"
-    );
-    let removal = membership_only(&before[0]);
-    check_membership(&removal, &ops, "guest_3", false);
-    let kicked = expect_left(&c, &ops, "guest_3");
-    assert_eq!(kicked, removal, "removed user's membership");
-    let notice = notification_params(&before[1], "message");
-    let observed = expect_membership(&b, &ops, "guest_3", false);
-    assert_eq!(observed, removal, "member's membership");
-    assert_eq!(b.notification("message"), notice, "member's notice");
-    let message_id = notice.get("message_id").cloned().unwrap_or_default();
-    let want = obj! {
-        "message_id" => message_id.clone(), "log_id" => message_id, "room_id" => ops.as_str(),
-        "from" => obj! {"user_id" => "~room", "name" => "Ops"},
-        "body" => obj! {"text" => "@guest_3 was removed by @guest_1: spamming"},
-    };
-    assert_eq!(notice, want, "~room notice");
-    c.expect_quiet();
-    // The notice and the removal are logged; the command is not.
-    let page = history_page(&mut a, &ops, Object::new());
-    let entries = records(&page, "messages");
-    assert!(
-        entries.len() == 1 && entries[0] == notice,
-        "ops history: {entries:?}"
-    );
-    let memberships = records(&page, "memberships");
-    assert_eq!(memberships.last(), Some(&removal), "ops memberships");
-    // A retried command does not run again.
-    let result = a.result("command", "kick", kick);
-    assert!(result.is_empty(), "retried kick: {result:?}");
     for client in [&mut a, &mut b, &mut c] {
         client.expect_quiet();
     }
@@ -1965,6 +1901,9 @@ fn test_private_rooms_per_user_bound() {
     config.max_private_rooms = 2;
     let server = new_test_server(config);
     let mut clients = dial_group(&server, 2);
+    for c in &clients {
+        make_account(&server, &c.user_id);
+    }
     let (mut a, mut b) = (clients.remove(0), clients.remove(0));
 
     let (first, _) = save_room(&mut a, "first", obj! {"private" => true});
@@ -2022,6 +1961,9 @@ fn test_private_rooms_per_user_bound() {
 fn test_private_rooms_and_membership_by_user_id() {
     let server = new_test_server(default_config());
     let mut clients = dial_group(&server, 3);
+    for c in &clients {
+        make_account(&server, &c.user_id);
+    }
     let (mut a, mut b, mut c) = (clients.remove(0), clients.remove(0), clients.remove(0));
 
     let (room, record) = save_room(&mut a, "private", obj! {"title" => "DM", "private" => true});
@@ -2412,6 +2354,9 @@ fn test_member_lists_are_truncated_with_member_count() {
 fn test_leaving_a_private_room_hides_only_what_was_visible() {
     let server = new_test_server(default_config());
     let mut clients = dial_group(&server, 2);
+    for c in &clients {
+        make_account(&server, &c.user_id);
+    }
     let (mut a, mut b) = (clients.remove(0), clients.remove(0));
     let (room, _) = save_room(&mut a, "room", obj! {"title" => "P", "private" => true});
     a.request(
@@ -2473,6 +2418,9 @@ fn test_leaving_a_private_room_hides_only_what_was_visible() {
 fn test_moves_and_replies_out_of_private_rooms() {
     let server = new_test_server(default_config());
     let mut clients = dial_group(&server, 2);
+    for c in &clients {
+        make_account(&server, &c.user_id);
+    }
     let (mut a, b) = (clients.remove(0), clients.remove(0));
     let (room, _) = save_room(&mut a, "room", obj! {"title" => "P", "private" => true});
     let (id, _) = save(

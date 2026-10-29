@@ -186,6 +186,9 @@ fn test_push_wakes_mentions_and_replies_of_idle_users() {
     let relay = new_test_relay();
     let server = push_test_server();
     let mut clients = dial_group(&server, 2);
+    for c in &clients {
+        make_account(&server, &c.user_id);
+    }
     let mut b = clients.pop().unwrap();
     let mut a = clients.pop().unwrap();
     add_account(&server, "alice", &[&a, &b]);
@@ -565,6 +568,7 @@ fn test_push_wake_scopes() {
     let relay = new_test_relay();
     let server = push_test_server();
     let mut a = dial_test_client(&server);
+    make_account(&server, &a.user_id);
     add_account(&server, "carol", &[&a]);
     for (name, wake) in [
         ("default", WakeScope::DEFAULT),
@@ -2050,6 +2054,7 @@ fn test_private_wakes_for_threads_of_joined_rooms() {
     let relay = new_test_relay();
     let server = push_test_server();
     let mut a = dial_test_client(&server);
+    make_account(&server, &a.user_id);
     add_account(&server, "carol", &[&a]);
     add_push(
         &server,
@@ -2114,6 +2119,7 @@ fn test_mentions_wake_in_private_rooms() {
     let relay = new_test_relay();
     let server = push_test_server();
     let mut a = dial_test_client(&server);
+    make_account(&server, &a.user_id);
     add_account(&server, "carol", &[&a]);
     add_push(
         &server,
@@ -2178,6 +2184,7 @@ fn test_room_mute_recounts_threads() {
     let relay = new_test_relay();
     let server = push_test_server();
     let mut a = dial_test_client(&server);
+    make_account(&server, &a.user_id);
     add_account(&server, "carol", &[&a]);
     add_push(
         &server,
@@ -2249,6 +2256,7 @@ fn test_leaving_private_room_recounts_threads() {
     let relay = new_test_relay();
     let server = push_test_server();
     let mut a = dial_test_client(&server);
+    make_account(&server, &a.user_id);
     add_account(&server, "carol", &[&a]);
     add_push(
         &server,

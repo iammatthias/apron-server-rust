@@ -38,19 +38,8 @@ fn permissions(list: &[&str]) -> Json {
     Json::from(obj! {"permissions" => strings(list)})
 }
 
-/// Sends a request and returns its reply, skipping notifications.
-fn answer(c: &mut TestClient, method: &str, id: &str, params: Object) -> Object {
-    c.write(&obj! {"method" => method, "id" => id, "params" => params});
-    loop {
-        let frame = c.read();
-        if frame.contains_key("id") {
-            return frame;
-        }
-    }
-}
-
 fn move_to(c: &mut TestClient, id: &str, message_id: &str, room_id: &str) -> Object {
-    answer(
+    reply(
         c,
         "message",
         id,
@@ -103,7 +92,7 @@ fn test_permissions_and_moderator_moves() {
         let frame = move_to(&mut tia, &format!("{role}-out"), &posted, "general");
         assert!(frame.contains_key("result"), "{role} out: {frame:?}");
         // A move keeps the content as it was.
-        let changed = answer(
+        let changed = reply(
             &mut tia,
             "message",
             &format!("{role}-edit"),
@@ -116,7 +105,7 @@ fn test_permissions_and_moderator_moves() {
             )
         );
         // Nor may a moderator edit it where it is.
-        assert!(denied(&answer(
+        assert!(denied(&reply(
             &mut tia,
             "message",
             &format!("{role}-same"),
