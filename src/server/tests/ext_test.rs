@@ -31,7 +31,7 @@ fn big_float() -> Json {
 /// A message save leaves ext out to keep it.
 #[test]
 fn test_message_saves_merge_ext() {
-    let server = new_test_server(default_config());
+    let server = new_test_server(large_frames_config());
     let mut a = dial_test_client(&server);
 
     let (id, created) = save(

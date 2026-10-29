@@ -59,6 +59,25 @@ pub struct Settings {
     pub guest_posting: bool,
     /// `--history.retention`, an extension Go lacks; `None` keeps history.
     pub retention: Option<Duration>,
+    /// The `--frame.*` bounds, an extension Go lacks.
+    pub frame: FrameSettings,
+}
+
+/// The `--frame.*` bounds, each positive.
+#[derive(Debug, Default)]
+pub struct FrameSettings {
+    pub max_bytes: usize,
+    pub max_text_bytes: usize,
+    pub max_depth: usize,
+    pub max_nodes: usize,
+    pub max_id_bytes: usize,
+}
+
+fn positive(flag: &str, value: i64) -> Result<usize, String> {
+    usize::try_from(value)
+        .ok()
+        .filter(|&n| n > 0)
+        .ok_or_else(|| format!("invalid --{flag} {value}: use a positive number"))
 }
 
 /// main.go's `serverConfig`: turns options into the server's settings, or
@@ -162,6 +181,14 @@ pub fn server_settings(options: &Options) -> Result<Settings, String> {
     config.unfurl = options.unfurl.enable;
     config.guest_posting = options.guest.posting;
     config.retention = parse_retention(&options.history.retention)?;
+    let f = &options.frame;
+    config.frame = FrameSettings {
+        max_bytes: positive("frame.max-bytes", f.max_bytes)?,
+        max_text_bytes: positive("frame.max-text-bytes", f.max_text_bytes)?,
+        max_depth: positive("frame.max-depth", f.max_depth)?,
+        max_nodes: positive("frame.max-nodes", f.max_nodes)?,
+        max_id_bytes: positive("frame.max-id-bytes", f.max_id_bytes)?,
+    };
     Ok(config)
 }
 

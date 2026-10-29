@@ -89,6 +89,14 @@ fn server_config(settings: Settings) -> Result<server::Config, String> {
     config.unfurl = settings.unfurl;
     config.guest_posting = settings.guest_posting;
     config.retention = settings.retention;
+    let frame = settings.frame;
+    config.frame = server::protocol::FrameLimits {
+        max_bytes: frame.max_bytes,
+        max_text_bytes: frame.max_text_bytes,
+        max_depth: frame.max_depth,
+        max_nodes: frame.max_nodes,
+        max_id_bytes: frame.max_id_bytes,
+    };
     if let Some(rp) = settings.webauthn {
         let web_authn = WebAuthn::new(webauthn::Config {
             rpid: rp.rp_id,

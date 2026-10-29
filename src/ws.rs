@@ -163,6 +163,9 @@ impl Conn {
                 Err(ReadError::Protocol(reason)) => {
                     return Err(self.fail(STATUS_PROTOCOL_ERROR, &reason))
                 }
+                Err(ReadError::TooBig(reason)) => {
+                    return Err(self.fail(STATUS_MESSAGE_TOO_BIG, &reason))
+                }
                 Err(ReadError::Io(e)) => {
                     if self.closed.load(Ordering::Relaxed) {
                         return Err(Error::Closed {
@@ -288,8 +291,9 @@ impl Conn {
         }
         let limit = self.read_limit.load(Ordering::Relaxed);
         if !control && limit >= 0 && len > (limit as u64).saturating_add(1) {
-            // A frame far past the limit is refused before it is read.
-            return Err(ReadError::Protocol(format!(
+            // A frame far past the limit is refused before it is read, with
+            // the same close code as a message over it.
+            return Err(ReadError::TooBig(format!(
                 "read limited at {} bytes",
                 limit + 1
             )));
@@ -424,6 +428,7 @@ struct Frame {
 
 enum ReadError {
     Protocol(String),
+    TooBig(String),
     Io(io::Error),
 }
 

@@ -102,10 +102,13 @@ pub fn mentions(body: Option<&Object>) -> Vec<String> {
         .unwrap_or_default()
 }
 
-pub(crate) fn validate_body(body: &Object) -> Result<(), RpcError> {
+pub(crate) fn validate_body(body: &Object, max_text_bytes: usize) -> Result<(), RpcError> {
     if let Some(raw) = body.get("text") {
-        if raw.as_str().is_none() {
+        let Some(text) = raw.as_str() else {
             return Err(invalid_params("body.text must be a string"));
+        };
+        if text.len() > max_text_bytes {
+            return Err(RpcError::new(CODE_TOO_LARGE, "body.text is too large"));
         }
     }
     if let Some(raw) = body.get("format") {
@@ -280,7 +283,7 @@ impl State {
         let mut body: Option<Object> = None;
         if !deleted {
             let parsed = parse_object(&req.params, "body", true)?.unwrap_or_default();
-            validate_body(&parsed)?;
+            validate_body(&parsed, self.config.frame.max_text_bytes)?;
             body = Some(parsed);
         }
         let (ext_write, _) = parse_ext(&req.params, "ext")?;

@@ -192,7 +192,7 @@ fn error_code(frame: &Object) -> Option<Json> {
 
 #[test]
 fn test_history_pages_are_bounded_and_records_unescaped() {
-    let server = new_test_server(default_config());
+    let server = new_test_server(large_frames_config());
     let mut a = dial_test_client(&server);
     save(
         &mut a,
@@ -250,7 +250,7 @@ fn test_history_pages_are_bounded_and_records_unescaped() {
 
 #[test]
 fn test_profile_and_push_size_limits() {
-    let mut config = default_config();
+    let mut config = large_frames_config();
     config.allow_insecure_push = true;
     let server = new_test_server(config);
     let mut a = dial_test_client(&server);

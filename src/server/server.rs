@@ -35,7 +35,6 @@ use crate::rate::Limiter;
 use crate::store::{self, Entry, Store};
 use crate::ws;
 
-pub const DEFAULT_READ_LIMIT: i64 = 256 << 10;
 pub const DEFAULT_OUTGOING_QUEUE: usize = 128;
 pub const DEFAULT_HISTORY_PAGE_SIZE: usize = 100;
 pub const MAX_HISTORY_PAGE_SIZE: usize = 1000;
@@ -76,7 +75,8 @@ pub struct Config {
     pub allow_any_origin: bool,
     /// Serves a built frontend from the HTTP root when non-empty. Phase 3.
     pub static_dir: String,
-    pub read_limit: i64,
+    /// Bounds on each frame a client sends (FrameLimits).
+    pub frame: FrameLimits,
     pub outgoing_queue: usize,
     pub history_page_size: usize,
     pub ping_interval: Duration,
@@ -171,7 +171,7 @@ pub fn default_config() -> Config {
         ]),
         allow_any_origin: false,
         static_dir: String::new(),
-        read_limit: DEFAULT_READ_LIMIT,
+        frame: FrameLimits::default(),
         outgoing_queue: DEFAULT_OUTGOING_QUEUE,
         history_page_size: DEFAULT_HISTORY_PAGE_SIZE,
         ping_interval: DEFAULT_PING_INTERVAL,
@@ -216,9 +216,6 @@ impl Config {
         let defaults = default_config();
         if self.origin_patterns.is_none() && !self.allow_any_origin {
             self.origin_patterns = defaults.origin_patterns;
-        }
-        if self.read_limit <= 0 {
-            self.read_limit = defaults.read_limit;
         }
         if self.outgoing_queue == 0 {
             self.outgoing_queue = defaults.outgoing_queue;
@@ -1130,7 +1127,7 @@ impl Server {
         let Ok(socket) = ws::accept(w, r, &options) else {
             return;
         };
-        socket.set_read_limit(self.config.read_limit);
+        socket.set_read_limit(self.config.frame.max_bytes as i64);
 
         let (out, rx) = sync_channel(self.config.outgoing_queue);
         let client = Arc::new(Client {
@@ -1351,7 +1348,7 @@ impl Server {
         if c.is_closing() {
             return;
         }
-        let (req, parse_err) = parse_request(payload);
+        let (req, parse_err) = parse_request(payload, &self.config.frame);
         if let Some(parse_err) = parse_err {
             if notification_only(&req.method) {
                 // The id of a notification method may be ignored, and the
@@ -1363,7 +1360,8 @@ impl Server {
                 }
                 return;
             }
-            if parse_err.code == CODE_INVALID_PARAMS && !req.has_id {
+            // Only an envelope error is answered without an id.
+            if !req.has_id && matches!(parse_err.code, CODE_INVALID_PARAMS | CODE_TOO_LARGE) {
                 return;
             }
             if req.has_id {

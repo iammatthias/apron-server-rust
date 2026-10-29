@@ -37,6 +37,7 @@ pub struct Options {
     pub unfurl: UnfurlOptions,
     pub guest: GuestOptions,
     pub history: HistoryOptions,
+    pub frame: FrameOptions,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -104,6 +105,16 @@ pub struct GuestOptions {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct HistoryOptions {
     pub retention: String,
+}
+
+/// An extension Go lacks (docs/DEVIATIONS.md).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct FrameOptions {
+    pub max_bytes: i64,
+    pub max_text_bytes: i64,
+    pub max_depth: i64,
+    pub max_nodes: i64,
+    pub max_id_bytes: i64,
 }
 
 /// A borrowed option field. `Int` is Go's `int` and `Int64` its `int64`;
@@ -259,6 +270,17 @@ pub static GROUPS: &[Group] = &[
         namespace: "history",
         options: &[
             spec!("retention", Str, history.retention, [], [], "Delete messages, reactions, and their uploads older than this, such as 168h, checking hourly; emptied threads go, other rooms stay (default: keep forever; not in the Go aprond)"),
+        ],
+    },
+    Group {
+        name: "Frames",
+        namespace: "frame",
+        options: &[
+            spec!("max-bytes", Int, frame.max_bytes, ["16384"], [], "Largest WebSocket message a client may send, in bytes; a larger one closes the connection with 1009 (not in the Go aprond)"),
+            spec!("max-text-bytes", Int, frame.max_text_bytes, ["4096"], [], "Largest body.text of a message or command, in bytes (not in the Go aprond)"),
+            spec!("max-depth", Int, frame.max_depth, ["8"], [], "Deepest nesting of objects and arrays in a frame, the frame itself at depth 1 (not in the Go aprond)"),
+            spec!("max-nodes", Int, frame.max_nodes, ["2048"], [], "Most JSON values in a frame, object keys not counted (not in the Go aprond)"),
+            spec!("max-id-bytes", Int, frame.max_id_bytes, ["128"], [], "Longest request id, in bytes (not in the Go aprond)"),
         ],
     },
 ];

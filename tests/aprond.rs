@@ -189,7 +189,7 @@ fn test_startup_errors_match_golden() {
     let not_a_database = format!("sqlite:{}", dir.write("bad.db", &"x".repeat(128)));
     let uploads = dir.join("uploads");
     let base = ["--upload.dir", &uploads];
-    let cases: [Vec<&str>; 7] = [
+    let cases: [Vec<&str>; 8] = [
         vec!["--store", "memory", "--addr", &busy],
         vec!["--store", "bogus:1"],
         vec!["--store", "sqlite:"],
@@ -208,6 +208,7 @@ fn test_startup_errors_match_golden() {
             "--push.allow-insecure",
         ],
         vec!["--store", &not_a_database],
+        vec!["--store", "memory", "--frame.max-depth", "0"],
     ];
     let cases: Vec<Vec<&str>> = cases
         .into_iter()
@@ -559,6 +560,43 @@ fn test_guest_posting_flag() {
     }
 }
 
+/// `--frame.max-bytes` bounds what a client may send.
+#[test]
+fn test_frame_flags() {
+    let dir = TempDir::new();
+    let uploads = dir.join("uploads");
+    let args = [
+        "--store",
+        "memory",
+        "--upload.dir",
+        &uploads,
+        "--addr",
+        "127.0.0.1:0",
+        "--frame.max-bytes",
+        "100",
+    ];
+    let mut aprond = Aprond::start(&args);
+    let addr = aprond.addr("apron server");
+    let timeout = rust_stdlib::time::SECOND;
+    let conn = apron::ws::dial(&format!("ws://{addr}/ws"), &[], timeout).unwrap();
+    let frame = format!(
+        r#"{{"method":"auth","id":"a","params":{{"x":"{}"}}}}"#,
+        "x".repeat(100)
+    );
+    conn.write(apron::ws::MessageType::Text, frame.as_bytes(), timeout)
+        .unwrap();
+    loop {
+        match conn.read() {
+            Ok(_) => continue,
+            Err(apron::ws::Error::Closed { code, .. }) => {
+                assert_eq!(code, apron::ws::STATUS_MESSAGE_TOO_BIG);
+                break;
+            }
+            Err(e) => panic!("{e}"),
+        }
+    }
+}
+
 /// `--guest.posting` and `--history.retention`, extensions: kept by
 /// `--print-config`, and a retention that is not a positive Go duration
 /// stops the server.
@@ -576,7 +614,7 @@ fn test_guest_and_history_flags() {
     assert_eq!(code, 0);
     assert!(String::from_utf8(out)
         .unwrap()
-        .ends_with("\nposting = true\n\n[history]\n\n# Delete messages, reactions, and their uploads older than this, such as 168h, checking hourly; emptied threads go, other rooms stay (default: keep forever; not in the Go aprond)\nretention = \"168h\"\n"));
+        .contains("\nposting = true\n\n[history]\n\n# Delete messages, reactions, and their uploads older than this, such as 168h, checking hourly; emptied threads go, other rooms stay (default: keep forever; not in the Go aprond)\nretention = \"168h\"\n\n[frame]\n"));
     for bad in ["7d", "-1h"] {
         let flag = format!("--history.retention={bad}");
         let (code, _, err) = output(APROND, &["--store", "memory", &flag]);

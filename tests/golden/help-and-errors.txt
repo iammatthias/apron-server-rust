@@ -155,6 +155,21 @@ History:
                                   hourly; emptied threads go, other rooms stay
                                   (default: keep forever; not in the Go aprond)
 
+Frames:
+      --frame.max-bytes=          Largest WebSocket message a client may send,
+                                  in bytes; a larger one closes the connection
+                                  with 1009 (not in the Go aprond) (default:
+                                  16384)
+      --frame.max-text-bytes=     Largest body.text of a message or command, in
+                                  bytes (not in the Go aprond) (default: 4096)
+      --frame.max-depth=          Deepest nesting of objects and arrays in a
+                                  frame, the frame itself at depth 1 (not in
+                                  the Go aprond) (default: 8)
+      --frame.max-nodes=          Most JSON values in a frame, object keys not
+                                  counted (not in the Go aprond) (default: 2048)
+      --frame.max-id-bytes=       Longest request id, in bytes (not in the Go
+                                  aprond) (default: 128)
+
 Help Options:
   -h, --help                      Show this help message
 
@@ -318,6 +333,21 @@ History:
                                   hourly; emptied threads go, other rooms stay
                                   (default: keep forever; not in the Go aprond)
 
+Frames:
+      --frame.max-bytes=          Largest WebSocket message a client may send,
+                                  in bytes; a larger one closes the connection
+                                  with 1009 (not in the Go aprond) (default:
+                                  16384)
+      --frame.max-text-bytes=     Largest body.text of a message or command, in
+                                  bytes (not in the Go aprond) (default: 4096)
+      --frame.max-depth=          Deepest nesting of objects and arrays in a
+                                  frame, the frame itself at depth 1 (not in
+                                  the Go aprond) (default: 8)
+      --frame.max-nodes=          Most JSON values in a frame, object keys not
+                                  counted (not in the Go aprond) (default: 2048)
+      --frame.max-id-bytes=       Longest request id, in bytes (not in the Go
+                                  aprond) (default: 128)
+
 Help Options:
   -h, --help                      Show this help message
 
@@ -480,6 +510,21 @@ History:
                                   older than this, such as 168h, checking
                                   hourly; emptied threads go, other rooms stay
                                   (default: keep forever; not in the Go aprond)
+
+Frames:
+      --frame.max-bytes=          Largest WebSocket message a client may send,
+                                  in bytes; a larger one closes the connection
+                                  with 1009 (not in the Go aprond) (default:
+                                  16384)
+      --frame.max-text-bytes=     Largest body.text of a message or command, in
+                                  bytes (not in the Go aprond) (default: 4096)
+      --frame.max-depth=          Deepest nesting of objects and arrays in a
+                                  frame, the frame itself at depth 1 (not in
+                                  the Go aprond) (default: 8)
+      --frame.max-nodes=          Most JSON values in a frame, object keys not
+                                  counted (not in the Go aprond) (default: 2048)
+      --frame.max-id-bytes=       Longest request id, in bytes (not in the Go
+                                  aprond) (default: 128)
 
 Help Options:
   -h, --help                      Show this help message

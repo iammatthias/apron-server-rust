@@ -90,6 +90,15 @@ pub fn default_config() -> Config {
     }
 }
 
+/// `default_config` with frames and texts large enough to reach the
+/// server's limits on ext, descriptions and history pages.
+pub fn large_frames_config() -> Config {
+    let mut config = default_config();
+    config.frame.max_bytes = 1 << 20;
+    config.frame.max_text_bytes = 1 << 20;
+    config
+}
+
 pub fn new_test_server(config: Config) -> TestServer {
     let app = open(config).expect("open");
     let http = httptest::Server::new(app.handler()).expect("httptest server");
@@ -926,8 +935,8 @@ pub fn command_revoking(
         "method" => "command", "id" => "reissue", "params" => obj! {"body" => obj! {"text" => text}},
     })
     .unwrap();
-    let (command, _) = parse_request(&command);
-    let (late, _) = parse_request(LATE_POST);
+    let (command, _) = parse_request(&command, &FrameLimits::default());
+    let (late, _) = parse_request(LATE_POST, &FrameLimits::default());
     {
         let mut st = server.app.lock();
         st.command_locked(asker_conn, &command)

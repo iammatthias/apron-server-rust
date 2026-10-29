@@ -816,7 +816,7 @@ fn test_replies_may_cross_rooms() {
 
 #[test]
 fn test_room_set_creates_and_edits_rooms_and_threads() {
-    let server = new_test_server(default_config());
+    let server = new_test_server(large_frames_config());
     let mut clients = dial_group(&server, 2);
     let mut observer = clients.remove(1);
     let mut c = clients.remove(0);

@@ -118,7 +118,7 @@ impl State {
         }
         let reply_id = parse_message_ref(&req.params, "reply_to")?;
         let body = parse_object(&req.params, "body", true)?.unwrap_or_default();
-        validate_body(&body)?;
+        validate_body(&body, self.config.frame.max_text_bytes)?;
         parse_ext(&req.params, "ext")?;
         let text = body.get("text").and_then(Json::as_str).unwrap_or("");
         let line = text.trim();
