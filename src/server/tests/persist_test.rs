@@ -520,3 +520,44 @@ fn test_url_avatars_are_dropped() {
     let server = start_with_store(kept, &format!("{dir}/after"));
     assert_eq!(server.app.lock().users[&ada_id].avatar, "");
 }
+
+/// An avatar, custom emoji or server avatar write still pending when the
+/// server stopped never finishes: it is dropped on restore, as a message's
+/// is, rather than kept without its expiry.
+#[test]
+fn test_pending_image_writes_are_dropped_on_restore() {
+    use super::metadata_test::{command_with, upload_embed, write_url};
+    let dir = TempDir::new("apron-pending-");
+    let configure = |config: &mut Config| {
+        config.admin_token = super::admin_test::admin_config().admin_token;
+    };
+    let kept: Arc<dyn Store> = Arc::new(store::Memory::new());
+    let server = start_with(kept.clone(), &format!("{dir}/before"), configure);
+    let mut ada = super::admin_test::admin(&server);
+    let mut urls = Vec::new();
+    for command in ["/avatar", "/emoji add :late:", "/server avatar"] {
+        let (_, started) = command_with(&mut ada, command, upload_embed());
+        urls.push(write_url(&started));
+    }
+    let pending: Vec<String> = server.app.lock().embeds.keys().cloned().collect();
+    assert_eq!(pending.len(), 3, "pending writes: {pending:?}");
+    let old_url = server.http.url.clone();
+    drop(ada);
+    let mut server = server;
+    server.stop();
+
+    let restored = start_with(kept, &format!("{dir}/after"), configure);
+    let left: Vec<String> = restored.app.lock().embeds.keys().cloned().collect();
+    assert!(
+        left.is_empty(),
+        "pending writes kept after a restart: {left:?}"
+    );
+    for url in urls {
+        let url = url.replace(&old_url, &restored.http.url);
+        assert_eq!(
+            http_do("PUT", &url, Some(&test_png()), "image/png").0,
+            404,
+            "{url}"
+        );
+    }
+}

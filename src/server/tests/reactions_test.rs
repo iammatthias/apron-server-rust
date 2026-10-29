@@ -32,6 +32,14 @@ fn test_reaction_entries_are_qualified_and_keys_known() {
         &["\u{2764}", "\u{2764}\u{FE0F}", "🏳\u{200D}🌈", "👍🏽"],
     );
     assert_eq!(emojis_of(&set), strings(&["\u{2764}\u{FE0F}", "🏳️‍🌈", "👍🏽"]));
+    // The logged record holds them so too, as history serves it.
+    let page = history_page(&mut c, "general", Object::new());
+    let logged = records(&page, "reactions");
+    assert_eq!(
+        emojis_of(logged.last().unwrap()),
+        strings(&["\u{2764}\u{FE0F}", "🏳️‍🌈", "👍🏽"]),
+        "logged: {logged:?}"
+    );
     // The same set in other forms is no change.
     let same = c.result(
         "reactions",

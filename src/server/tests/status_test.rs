@@ -1426,6 +1426,10 @@ fn test_me_status_changes_are_limited() {
         failure.is_some_and(|f| f.get("code") == Some(&Json::from(CODE_RETRY_AFTER))),
         "me beyond the limit: {frame:?}"
     );
+    // `me` is no request of ext:limits' rows, so its refusal names no
+    // category: data holds retry_after alone (Cloudflare b97f119).
+    let data = failure.unwrap()["data"].as_object().expect("data");
+    assert_eq!(data.keys().collect::<Vec<_>>(), ["retry_after"], "{data:?}");
     assert_eq!(
         set_status(&mut b, "dnd"),
         Json::from("dnd"),
