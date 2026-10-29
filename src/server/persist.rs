@@ -182,7 +182,7 @@ pub struct StoredReaction {
     #[json("emojis")]
     pub emojis: Vec<String>,
     /// The record that logged the set, which retention reads; absent in
-    /// stores written before it, and Go's decoder skips the member.
+    /// stores written before it.
     #[json("log_id,omitzero")]
     pub log_id: i64,
 }
@@ -219,17 +219,16 @@ pub struct StoredUser {
     pub passkey: Option<StoredPasskey>,
     #[json("email,omitzero")]
     pub email: String,
-    /// A bot's owner (bots.rs). Go's decoder skips the member.
+    /// A bot's owner (bots.rs).
     #[json("bot,omitzero")]
     pub bot: String,
-    /// The user's roles (§3.3), in the order given. Go's decoder skips the
-    /// member.
+    /// The user's roles (§3.3), in the order given.
     #[json("roles,omitzero")]
     pub roles: Vec<String>,
-    /// `UserState.invited`. Go's decoder skips the member.
+    /// `UserState.invited`.
     #[json("invited,omitzero")]
     pub invited: bool,
-    /// `UserState.active`. Go's decoder skips the member.
+    /// `UserState.active`.
     #[json("active,omitzero")]
     pub active: i64,
     /// The chosen status (§4.5.1), absent for online.
@@ -258,8 +257,7 @@ pub struct StoredPasskey {
     pub handle: Bytes,
     #[json("credentials")]
     pub credentials: Vec<Credential>,
-    /// `PasskeyUser.times` by the base64url credential ID. Go's decoder
-    /// skips the member.
+    /// `PasskeyUser.times` by the base64url credential ID.
     #[json("times,omitzero")]
     pub times: BTreeMap<String, StoredPasskeyTimes>,
 }

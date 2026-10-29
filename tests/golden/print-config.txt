@@ -28,7 +28,7 @@ max-listed-members = 1000
 # Top-level private rooms one user may be in at once, created or added to, such as on a public deployment; 0 is unlimited
 max-private-rooms = 20
 
-# Relay each user's read cursors to everyone in the room, and list them after room_list; without it they go only to the user's own connections (not in the Go aprond)
+# Relay each user's read cursors to everyone in the room, and list them after room_list; without it they go only to the user's own connections
 read-receipts = false
 
 # Listen address for unauthenticated pprof and expvar under /debug/, such as 127.0.0.1:6060; empty disables
@@ -65,10 +65,10 @@ dir = "/home/aprond/Library/Application Support/aprond/uploads"
 # Maximum size of one upload, in MiB
 max-mb = 5
 
-# Maximum size of an /avatar image, in KiB (not in the Go aprond)
+# Maximum size of an /avatar image, in KiB
 max-avatar-kb = 256
 
-# Type an upload may be, as a MIME type, type/* or */*; repeat for more. A PNG, JPEG, GIF, WebP, WebM, Ogg or MP4 file is typed from its bytes, any other from its declared type (not in the Go aprond)
+# Type an upload may be, as a MIME type, type/* or */*; repeat for more. A PNG, JPEG, GIF, WebP, WebM, Ogg or MP4 file is typed from its bytes, any other from its declared type
 type = ["image/png", "image/jpeg", "image/gif", "image/webp", "audio/webm", "audio/ogg", "audio/mp4"]
 
 # Maximum total size of one message's uploads, in MiB
@@ -82,7 +82,7 @@ max-storage-mb = 1000
 # Offer email sign-in (off by default)
 enable = false
 
-# How email sign-in codes are delivered, with --email.enable: smtp sends them, http POSTs them to a mail API (not in the Go aprond), log writes them to the server log (development only; refused with --public-url or --tls.domain)
+# How email sign-in codes are delivered, with --email.enable: smtp sends them, http POSTs them to a mail API, log writes them to the server log (development only; refused with --public-url or --tls.domain)
 sender = "smtp"
 
 # Page that sign-in links in emails open, such as https://chat.example/, with a sign-in token in its fragment (default: --public-url; empty sends codes without links)
@@ -103,10 +103,10 @@ smtp-password = ""
 # Send through a relay that does not offer STARTTLS, in cleartext (a relay on the same host only)
 smtp-insecure = false
 
-# Mail API that --email.sender http POSTs {"from", "to", "subject", "text"} to as JSON, such as https://api.cloudflare.com/client/v4/accounts/<account ID>/email/sending/send (not in the Go aprond)
+# Mail API that --email.sender http POSTs {"from", "to", "subject", "text"} to as JSON, such as https://api.cloudflare.com/client/v4/accounts/<account ID>/email/sending/send
 http-url = ""
 
-# Header of each --email.sender http request, as Name: value, such as "Authorization: Bearer <token>"; repeat for more (not in the Go aprond)
+# Header of each --email.sender http request, as Name: value, such as "Authorization: Bearer <token>"; repeat for more
 # http-header = []
 
 [push]
@@ -117,10 +117,10 @@ disable = false
 # Accept http push endpoints and ones on internal addresses, so any client can make the server POST into its network (tests only; refused with --public-url or --tls.domain)
 allow-insecure = false
 
-# Push service an endpoint may name, for relay and webpush alike: a host name, a *.host suffix, or a standalone * for any; repeat for more (default: fcm.googleapis.com, *.push.services.mozilla.com, web.push.apple.com, *.push.apple.com and *.notify.windows.com; not in the Go aprond)
+# Push service an endpoint may name, for relay and webpush alike: a host name, a *.host suffix, or a standalone * for any; repeat for more (default: fcm.googleapis.com, *.push.services.mozilla.com, web.push.apple.com, *.push.apple.com and *.notify.windows.com)
 # hosts = []
 
-# How long a message's push waits, so a user back at their screen by then is not pushed, from 0 (at once) to 60s (not in the Go aprond)
+# How long a message's push waits, so a user back at their screen by then is not pushed, from 0 (at once) to 60s
 delay = "30s"
 
 # Web Push VAPID private key, the P-256 scalar in base64url as web-push tools print it (default: one generated at the first start and kept in the store)
@@ -148,142 +148,142 @@ email = ""
 
 [apple]
 
-# iOS app allowed to use this server's passkeys, as <team ID>.<bundle ID>, listed in /.well-known/apple-app-site-association; repeat for more (not in the Go aprond)
+# iOS app allowed to use this server's passkeys, as <team ID>.<bundle ID>, listed in /.well-known/apple-app-site-association; repeat for more
 # app-id = []
 
 [unfurl]
 
-# Fetch the pages that messages link to and attach their OpenGraph previews, with images hosted here; the server then requests any public http(s) URL a user posts (off by default; not in the Go aprond)
+# Fetch the pages that messages link to and attach their OpenGraph previews, with images hosted here; the server then requests any public http(s) URL a user posts (off by default)
 enable = false
 
 [guest]
 
-# Let guests post, react, join, leave, and make rooms; without it they only read, and server.ext.settings says so (not in the Go aprond)
+# Let guests post, react, join, leave, and make rooms; without it they only read, and server.ext.settings says so
 posting = false
 
 [history]
 
-# Delete messages, reactions, and their uploads older than this, such as 168h, checking hourly; emptied threads and private rooms go, other rooms stay (default: keep forever; not in the Go aprond)
+# Delete messages, reactions, and their uploads older than this, such as 168h, checking hourly; emptied threads and private rooms go, other rooms stay (default: keep forever)
 retention = ""
 
 [frame]
 
-# Largest WebSocket message a client may send, in bytes; a larger one closes the connection with 1009 (not in the Go aprond)
+# Largest WebSocket message a client may send, in bytes; a larger one closes the connection with 1009
 max-bytes = 16384
 
-# Largest body.text of a message or command, in bytes (not in the Go aprond)
+# Largest body.text of a message or command, in bytes
 max-text-bytes = 4096
 
-# Deepest nesting of objects and arrays in a frame, the frame itself at depth 1 (not in the Go aprond)
+# Deepest nesting of objects and arrays in a frame, the frame itself at depth 1
 max-depth = 8
 
-# Most JSON values in a frame, object keys not counted (not in the Go aprond)
+# Most JSON values in a frame, object keys not counted
 max-nodes = 2048
 
-# Longest request id, in bytes (not in the Go aprond)
+# Longest request id, in bytes
 max-id-bytes = 128
 
 [limit]
 
-# Open WebSockets from one client address (an IPv4 address or an IPv6 /56); 0 is unlimited (not in the Go aprond)
+# Open WebSockets from one client address (an IPv4 address or an IPv6 /56); 0 is unlimited
 connections-per-ip = 10
 
-# Open WebSockets from one client address that are not signed in to an account, guests included; 0 is unlimited (not in the Go aprond)
+# Open WebSockets from one client address that are not signed in to an account, guests included; 0 is unlimited
 guest-connections-per-ip = 6
 
-# Open WebSockets of one account; 0 is unlimited (not in the Go aprond)
+# Open WebSockets of one account; 0 is unlimited
 connections-per-user = 3
 
-# New WebSockets one client address may open a minute; 0 is unlimited (not in the Go aprond)
+# New WebSockets one client address may open a minute; 0 is unlimited
 admissions-per-ip-minute = 12
 
-# Posts of one client address's guests together a minute, as a burst refilled over the minute. A post is any message saved, reaction set changed, room saved, join, leave or profile change; 0 is unlimited (not in the Go aprond)
+# Posts of one client address's guests together a minute, as a burst refilled over the minute. A post is any message saved, reaction set changed, room saved, join, leave or profile change; 0 is unlimited
 guest-posts-per-minute = 5
 
-# Posts of one client address's guests together a UTC day; 0 is unlimited (not in the Go aprond)
+# Posts of one client address's guests together a UTC day; 0 is unlimited
 guest-posts-per-day = 200
 
-# Posts of one account a minute; 0 is unlimited (not in the Go aprond)
+# Posts of one account a minute; 0 is unlimited
 posts-per-minute = 20
 
-# Posts of one account a UTC day; 0 is unlimited (not in the Go aprond)
+# Posts of one account a UTC day; 0 is unlimited
 posts-per-day = 1000
 
-# Posts a minute of an account holding any role, in place of --limit.posts-per-minute, and of its client address when larger; 0 is unlimited (not in the Go aprond)
+# Posts a minute of an account holding any role, in place of --limit.posts-per-minute, and of its client address when larger; 0 is unlimited
 trusted-posts-per-minute = 50
 
-# Posts a UTC day of an account holding any role, in place of --limit.posts-per-day, and of its client address when larger; 0 is unlimited (not in the Go aprond)
+# Posts a UTC day of an account holding any role, in place of --limit.posts-per-day, and of its client address when larger; 0 is unlimited
 trusted-posts-per-day = 4000
 
-# Posts of everyone at one client address together a minute; 0 is unlimited (not in the Go aprond)
+# Posts of everyone at one client address together a minute; 0 is unlimited
 ip-posts-per-minute = 30
 
-# Posts of everyone at one client address together a UTC day; 0 is unlimited (not in the Go aprond)
+# Posts of everyone at one client address together a UTC day; 0 is unlimited
 ip-posts-per-day = 2000
 
-# Posts of everyone on the server a minute; 0 is unlimited (not in the Go aprond)
+# Posts of everyone on the server a minute; 0 is unlimited
 server-posts-per-minute = 120
 
-# Posts of everyone on the server a UTC day; 0 is unlimited (not in the Go aprond)
+# Posts of everyone on the server a UTC day; 0 is unlimited
 server-posts-per-day = 10000
 
-# room_list requests of one user a minute, besides the first joined listing after each sign-in; 0 is unlimited (not in the Go aprond)
+# room_list requests of one user a minute, besides the first joined listing after each sign-in; 0 is unlimited
 room-lists-per-minute = 6
 
-# New uploads of one user a UTC day: a message's upload embeds, /avatar, /emoji add and /server avatar; 0 is unlimited (not in the Go aprond)
+# New uploads of one user a UTC day: a message's upload embeds, /avatar, /emoji add and /server avatar; 0 is unlimited
 uploads-per-user-day = 20
 
-# New uploads of everyone on the server a UTC day; 0 is unlimited (not in the Go aprond)
+# New uploads of everyone on the server a UTC day; 0 is unlimited
 uploads-per-day = 500
 
-# WebSocket messages one connection may send in a rolling minute, past which it is closed with 1008; pings do not count; 0 is unlimited (not in the Go aprond)
+# WebSocket messages one connection may send in a rolling minute, past which it is closed with 1008; pings do not count; 0 is unlimited
 frames-per-connection-minute = 60
 
-# WebSocket messages one client address may send a minute, past which its connection is closed with 1013; 0 is unlimited (not in the Go aprond)
+# WebSocket messages one client address may send a minute, past which its connection is closed with 1013; 0 is unlimited
 frames-per-ip-minute = 120
 
-# WebSocket messages everyone may send a minute, past which requests get retry_after and notifications are dropped; 0 is unlimited (not in the Go aprond)
+# WebSocket messages everyone may send a minute, past which requests get retry_after and notifications are dropped; 0 is unlimited
 server-frames-per-minute = 600
 
-# Malformed or invalid requests within a minute that close a connection with 1008; 0 never closes (not in the Go aprond)
+# Malformed or invalid requests within a minute that close a connection with 1008; 0 never closes
 policy-violations = 3
 
-# Seconds between the status changes of one user that others are sent, the latest winning; a change made with me goes at once; 0 to 60 (not in the Go aprond)
+# Seconds between the status changes of one user that others are sent, the latest winning; a change made with me goes at once; 0 to 60
 status-coalesce-seconds = 60
 
-# History pages one user may request a minute, after a burst of --limit.history-burst; 0 is unlimited (not in the Go aprond)
+# History pages one user may request a minute, after a burst of --limit.history-burst; 0 is unlimited
 history-per-minute = 20
 
-# History pages a quiet user may request at once (not in the Go aprond)
+# History pages a quiet user may request at once
 history-burst = 60
 
-# History pages one user may request a UTC day; 0 is unlimited (not in the Go aprond)
+# History pages one user may request a UTC day; 0 is unlimited
 history-per-day = 3000
 
-# History pages one client address may request a minute, after a burst of --limit.ip-history-burst; 0 is unlimited (not in the Go aprond)
+# History pages one client address may request a minute, after a burst of --limit.ip-history-burst; 0 is unlimited
 ip-history-per-minute = 60
 
-# History pages a quiet client address may request at once (not in the Go aprond)
+# History pages a quiet client address may request at once
 ip-history-burst = 120
 
-# History pages one client address may request a UTC day; 0 is unlimited (not in the Go aprond)
+# History pages one client address may request a UTC day; 0 is unlimited
 ip-history-per-day = 6000
 
-# History pages everyone may request a UTC day; 0 is unlimited (not in the Go aprond)
+# History pages everyone may request a UTC day; 0 is unlimited
 server-history-per-day = 40000
 
-# Seconds a status change a closed connection caused waits, so a reconnect within them shows others nothing; 0 to 60 (not in the Go aprond)
+# Seconds a status change a closed connection caused waits, so a reconnect within them shows others nothing; 0 to 60
 offline-grace-seconds = 60
 
 [server]
 
-# Plain name clients show for this server, as server.title, unless an admin's /server title sets one (default: none, so clients show the server's address; not in the Go aprond)
+# Plain name clients show for this server, as server.title, unless an admin's /server title sets one (default: none, so clients show the server's address)
 title = ""
 
-# CommonMark of at most 500 bytes saying what this server is about, as server.description, unless an admin's /server description sets one (default: general's description; not in the Go aprond)
+# CommonMark of at most 500 bytes saying what this server is about, as server.description, unless an admin's /server description sets one (default: general's description)
 description = ""
 
-# Server icon, as server.avatar: an https: URL or a small data:image/{png,jpeg,gif,webp};base64, URL, unless an admin's /server avatar sets one (not in the Go aprond)
+# Server icon, as server.avatar: an https: URL or a small data:image/{png,jpeg,gif,webp};base64, URL, unless an admin's /server avatar sets one
 avatar = ""
 --- stderr
 
@@ -318,7 +318,7 @@ max-listed-members = 1000
 # Top-level private rooms one user may be in at once, created or added to, such as on a public deployment; 0 is unlimited
 max-private-rooms = 20
 
-# Relay each user's read cursors to everyone in the room, and list them after room_list; without it they go only to the user's own connections (not in the Go aprond)
+# Relay each user's read cursors to everyone in the room, and list them after room_list; without it they go only to the user's own connections
 read-receipts = false
 
 # Listen address for unauthenticated pprof and expvar under /debug/, such as 127.0.0.1:6060; empty disables
@@ -355,10 +355,10 @@ dir = "/home/aprond/Library/Application Support/aprond/uploads"
 # Maximum size of one upload, in MiB
 max-mb = 5
 
-# Maximum size of an /avatar image, in KiB (not in the Go aprond)
+# Maximum size of an /avatar image, in KiB
 max-avatar-kb = 256
 
-# Type an upload may be, as a MIME type, type/* or */*; repeat for more. A PNG, JPEG, GIF, WebP, WebM, Ogg or MP4 file is typed from its bytes, any other from its declared type (not in the Go aprond)
+# Type an upload may be, as a MIME type, type/* or */*; repeat for more. A PNG, JPEG, GIF, WebP, WebM, Ogg or MP4 file is typed from its bytes, any other from its declared type
 type = ["image/png", "image/jpeg", "image/gif", "image/webp", "audio/webm", "audio/ogg", "audio/mp4"]
 
 # Maximum total size of one message's uploads, in MiB
@@ -372,7 +372,7 @@ max-storage-mb = 1000
 # Offer email sign-in (off by default)
 enable = false
 
-# How email sign-in codes are delivered, with --email.enable: smtp sends them, http POSTs them to a mail API (not in the Go aprond), log writes them to the server log (development only; refused with --public-url or --tls.domain)
+# How email sign-in codes are delivered, with --email.enable: smtp sends them, http POSTs them to a mail API, log writes them to the server log (development only; refused with --public-url or --tls.domain)
 sender = "smtp"
 
 # Page that sign-in links in emails open, such as https://chat.example/, with a sign-in token in its fragment (default: --public-url; empty sends codes without links)
@@ -393,10 +393,10 @@ smtp-password = ""
 # Send through a relay that does not offer STARTTLS, in cleartext (a relay on the same host only)
 smtp-insecure = false
 
-# Mail API that --email.sender http POSTs {"from", "to", "subject", "text"} to as JSON, such as https://api.cloudflare.com/client/v4/accounts/<account ID>/email/sending/send (not in the Go aprond)
+# Mail API that --email.sender http POSTs {"from", "to", "subject", "text"} to as JSON, such as https://api.cloudflare.com/client/v4/accounts/<account ID>/email/sending/send
 http-url = ""
 
-# Header of each --email.sender http request, as Name: value, such as "Authorization: Bearer <token>"; repeat for more (not in the Go aprond)
+# Header of each --email.sender http request, as Name: value, such as "Authorization: Bearer <token>"; repeat for more
 # http-header = []
 
 [push]
@@ -407,10 +407,10 @@ disable = true
 # Accept http push endpoints and ones on internal addresses, so any client can make the server POST into its network (tests only; refused with --public-url or --tls.domain)
 allow-insecure = false
 
-# Push service an endpoint may name, for relay and webpush alike: a host name, a *.host suffix, or a standalone * for any; repeat for more (default: fcm.googleapis.com, *.push.services.mozilla.com, web.push.apple.com, *.push.apple.com and *.notify.windows.com; not in the Go aprond)
+# Push service an endpoint may name, for relay and webpush alike: a host name, a *.host suffix, or a standalone * for any; repeat for more (default: fcm.googleapis.com, *.push.services.mozilla.com, web.push.apple.com, *.push.apple.com and *.notify.windows.com)
 # hosts = []
 
-# How long a message's push waits, so a user back at their screen by then is not pushed, from 0 (at once) to 60s (not in the Go aprond)
+# How long a message's push waits, so a user back at their screen by then is not pushed, from 0 (at once) to 60s
 delay = "30s"
 
 # Web Push VAPID private key, the P-256 scalar in base64url as web-push tools print it (default: one generated at the first start and kept in the store)
@@ -438,142 +438,142 @@ email = ""
 
 [apple]
 
-# iOS app allowed to use this server's passkeys, as <team ID>.<bundle ID>, listed in /.well-known/apple-app-site-association; repeat for more (not in the Go aprond)
+# iOS app allowed to use this server's passkeys, as <team ID>.<bundle ID>, listed in /.well-known/apple-app-site-association; repeat for more
 # app-id = []
 
 [unfurl]
 
-# Fetch the pages that messages link to and attach their OpenGraph previews, with images hosted here; the server then requests any public http(s) URL a user posts (off by default; not in the Go aprond)
+# Fetch the pages that messages link to and attach their OpenGraph previews, with images hosted here; the server then requests any public http(s) URL a user posts (off by default)
 enable = false
 
 [guest]
 
-# Let guests post, react, join, leave, and make rooms; without it they only read, and server.ext.settings says so (not in the Go aprond)
+# Let guests post, react, join, leave, and make rooms; without it they only read, and server.ext.settings says so
 posting = false
 
 [history]
 
-# Delete messages, reactions, and their uploads older than this, such as 168h, checking hourly; emptied threads and private rooms go, other rooms stay (default: keep forever; not in the Go aprond)
+# Delete messages, reactions, and their uploads older than this, such as 168h, checking hourly; emptied threads and private rooms go, other rooms stay (default: keep forever)
 retention = ""
 
 [frame]
 
-# Largest WebSocket message a client may send, in bytes; a larger one closes the connection with 1009 (not in the Go aprond)
+# Largest WebSocket message a client may send, in bytes; a larger one closes the connection with 1009
 max-bytes = 16384
 
-# Largest body.text of a message or command, in bytes (not in the Go aprond)
+# Largest body.text of a message or command, in bytes
 max-text-bytes = 4096
 
-# Deepest nesting of objects and arrays in a frame, the frame itself at depth 1 (not in the Go aprond)
+# Deepest nesting of objects and arrays in a frame, the frame itself at depth 1
 max-depth = 8
 
-# Most JSON values in a frame, object keys not counted (not in the Go aprond)
+# Most JSON values in a frame, object keys not counted
 max-nodes = 2048
 
-# Longest request id, in bytes (not in the Go aprond)
+# Longest request id, in bytes
 max-id-bytes = 128
 
 [limit]
 
-# Open WebSockets from one client address (an IPv4 address or an IPv6 /56); 0 is unlimited (not in the Go aprond)
+# Open WebSockets from one client address (an IPv4 address or an IPv6 /56); 0 is unlimited
 connections-per-ip = 10
 
-# Open WebSockets from one client address that are not signed in to an account, guests included; 0 is unlimited (not in the Go aprond)
+# Open WebSockets from one client address that are not signed in to an account, guests included; 0 is unlimited
 guest-connections-per-ip = 6
 
-# Open WebSockets of one account; 0 is unlimited (not in the Go aprond)
+# Open WebSockets of one account; 0 is unlimited
 connections-per-user = 3
 
-# New WebSockets one client address may open a minute; 0 is unlimited (not in the Go aprond)
+# New WebSockets one client address may open a minute; 0 is unlimited
 admissions-per-ip-minute = 12
 
-# Posts of one client address's guests together a minute, as a burst refilled over the minute. A post is any message saved, reaction set changed, room saved, join, leave or profile change; 0 is unlimited (not in the Go aprond)
+# Posts of one client address's guests together a minute, as a burst refilled over the minute. A post is any message saved, reaction set changed, room saved, join, leave or profile change; 0 is unlimited
 guest-posts-per-minute = 5
 
-# Posts of one client address's guests together a UTC day; 0 is unlimited (not in the Go aprond)
+# Posts of one client address's guests together a UTC day; 0 is unlimited
 guest-posts-per-day = 200
 
-# Posts of one account a minute; 0 is unlimited (not in the Go aprond)
+# Posts of one account a minute; 0 is unlimited
 posts-per-minute = 20
 
-# Posts of one account a UTC day; 0 is unlimited (not in the Go aprond)
+# Posts of one account a UTC day; 0 is unlimited
 posts-per-day = 1000
 
-# Posts a minute of an account holding any role, in place of --limit.posts-per-minute, and of its client address when larger; 0 is unlimited (not in the Go aprond)
+# Posts a minute of an account holding any role, in place of --limit.posts-per-minute, and of its client address when larger; 0 is unlimited
 trusted-posts-per-minute = 50
 
-# Posts a UTC day of an account holding any role, in place of --limit.posts-per-day, and of its client address when larger; 0 is unlimited (not in the Go aprond)
+# Posts a UTC day of an account holding any role, in place of --limit.posts-per-day, and of its client address when larger; 0 is unlimited
 trusted-posts-per-day = 4000
 
-# Posts of everyone at one client address together a minute; 0 is unlimited (not in the Go aprond)
+# Posts of everyone at one client address together a minute; 0 is unlimited
 ip-posts-per-minute = 30
 
-# Posts of everyone at one client address together a UTC day; 0 is unlimited (not in the Go aprond)
+# Posts of everyone at one client address together a UTC day; 0 is unlimited
 ip-posts-per-day = 2000
 
-# Posts of everyone on the server a minute; 0 is unlimited (not in the Go aprond)
+# Posts of everyone on the server a minute; 0 is unlimited
 server-posts-per-minute = 120
 
-# Posts of everyone on the server a UTC day; 0 is unlimited (not in the Go aprond)
+# Posts of everyone on the server a UTC day; 0 is unlimited
 server-posts-per-day = 10000
 
-# room_list requests of one user a minute, besides the first joined listing after each sign-in; 0 is unlimited (not in the Go aprond)
+# room_list requests of one user a minute, besides the first joined listing after each sign-in; 0 is unlimited
 room-lists-per-minute = 6
 
-# New uploads of one user a UTC day: a message's upload embeds, /avatar, /emoji add and /server avatar; 0 is unlimited (not in the Go aprond)
+# New uploads of one user a UTC day: a message's upload embeds, /avatar, /emoji add and /server avatar; 0 is unlimited
 uploads-per-user-day = 20
 
-# New uploads of everyone on the server a UTC day; 0 is unlimited (not in the Go aprond)
+# New uploads of everyone on the server a UTC day; 0 is unlimited
 uploads-per-day = 500
 
-# WebSocket messages one connection may send in a rolling minute, past which it is closed with 1008; pings do not count; 0 is unlimited (not in the Go aprond)
+# WebSocket messages one connection may send in a rolling minute, past which it is closed with 1008; pings do not count; 0 is unlimited
 frames-per-connection-minute = 60
 
-# WebSocket messages one client address may send a minute, past which its connection is closed with 1013; 0 is unlimited (not in the Go aprond)
+# WebSocket messages one client address may send a minute, past which its connection is closed with 1013; 0 is unlimited
 frames-per-ip-minute = 120
 
-# WebSocket messages everyone may send a minute, past which requests get retry_after and notifications are dropped; 0 is unlimited (not in the Go aprond)
+# WebSocket messages everyone may send a minute, past which requests get retry_after and notifications are dropped; 0 is unlimited
 server-frames-per-minute = 600
 
-# Malformed or invalid requests within a minute that close a connection with 1008; 0 never closes (not in the Go aprond)
+# Malformed or invalid requests within a minute that close a connection with 1008; 0 never closes
 policy-violations = 3
 
-# Seconds between the status changes of one user that others are sent, the latest winning; a change made with me goes at once; 0 to 60 (not in the Go aprond)
+# Seconds between the status changes of one user that others are sent, the latest winning; a change made with me goes at once; 0 to 60
 status-coalesce-seconds = 60
 
-# History pages one user may request a minute, after a burst of --limit.history-burst; 0 is unlimited (not in the Go aprond)
+# History pages one user may request a minute, after a burst of --limit.history-burst; 0 is unlimited
 history-per-minute = 20
 
-# History pages a quiet user may request at once (not in the Go aprond)
+# History pages a quiet user may request at once
 history-burst = 60
 
-# History pages one user may request a UTC day; 0 is unlimited (not in the Go aprond)
+# History pages one user may request a UTC day; 0 is unlimited
 history-per-day = 3000
 
-# History pages one client address may request a minute, after a burst of --limit.ip-history-burst; 0 is unlimited (not in the Go aprond)
+# History pages one client address may request a minute, after a burst of --limit.ip-history-burst; 0 is unlimited
 ip-history-per-minute = 60
 
-# History pages a quiet client address may request at once (not in the Go aprond)
+# History pages a quiet client address may request at once
 ip-history-burst = 120
 
-# History pages one client address may request a UTC day; 0 is unlimited (not in the Go aprond)
+# History pages one client address may request a UTC day; 0 is unlimited
 ip-history-per-day = 6000
 
-# History pages everyone may request a UTC day; 0 is unlimited (not in the Go aprond)
+# History pages everyone may request a UTC day; 0 is unlimited
 server-history-per-day = 40000
 
-# Seconds a status change a closed connection caused waits, so a reconnect within them shows others nothing; 0 to 60 (not in the Go aprond)
+# Seconds a status change a closed connection caused waits, so a reconnect within them shows others nothing; 0 to 60
 offline-grace-seconds = 60
 
 [server]
 
-# Plain name clients show for this server, as server.title, unless an admin's /server title sets one (default: none, so clients show the server's address; not in the Go aprond)
+# Plain name clients show for this server, as server.title, unless an admin's /server title sets one (default: none, so clients show the server's address)
 title = ""
 
-# CommonMark of at most 500 bytes saying what this server is about, as server.description, unless an admin's /server description sets one (default: general's description; not in the Go aprond)
+# CommonMark of at most 500 bytes saying what this server is about, as server.description, unless an admin's /server description sets one (default: general's description)
 description = ""
 
-# Server icon, as server.avatar: an https: URL or a small data:image/{png,jpeg,gif,webp};base64, URL, unless an admin's /server avatar sets one (not in the Go aprond)
+# Server icon, as server.avatar: an https: URL or a small data:image/{png,jpeg,gif,webp};base64, URL, unless an admin's /server avatar sets one
 avatar = ""
 --- stderr
 
@@ -609,7 +609,7 @@ max-listed-members = 1000
 # Top-level private rooms one user may be in at once, created or added to, such as on a public deployment; 0 is unlimited
 max-private-rooms = 20
 
-# Relay each user's read cursors to everyone in the room, and list them after room_list; without it they go only to the user's own connections (not in the Go aprond)
+# Relay each user's read cursors to everyone in the room, and list them after room_list; without it they go only to the user's own connections
 read-receipts = false
 
 # Listen address for unauthenticated pprof and expvar under /debug/, such as 127.0.0.1:6060; empty disables
@@ -646,10 +646,10 @@ dir = "/home/aprond/Library/Application Support/aprond/uploads"
 # Maximum size of one upload, in MiB
 max-mb = 5
 
-# Maximum size of an /avatar image, in KiB (not in the Go aprond)
+# Maximum size of an /avatar image, in KiB
 max-avatar-kb = 256
 
-# Type an upload may be, as a MIME type, type/* or */*; repeat for more. A PNG, JPEG, GIF, WebP, WebM, Ogg or MP4 file is typed from its bytes, any other from its declared type (not in the Go aprond)
+# Type an upload may be, as a MIME type, type/* or */*; repeat for more. A PNG, JPEG, GIF, WebP, WebM, Ogg or MP4 file is typed from its bytes, any other from its declared type
 type = ["image/png", "image/jpeg", "image/gif", "image/webp", "audio/webm", "audio/ogg", "audio/mp4"]
 
 # Maximum total size of one message's uploads, in MiB
@@ -663,7 +663,7 @@ max-storage-mb = -1
 # Offer email sign-in (off by default)
 enable = true
 
-# How email sign-in codes are delivered, with --email.enable: smtp sends them, http POSTs them to a mail API (not in the Go aprond), log writes them to the server log (development only; refused with --public-url or --tls.domain)
+# How email sign-in codes are delivered, with --email.enable: smtp sends them, http POSTs them to a mail API, log writes them to the server log (development only; refused with --public-url or --tls.domain)
 sender = "log"
 
 # Page that sign-in links in emails open, such as https://chat.example/, with a sign-in token in its fragment (default: --public-url; empty sends codes without links)
@@ -684,10 +684,10 @@ smtp-password = ""
 # Send through a relay that does not offer STARTTLS, in cleartext (a relay on the same host only)
 smtp-insecure = false
 
-# Mail API that --email.sender http POSTs {"from", "to", "subject", "text"} to as JSON, such as https://api.cloudflare.com/client/v4/accounts/<account ID>/email/sending/send (not in the Go aprond)
+# Mail API that --email.sender http POSTs {"from", "to", "subject", "text"} to as JSON, such as https://api.cloudflare.com/client/v4/accounts/<account ID>/email/sending/send
 http-url = ""
 
-# Header of each --email.sender http request, as Name: value, such as "Authorization: Bearer <token>"; repeat for more (not in the Go aprond)
+# Header of each --email.sender http request, as Name: value, such as "Authorization: Bearer <token>"; repeat for more
 # http-header = []
 
 [push]
@@ -698,10 +698,10 @@ disable = false
 # Accept http push endpoints and ones on internal addresses, so any client can make the server POST into its network (tests only; refused with --public-url or --tls.domain)
 allow-insecure = false
 
-# Push service an endpoint may name, for relay and webpush alike: a host name, a *.host suffix, or a standalone * for any; repeat for more (default: fcm.googleapis.com, *.push.services.mozilla.com, web.push.apple.com, *.push.apple.com and *.notify.windows.com; not in the Go aprond)
+# Push service an endpoint may name, for relay and webpush alike: a host name, a *.host suffix, or a standalone * for any; repeat for more (default: fcm.googleapis.com, *.push.services.mozilla.com, web.push.apple.com, *.push.apple.com and *.notify.windows.com)
 # hosts = []
 
-# How long a message's push waits, so a user back at their screen by then is not pushed, from 0 (at once) to 60s (not in the Go aprond)
+# How long a message's push waits, so a user back at their screen by then is not pushed, from 0 (at once) to 60s
 delay = "30s"
 
 # Web Push VAPID private key, the P-256 scalar in base64url as web-push tools print it (default: one generated at the first start and kept in the store)
@@ -729,142 +729,142 @@ email = ""
 
 [apple]
 
-# iOS app allowed to use this server's passkeys, as <team ID>.<bundle ID>, listed in /.well-known/apple-app-site-association; repeat for more (not in the Go aprond)
+# iOS app allowed to use this server's passkeys, as <team ID>.<bundle ID>, listed in /.well-known/apple-app-site-association; repeat for more
 # app-id = []
 
 [unfurl]
 
-# Fetch the pages that messages link to and attach their OpenGraph previews, with images hosted here; the server then requests any public http(s) URL a user posts (off by default; not in the Go aprond)
+# Fetch the pages that messages link to and attach their OpenGraph previews, with images hosted here; the server then requests any public http(s) URL a user posts (off by default)
 enable = false
 
 [guest]
 
-# Let guests post, react, join, leave, and make rooms; without it they only read, and server.ext.settings says so (not in the Go aprond)
+# Let guests post, react, join, leave, and make rooms; without it they only read, and server.ext.settings says so
 posting = false
 
 [history]
 
-# Delete messages, reactions, and their uploads older than this, such as 168h, checking hourly; emptied threads and private rooms go, other rooms stay (default: keep forever; not in the Go aprond)
+# Delete messages, reactions, and their uploads older than this, such as 168h, checking hourly; emptied threads and private rooms go, other rooms stay (default: keep forever)
 retention = ""
 
 [frame]
 
-# Largest WebSocket message a client may send, in bytes; a larger one closes the connection with 1009 (not in the Go aprond)
+# Largest WebSocket message a client may send, in bytes; a larger one closes the connection with 1009
 max-bytes = 16384
 
-# Largest body.text of a message or command, in bytes (not in the Go aprond)
+# Largest body.text of a message or command, in bytes
 max-text-bytes = 4096
 
-# Deepest nesting of objects and arrays in a frame, the frame itself at depth 1 (not in the Go aprond)
+# Deepest nesting of objects and arrays in a frame, the frame itself at depth 1
 max-depth = 8
 
-# Most JSON values in a frame, object keys not counted (not in the Go aprond)
+# Most JSON values in a frame, object keys not counted
 max-nodes = 2048
 
-# Longest request id, in bytes (not in the Go aprond)
+# Longest request id, in bytes
 max-id-bytes = 128
 
 [limit]
 
-# Open WebSockets from one client address (an IPv4 address or an IPv6 /56); 0 is unlimited (not in the Go aprond)
+# Open WebSockets from one client address (an IPv4 address or an IPv6 /56); 0 is unlimited
 connections-per-ip = 10
 
-# Open WebSockets from one client address that are not signed in to an account, guests included; 0 is unlimited (not in the Go aprond)
+# Open WebSockets from one client address that are not signed in to an account, guests included; 0 is unlimited
 guest-connections-per-ip = 6
 
-# Open WebSockets of one account; 0 is unlimited (not in the Go aprond)
+# Open WebSockets of one account; 0 is unlimited
 connections-per-user = 3
 
-# New WebSockets one client address may open a minute; 0 is unlimited (not in the Go aprond)
+# New WebSockets one client address may open a minute; 0 is unlimited
 admissions-per-ip-minute = 12
 
-# Posts of one client address's guests together a minute, as a burst refilled over the minute. A post is any message saved, reaction set changed, room saved, join, leave or profile change; 0 is unlimited (not in the Go aprond)
+# Posts of one client address's guests together a minute, as a burst refilled over the minute. A post is any message saved, reaction set changed, room saved, join, leave or profile change; 0 is unlimited
 guest-posts-per-minute = 5
 
-# Posts of one client address's guests together a UTC day; 0 is unlimited (not in the Go aprond)
+# Posts of one client address's guests together a UTC day; 0 is unlimited
 guest-posts-per-day = 200
 
-# Posts of one account a minute; 0 is unlimited (not in the Go aprond)
+# Posts of one account a minute; 0 is unlimited
 posts-per-minute = 20
 
-# Posts of one account a UTC day; 0 is unlimited (not in the Go aprond)
+# Posts of one account a UTC day; 0 is unlimited
 posts-per-day = 1000
 
-# Posts a minute of an account holding any role, in place of --limit.posts-per-minute, and of its client address when larger; 0 is unlimited (not in the Go aprond)
+# Posts a minute of an account holding any role, in place of --limit.posts-per-minute, and of its client address when larger; 0 is unlimited
 trusted-posts-per-minute = 50
 
-# Posts a UTC day of an account holding any role, in place of --limit.posts-per-day, and of its client address when larger; 0 is unlimited (not in the Go aprond)
+# Posts a UTC day of an account holding any role, in place of --limit.posts-per-day, and of its client address when larger; 0 is unlimited
 trusted-posts-per-day = 4000
 
-# Posts of everyone at one client address together a minute; 0 is unlimited (not in the Go aprond)
+# Posts of everyone at one client address together a minute; 0 is unlimited
 ip-posts-per-minute = 30
 
-# Posts of everyone at one client address together a UTC day; 0 is unlimited (not in the Go aprond)
+# Posts of everyone at one client address together a UTC day; 0 is unlimited
 ip-posts-per-day = 2000
 
-# Posts of everyone on the server a minute; 0 is unlimited (not in the Go aprond)
+# Posts of everyone on the server a minute; 0 is unlimited
 server-posts-per-minute = 120
 
-# Posts of everyone on the server a UTC day; 0 is unlimited (not in the Go aprond)
+# Posts of everyone on the server a UTC day; 0 is unlimited
 server-posts-per-day = 10000
 
-# room_list requests of one user a minute, besides the first joined listing after each sign-in; 0 is unlimited (not in the Go aprond)
+# room_list requests of one user a minute, besides the first joined listing after each sign-in; 0 is unlimited
 room-lists-per-minute = 6
 
-# New uploads of one user a UTC day: a message's upload embeds, /avatar, /emoji add and /server avatar; 0 is unlimited (not in the Go aprond)
+# New uploads of one user a UTC day: a message's upload embeds, /avatar, /emoji add and /server avatar; 0 is unlimited
 uploads-per-user-day = 20
 
-# New uploads of everyone on the server a UTC day; 0 is unlimited (not in the Go aprond)
+# New uploads of everyone on the server a UTC day; 0 is unlimited
 uploads-per-day = 500
 
-# WebSocket messages one connection may send in a rolling minute, past which it is closed with 1008; pings do not count; 0 is unlimited (not in the Go aprond)
+# WebSocket messages one connection may send in a rolling minute, past which it is closed with 1008; pings do not count; 0 is unlimited
 frames-per-connection-minute = 60
 
-# WebSocket messages one client address may send a minute, past which its connection is closed with 1013; 0 is unlimited (not in the Go aprond)
+# WebSocket messages one client address may send a minute, past which its connection is closed with 1013; 0 is unlimited
 frames-per-ip-minute = 120
 
-# WebSocket messages everyone may send a minute, past which requests get retry_after and notifications are dropped; 0 is unlimited (not in the Go aprond)
+# WebSocket messages everyone may send a minute, past which requests get retry_after and notifications are dropped; 0 is unlimited
 server-frames-per-minute = 600
 
-# Malformed or invalid requests within a minute that close a connection with 1008; 0 never closes (not in the Go aprond)
+# Malformed or invalid requests within a minute that close a connection with 1008; 0 never closes
 policy-violations = 3
 
-# Seconds between the status changes of one user that others are sent, the latest winning; a change made with me goes at once; 0 to 60 (not in the Go aprond)
+# Seconds between the status changes of one user that others are sent, the latest winning; a change made with me goes at once; 0 to 60
 status-coalesce-seconds = 60
 
-# History pages one user may request a minute, after a burst of --limit.history-burst; 0 is unlimited (not in the Go aprond)
+# History pages one user may request a minute, after a burst of --limit.history-burst; 0 is unlimited
 history-per-minute = 20
 
-# History pages a quiet user may request at once (not in the Go aprond)
+# History pages a quiet user may request at once
 history-burst = 60
 
-# History pages one user may request a UTC day; 0 is unlimited (not in the Go aprond)
+# History pages one user may request a UTC day; 0 is unlimited
 history-per-day = 3000
 
-# History pages one client address may request a minute, after a burst of --limit.ip-history-burst; 0 is unlimited (not in the Go aprond)
+# History pages one client address may request a minute, after a burst of --limit.ip-history-burst; 0 is unlimited
 ip-history-per-minute = 60
 
-# History pages a quiet client address may request at once (not in the Go aprond)
+# History pages a quiet client address may request at once
 ip-history-burst = 120
 
-# History pages one client address may request a UTC day; 0 is unlimited (not in the Go aprond)
+# History pages one client address may request a UTC day; 0 is unlimited
 ip-history-per-day = 6000
 
-# History pages everyone may request a UTC day; 0 is unlimited (not in the Go aprond)
+# History pages everyone may request a UTC day; 0 is unlimited
 server-history-per-day = 40000
 
-# Seconds a status change a closed connection caused waits, so a reconnect within them shows others nothing; 0 to 60 (not in the Go aprond)
+# Seconds a status change a closed connection caused waits, so a reconnect within them shows others nothing; 0 to 60
 offline-grace-seconds = 60
 
 [server]
 
-# Plain name clients show for this server, as server.title, unless an admin's /server title sets one (default: none, so clients show the server's address; not in the Go aprond)
+# Plain name clients show for this server, as server.title, unless an admin's /server title sets one (default: none, so clients show the server's address)
 title = ""
 
-# CommonMark of at most 500 bytes saying what this server is about, as server.description, unless an admin's /server description sets one (default: general's description; not in the Go aprond)
+# CommonMark of at most 500 bytes saying what this server is about, as server.description, unless an admin's /server description sets one (default: general's description)
 description = ""
 
-# Server icon, as server.avatar: an https: URL or a small data:image/{png,jpeg,gif,webp};base64, URL, unless an admin's /server avatar sets one (not in the Go aprond)
+# Server icon, as server.avatar: an https: URL or a small data:image/{png,jpeg,gif,webp};base64, URL, unless an admin's /server avatar sets one
 avatar = ""
 --- stderr
 
@@ -899,7 +899,7 @@ max-listed-members = 1000
 # Top-level private rooms one user may be in at once, created or added to, such as on a public deployment; 0 is unlimited
 max-private-rooms = 20
 
-# Relay each user's read cursors to everyone in the room, and list them after room_list; without it they go only to the user's own connections (not in the Go aprond)
+# Relay each user's read cursors to everyone in the room, and list them after room_list; without it they go only to the user's own connections
 read-receipts = false
 
 # Listen address for unauthenticated pprof and expvar under /debug/, such as 127.0.0.1:6060; empty disables
@@ -936,10 +936,10 @@ dir = "/home/aprond/Library/Application Support/aprond/uploads"
 # Maximum size of one upload, in MiB
 max-mb = 9
 
-# Maximum size of an /avatar image, in KiB (not in the Go aprond)
+# Maximum size of an /avatar image, in KiB
 max-avatar-kb = 256
 
-# Type an upload may be, as a MIME type, type/* or */*; repeat for more. A PNG, JPEG, GIF, WebP, WebM, Ogg or MP4 file is typed from its bytes, any other from its declared type (not in the Go aprond)
+# Type an upload may be, as a MIME type, type/* or */*; repeat for more. A PNG, JPEG, GIF, WebP, WebM, Ogg or MP4 file is typed from its bytes, any other from its declared type
 type = ["image/png", "image/jpeg", "image/gif", "image/webp", "audio/webm", "audio/ogg", "audio/mp4"]
 
 # Maximum total size of one message's uploads, in MiB
@@ -953,7 +953,7 @@ max-storage-mb = 1000
 # Offer email sign-in (off by default)
 enable = false
 
-# How email sign-in codes are delivered, with --email.enable: smtp sends them, http POSTs them to a mail API (not in the Go aprond), log writes them to the server log (development only; refused with --public-url or --tls.domain)
+# How email sign-in codes are delivered, with --email.enable: smtp sends them, http POSTs them to a mail API, log writes them to the server log (development only; refused with --public-url or --tls.domain)
 sender = "smtp"
 
 # Page that sign-in links in emails open, such as https://chat.example/, with a sign-in token in its fragment (default: --public-url; empty sends codes without links)
@@ -974,10 +974,10 @@ smtp-password = ""
 # Send through a relay that does not offer STARTTLS, in cleartext (a relay on the same host only)
 smtp-insecure = false
 
-# Mail API that --email.sender http POSTs {"from", "to", "subject", "text"} to as JSON, such as https://api.cloudflare.com/client/v4/accounts/<account ID>/email/sending/send (not in the Go aprond)
+# Mail API that --email.sender http POSTs {"from", "to", "subject", "text"} to as JSON, such as https://api.cloudflare.com/client/v4/accounts/<account ID>/email/sending/send
 http-url = ""
 
-# Header of each --email.sender http request, as Name: value, such as "Authorization: Bearer <token>"; repeat for more (not in the Go aprond)
+# Header of each --email.sender http request, as Name: value, such as "Authorization: Bearer <token>"; repeat for more
 # http-header = []
 
 [push]
@@ -988,10 +988,10 @@ disable = false
 # Accept http push endpoints and ones on internal addresses, so any client can make the server POST into its network (tests only; refused with --public-url or --tls.domain)
 allow-insecure = false
 
-# Push service an endpoint may name, for relay and webpush alike: a host name, a *.host suffix, or a standalone * for any; repeat for more (default: fcm.googleapis.com, *.push.services.mozilla.com, web.push.apple.com, *.push.apple.com and *.notify.windows.com; not in the Go aprond)
+# Push service an endpoint may name, for relay and webpush alike: a host name, a *.host suffix, or a standalone * for any; repeat for more (default: fcm.googleapis.com, *.push.services.mozilla.com, web.push.apple.com, *.push.apple.com and *.notify.windows.com)
 # hosts = []
 
-# How long a message's push waits, so a user back at their screen by then is not pushed, from 0 (at once) to 60s (not in the Go aprond)
+# How long a message's push waits, so a user back at their screen by then is not pushed, from 0 (at once) to 60s
 delay = "30s"
 
 # Web Push VAPID private key, the P-256 scalar in base64url as web-push tools print it (default: one generated at the first start and kept in the store)
@@ -1019,142 +1019,142 @@ email = ""
 
 [apple]
 
-# iOS app allowed to use this server's passkeys, as <team ID>.<bundle ID>, listed in /.well-known/apple-app-site-association; repeat for more (not in the Go aprond)
+# iOS app allowed to use this server's passkeys, as <team ID>.<bundle ID>, listed in /.well-known/apple-app-site-association; repeat for more
 # app-id = []
 
 [unfurl]
 
-# Fetch the pages that messages link to and attach their OpenGraph previews, with images hosted here; the server then requests any public http(s) URL a user posts (off by default; not in the Go aprond)
+# Fetch the pages that messages link to and attach their OpenGraph previews, with images hosted here; the server then requests any public http(s) URL a user posts (off by default)
 enable = false
 
 [guest]
 
-# Let guests post, react, join, leave, and make rooms; without it they only read, and server.ext.settings says so (not in the Go aprond)
+# Let guests post, react, join, leave, and make rooms; without it they only read, and server.ext.settings says so
 posting = false
 
 [history]
 
-# Delete messages, reactions, and their uploads older than this, such as 168h, checking hourly; emptied threads and private rooms go, other rooms stay (default: keep forever; not in the Go aprond)
+# Delete messages, reactions, and their uploads older than this, such as 168h, checking hourly; emptied threads and private rooms go, other rooms stay (default: keep forever)
 retention = ""
 
 [frame]
 
-# Largest WebSocket message a client may send, in bytes; a larger one closes the connection with 1009 (not in the Go aprond)
+# Largest WebSocket message a client may send, in bytes; a larger one closes the connection with 1009
 max-bytes = 16384
 
-# Largest body.text of a message or command, in bytes (not in the Go aprond)
+# Largest body.text of a message or command, in bytes
 max-text-bytes = 4096
 
-# Deepest nesting of objects and arrays in a frame, the frame itself at depth 1 (not in the Go aprond)
+# Deepest nesting of objects and arrays in a frame, the frame itself at depth 1
 max-depth = 8
 
-# Most JSON values in a frame, object keys not counted (not in the Go aprond)
+# Most JSON values in a frame, object keys not counted
 max-nodes = 2048
 
-# Longest request id, in bytes (not in the Go aprond)
+# Longest request id, in bytes
 max-id-bytes = 128
 
 [limit]
 
-# Open WebSockets from one client address (an IPv4 address or an IPv6 /56); 0 is unlimited (not in the Go aprond)
+# Open WebSockets from one client address (an IPv4 address or an IPv6 /56); 0 is unlimited
 connections-per-ip = 10
 
-# Open WebSockets from one client address that are not signed in to an account, guests included; 0 is unlimited (not in the Go aprond)
+# Open WebSockets from one client address that are not signed in to an account, guests included; 0 is unlimited
 guest-connections-per-ip = 6
 
-# Open WebSockets of one account; 0 is unlimited (not in the Go aprond)
+# Open WebSockets of one account; 0 is unlimited
 connections-per-user = 3
 
-# New WebSockets one client address may open a minute; 0 is unlimited (not in the Go aprond)
+# New WebSockets one client address may open a minute; 0 is unlimited
 admissions-per-ip-minute = 12
 
-# Posts of one client address's guests together a minute, as a burst refilled over the minute. A post is any message saved, reaction set changed, room saved, join, leave or profile change; 0 is unlimited (not in the Go aprond)
+# Posts of one client address's guests together a minute, as a burst refilled over the minute. A post is any message saved, reaction set changed, room saved, join, leave or profile change; 0 is unlimited
 guest-posts-per-minute = 5
 
-# Posts of one client address's guests together a UTC day; 0 is unlimited (not in the Go aprond)
+# Posts of one client address's guests together a UTC day; 0 is unlimited
 guest-posts-per-day = 200
 
-# Posts of one account a minute; 0 is unlimited (not in the Go aprond)
+# Posts of one account a minute; 0 is unlimited
 posts-per-minute = 20
 
-# Posts of one account a UTC day; 0 is unlimited (not in the Go aprond)
+# Posts of one account a UTC day; 0 is unlimited
 posts-per-day = 1000
 
-# Posts a minute of an account holding any role, in place of --limit.posts-per-minute, and of its client address when larger; 0 is unlimited (not in the Go aprond)
+# Posts a minute of an account holding any role, in place of --limit.posts-per-minute, and of its client address when larger; 0 is unlimited
 trusted-posts-per-minute = 50
 
-# Posts a UTC day of an account holding any role, in place of --limit.posts-per-day, and of its client address when larger; 0 is unlimited (not in the Go aprond)
+# Posts a UTC day of an account holding any role, in place of --limit.posts-per-day, and of its client address when larger; 0 is unlimited
 trusted-posts-per-day = 4000
 
-# Posts of everyone at one client address together a minute; 0 is unlimited (not in the Go aprond)
+# Posts of everyone at one client address together a minute; 0 is unlimited
 ip-posts-per-minute = 30
 
-# Posts of everyone at one client address together a UTC day; 0 is unlimited (not in the Go aprond)
+# Posts of everyone at one client address together a UTC day; 0 is unlimited
 ip-posts-per-day = 2000
 
-# Posts of everyone on the server a minute; 0 is unlimited (not in the Go aprond)
+# Posts of everyone on the server a minute; 0 is unlimited
 server-posts-per-minute = 120
 
-# Posts of everyone on the server a UTC day; 0 is unlimited (not in the Go aprond)
+# Posts of everyone on the server a UTC day; 0 is unlimited
 server-posts-per-day = 10000
 
-# room_list requests of one user a minute, besides the first joined listing after each sign-in; 0 is unlimited (not in the Go aprond)
+# room_list requests of one user a minute, besides the first joined listing after each sign-in; 0 is unlimited
 room-lists-per-minute = 6
 
-# New uploads of one user a UTC day: a message's upload embeds, /avatar, /emoji add and /server avatar; 0 is unlimited (not in the Go aprond)
+# New uploads of one user a UTC day: a message's upload embeds, /avatar, /emoji add and /server avatar; 0 is unlimited
 uploads-per-user-day = 20
 
-# New uploads of everyone on the server a UTC day; 0 is unlimited (not in the Go aprond)
+# New uploads of everyone on the server a UTC day; 0 is unlimited
 uploads-per-day = 500
 
-# WebSocket messages one connection may send in a rolling minute, past which it is closed with 1008; pings do not count; 0 is unlimited (not in the Go aprond)
+# WebSocket messages one connection may send in a rolling minute, past which it is closed with 1008; pings do not count; 0 is unlimited
 frames-per-connection-minute = 60
 
-# WebSocket messages one client address may send a minute, past which its connection is closed with 1013; 0 is unlimited (not in the Go aprond)
+# WebSocket messages one client address may send a minute, past which its connection is closed with 1013; 0 is unlimited
 frames-per-ip-minute = 120
 
-# WebSocket messages everyone may send a minute, past which requests get retry_after and notifications are dropped; 0 is unlimited (not in the Go aprond)
+# WebSocket messages everyone may send a minute, past which requests get retry_after and notifications are dropped; 0 is unlimited
 server-frames-per-minute = 600
 
-# Malformed or invalid requests within a minute that close a connection with 1008; 0 never closes (not in the Go aprond)
+# Malformed or invalid requests within a minute that close a connection with 1008; 0 never closes
 policy-violations = 3
 
-# Seconds between the status changes of one user that others are sent, the latest winning; a change made with me goes at once; 0 to 60 (not in the Go aprond)
+# Seconds between the status changes of one user that others are sent, the latest winning; a change made with me goes at once; 0 to 60
 status-coalesce-seconds = 60
 
-# History pages one user may request a minute, after a burst of --limit.history-burst; 0 is unlimited (not in the Go aprond)
+# History pages one user may request a minute, after a burst of --limit.history-burst; 0 is unlimited
 history-per-minute = 20
 
-# History pages a quiet user may request at once (not in the Go aprond)
+# History pages a quiet user may request at once
 history-burst = 60
 
-# History pages one user may request a UTC day; 0 is unlimited (not in the Go aprond)
+# History pages one user may request a UTC day; 0 is unlimited
 history-per-day = 3000
 
-# History pages one client address may request a minute, after a burst of --limit.ip-history-burst; 0 is unlimited (not in the Go aprond)
+# History pages one client address may request a minute, after a burst of --limit.ip-history-burst; 0 is unlimited
 ip-history-per-minute = 60
 
-# History pages a quiet client address may request at once (not in the Go aprond)
+# History pages a quiet client address may request at once
 ip-history-burst = 120
 
-# History pages one client address may request a UTC day; 0 is unlimited (not in the Go aprond)
+# History pages one client address may request a UTC day; 0 is unlimited
 ip-history-per-day = 6000
 
-# History pages everyone may request a UTC day; 0 is unlimited (not in the Go aprond)
+# History pages everyone may request a UTC day; 0 is unlimited
 server-history-per-day = 40000
 
-# Seconds a status change a closed connection caused waits, so a reconnect within them shows others nothing; 0 to 60 (not in the Go aprond)
+# Seconds a status change a closed connection caused waits, so a reconnect within them shows others nothing; 0 to 60
 offline-grace-seconds = 60
 
 [server]
 
-# Plain name clients show for this server, as server.title, unless an admin's /server title sets one (default: none, so clients show the server's address; not in the Go aprond)
+# Plain name clients show for this server, as server.title, unless an admin's /server title sets one (default: none, so clients show the server's address)
 title = ""
 
-# CommonMark of at most 500 bytes saying what this server is about, as server.description, unless an admin's /server description sets one (default: general's description; not in the Go aprond)
+# CommonMark of at most 500 bytes saying what this server is about, as server.description, unless an admin's /server description sets one (default: general's description)
 description = ""
 
-# Server icon, as server.avatar: an https: URL or a small data:image/{png,jpeg,gif,webp};base64, URL, unless an admin's /server avatar sets one (not in the Go aprond)
+# Server icon, as server.avatar: an https: URL or a small data:image/{png,jpeg,gif,webp};base64, URL, unless an admin's /server avatar sets one
 avatar = ""
 --- stderr
 

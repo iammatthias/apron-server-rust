@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use super::client::Client;
 use super::embeds::EmbedPurpose;
-use super::messages::{parse_message_ref, validate_body, MessageState};
+use super::messages::{parse_message_ref, validate_body};
 use super::metadata::one_upload;
 use super::protocol::*;
 use super::rooms::RoomState;
@@ -17,7 +17,6 @@ use crate::obj;
 
 /// Scoped system identities (Appendix A.1). user_ids starting with `~` are
 /// reserved for them (Appendix A.3): requestable_user_id never matches one.
-pub const ROOM_NOTICE_ID: &str = "~room";
 pub const PRIVATE_NOTICE_ID: &str = "~private";
 pub const PRIVATE_NOTICE_NAME: &str = "System message to you";
 
@@ -362,35 +361,6 @@ impl State {
             }
         }
         Err(invalid_params(format!("Unknown command /{word}; try /help")).forgiven())
-    }
-
-    /// Logs and delivers a message from ~room to the room's members
-    /// (Appendix A.1). It mentions no one.
-    pub fn post_room_notice_locked(&mut self, room_id: &str, text: &str) {
-        let log_id = self.next_id_locked();
-        let message_id = format_id(log_id);
-        let title = self.rooms[room_id].title();
-        let from = obj! {"user_id" => ROOM_NOTICE_ID, "name" => title.as_str()};
-        self.messages.insert(
-            message_id.clone(),
-            MessageState {
-                id: message_id.clone(),
-                from: from.clone(),
-                owner: ROOM_NOTICE_ID.into(),
-                ..MessageState::default()
-            },
-        );
-        self.commit_snapshot_locked(
-            &message_id,
-            obj! {
-                "message_id" => message_id.as_str(),
-                "log_id" => message_id.as_str(),
-                "room_id" => room_id,
-                "from" => from,
-                "body" => obj! {"text" => text},
-            },
-            log_id,
-        );
     }
 
     /// Replies with a ~private notice listing the commands available to the

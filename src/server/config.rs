@@ -48,9 +48,7 @@ pub const UNTRUSTED_ADDRESS: &str = "Trusted client address unavailable";
 /// How long a connection may stay without signing in (Config.auth_timeout).
 pub const AUTH_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Controls the HTTP and WebSocket behavior of a Server. The fields are Go's
-/// `Config`; the ones later phases implement are kept so a configuration
-/// written against the Go server type-checks here.
+/// Controls the HTTP and WebSocket behavior of a Server.
 #[derive(Clone)]
 pub struct Config {
     /// Enables passkeys with an explicitly configured RP and frontend
