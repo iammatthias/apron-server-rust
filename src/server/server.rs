@@ -21,6 +21,7 @@ use super::email::{EmailSender, EmailState, ProposalId};
 use super::embeds::EmbedState;
 use super::embeds::{AVATAR_TYPES, UPLOAD_TYPES};
 use super::invites::{InviteTokens, JoinInvite};
+use super::limits::IpKey;
 use super::messages::MessageState;
 use super::metadata::{ServerMetadata, StoredServer};
 use super::outbound;
@@ -61,6 +62,8 @@ pub const DEFAULT_MAX_LISTED_MEMBERS: usize = 1000;
 /// The delay suggested by connection-level retry_after errors (capacity and
 /// shutdown).
 pub const RETRY_AFTER_SECONDS: i64 = 30;
+/// Refuses a connection whose client address the proxy did not give.
+pub const UNTRUSTED_ADDRESS: &str = "Trusted client address unavailable";
 
 /// How long a connection may stay without signing in (Config.auth_timeout).
 pub const AUTH_TIMEOUT: Duration = Duration::from_secs(30);
@@ -441,7 +444,7 @@ pub struct Client {
     pub base_url: String,
     pub origin: String,
     /// Names the client address for the limits of all its connections.
-    pub client_key: String,
+    pub ip_key: IpKey,
     write_timeout: Duration,
     ping_interval: Duration,
     ping_timeout: Duration,
@@ -1082,6 +1085,8 @@ impl Server {
                 .is_err()
         {
             Some((http::STATUS_FORBIDDEN, "Origin not allowed", None))
+        } else if self.client_ip(r).is_none() {
+            Some((http::STATUS_FORBIDDEN, UNTRUSTED_ADDRESS, None))
         } else {
             let st = self.lock();
             if st.closed {
@@ -1197,6 +1202,10 @@ impl Server {
             );
             return;
         }
+        let Some(ip_key) = self.client_ip(r) else {
+            http::http_error(w, UNTRUSTED_ADDRESS, http::STATUS_FORBIDDEN);
+            return;
+        };
         self.connections.add(1);
         let _finished = ConnectionDone(&self.connections);
 
@@ -1224,7 +1233,7 @@ impl Server {
             done: Done::default(),
             base_url: self.base_url(r),
             origin: r.header.get("Origin").unwrap_or("").to_owned(),
-            client_key: super::email::client_key(&self.client_ip(r)),
+            ip_key,
             write_timeout: self.config.write_timeout,
             ping_interval: self.config.ping_interval,
             ping_timeout: self.config.ping_timeout,
@@ -1320,18 +1329,20 @@ impl Server {
         auth_deadline.stop();
     }
 
-    /// The address of the client that opened a request: with
-    /// `client_ip_header`, the last entry across every line of that header,
-    /// which the proxy in front added itself, without a port; else, or when
-    /// that is not an IP address, the connection's own address.
-    pub(crate) fn client_ip(&self, r: &HttpRequest) -> String {
-        let remote = match rust_stdlib::net::split_host_port(&r.remote_addr) {
-            Ok((host, _)) => host,
-            Err(_) => r.remote_addr.clone(),
-        };
+    /// The key of the client that opened a request: with
+    /// `client_ip_header`, of the last entry across every line of that
+    /// header, which the proxy in front added itself, without a port; else of
+    /// the connection's own address. `None` when the header names no address,
+    /// which refuses the connection rather than give it a fresh, unlimited
+    /// key, as apron-server-cloudflare does without its trusted address.
+    pub(crate) fn client_ip(&self, r: &HttpRequest) -> Option<IpKey> {
         let header = &self.config.client_ip_header;
         if header.is_empty() {
-            return remote;
+            let remote = match rust_stdlib::net::split_host_port(&r.remote_addr) {
+                Ok((host, _)) => host,
+                Err(_) => r.remote_addr.clone(),
+            };
+            return IpKey::parse(&remote);
         }
         let joined = r.header.values(header).join(",");
         let mut entry = joined.rsplit(',').next().unwrap_or("").trim().to_owned();
@@ -1339,11 +1350,7 @@ impl Server {
             entry = host;
         }
         let entry = entry.strip_prefix('[').unwrap_or(&entry);
-        let entry = entry.strip_suffix(']').unwrap_or(entry);
-        if rust_stdlib::net::parse_ip(entry).is_none() {
-            return remote;
-        }
-        entry.to_owned()
+        IpKey::parse(entry.strip_suffix(']').unwrap_or(entry))
     }
 
     /// The configured public URL or the scheme and host the WebSocket

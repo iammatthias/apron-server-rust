@@ -17,6 +17,7 @@ use super::webauthn_test::{
 };
 use crate::obj;
 use crate::server::email::*;
+use crate::server::limits::IpKey;
 use crate::server::protocol::*;
 use crate::server::{Config, Server};
 use crate::store::{self, Store};
@@ -1279,8 +1280,9 @@ fn test_normalize_email() {
     }
 }
 
-/// The client address comes from the last entry across every line of the
-/// configured header, without a port, else from the connection.
+/// The client key comes from the last entry across every line of the
+/// configured header, without a port, else from the connection; a header
+/// that names no address gives none, which refuses the connection.
 #[test]
 fn test_client_ip_from_a_proxy_header() {
     let mut config = default_config();
@@ -1294,23 +1296,24 @@ fn test_client_ip_from_a_proxy_header() {
         }
         r
     };
-    let tests: [(&[&str], &str); 9] = [
-        (&[], "10.0.0.1"),
-        (&["203.0.113.7"], "203.0.113.7"),
-        (&["6.6.6.6, 203.0.113.7"], "203.0.113.7"),
-        (&["6.6.6.6", "203.0.113.7"], "203.0.113.7"),
+    let tests: [(&[&str], Option<&str>); 10] = [
+        (&[], None),
+        (&["203.0.113.7"], Some("v4:203.0.113.7")),
+        (&["6.6.6.6, 203.0.113.7"], Some("v4:203.0.113.7")),
+        (&["6.6.6.6", "203.0.113.7"], Some("v4:203.0.113.7")),
         (
             &["6.6.6.6", "198.51.100.1, 203.0.113.7:4711"],
-            "203.0.113.7",
+            Some("v4:203.0.113.7"),
         ),
-        (&["[2001:db8::1]:4711"], "2001:db8::1"),
-        (&["2001:db8::2"], "2001:db8::2"),
-        (&["garbage-x"], "10.0.0.1"),
-        (&["203.0.113.7, "], "10.0.0.1"),
+        (&["[2001:db8::1]:4711"], Some("v6:2001:db8::/56")),
+        (&["2001:db8:0:ff::2"], Some("v6:2001:db8::/56")),
+        (&["::ffff:203.0.113.7"], Some("v4:203.0.113.7")),
+        (&["garbage-x"], None),
+        (&["203.0.113.7, "], None),
     ];
     for (lines, want) in tests {
         assert_eq!(
-            s.app.client_ip(&request(lines)),
+            s.app.client_ip(&request(lines)).as_ref().map(IpKey::as_str),
             want,
             "client_ip({lines:?})"
         );
@@ -1319,8 +1322,30 @@ fn test_client_ip_from_a_proxy_header() {
     let mut r = request(&[]);
     r.header.set("X-Forwarded-For", "203.0.113.7");
     assert_eq!(
-        plain.app.client_ip(&r),
-        "10.0.0.1",
+        plain.app.client_ip(&r).as_ref().map(IpKey::as_str),
+        Some("v4:10.0.0.1"),
         "without a header configured"
     );
+}
+
+/// With the header configured, a connection without it is refused before
+/// the upgrade, and the connection-status probe says why.
+#[test]
+fn test_missing_client_address_is_refused() {
+    let mut config = default_config();
+    config.client_ip_header = "Cf-Connecting-IP".into();
+    let s = new_test_server(config);
+    let (status, body) = http_get(&format!("{}/ws?apron_connection_status=1", s.http.url));
+    assert_eq!(
+        (status, String::from_utf8_lossy(&body).into_owned()),
+        (
+            403,
+            r#"{"error":"Trusted client address unavailable"}"#.to_owned()
+        )
+    );
+    let (status, _) = http_get(&format!("{}/ws", s.http.url));
+    assert_eq!(status, 403, "an upgrade without the header");
+    let (c, frame) = dial_headers(&s, &[("Cf-Connecting-IP", "198.51.100.4")]);
+    assert_eq!(frame["method"].as_str(), Some("server"));
+    drop(c);
 }
