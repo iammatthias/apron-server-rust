@@ -11,11 +11,15 @@ protocol, version 9. It builds one binary, `aprond`, that should behave the
 way the Go `aprond` does: same flags, same TOML config, same wire frames,
 same storage format.
 
-The Go source is the spec where `PROTOCOL.md` leaves room for choice. Tests
-and tools read a local clone at `$APRON_GO_DIR`, which defaults to
-`~/Developer/forks/apron-server-go`. Keep the clone unmodified. Its
-`SERVER.md` documents the server's choices, and its tests define the expected
-behavior.
+Where `PROTOCOL.md` leaves room for choice, the reference is now
+[apron-chat/apron-server-cloudflare](https://github.com/apron-chat/apron-server-cloudflare):
+its `SPEC.md` and its behavior, with its defaults. Go is a fallback where
+Cloudflare says nothing, and there is no Go upstream work. Port a
+Cloudflare behavior with its integration tests where they exist, and record
+what still differs in `docs/DEVIATIONS.md`. Some tests and tools still read
+a local Go clone at `$APRON_GO_DIR`, which defaults to
+`~/Developer/forks/apron-server-go`, for the shared fixtures and the
+browser suites. Keep the clone unmodified.
 
 The port also dogfoods [rust-stdlib](https://github.com/iammatthias/rust-stdlib),
 Go 1.27's standard library for Rust. Wherever the Go server imports a Go
@@ -79,7 +83,11 @@ The Go files map one to one onto Rust modules:
 
 ## Upstream parity
 
-This port tracks apron-server-go's `main`. `UPSTREAM` pins the Go commit the
+This section predates the switch to the Cloudflare reference: porting new
+Go commits is no longer required, and `UPSTREAM` and `check.sh` are due to
+be re-pointed at apron-server-cloudflare. Until then, treat the script as a
+report of Go changes worth a look. This port tracked apron-server-go's
+`main`. `UPSTREAM` pins the Go commit the
 port matches. Check it at the start of every session and before every pull
 request:
 

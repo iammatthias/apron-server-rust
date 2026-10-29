@@ -4,6 +4,7 @@
 
 use super::email::{HttpSender, SmtpSender};
 use super::options::Options;
+use crate::server::protocol::FrameLimits;
 use rust_stdlib::time::Duration;
 use std::collections::BTreeMap;
 
@@ -62,17 +63,7 @@ pub struct Settings {
     /// `--history.retention`, an extension Go lacks; `None` keeps history.
     pub retention: Option<Duration>,
     /// The `--frame.*` bounds, an extension Go lacks.
-    pub frame: FrameSettings,
-}
-
-/// The `--frame.*` bounds, each positive.
-#[derive(Debug, Default)]
-pub struct FrameSettings {
-    pub max_bytes: usize,
-    pub max_text_bytes: usize,
-    pub max_depth: usize,
-    pub max_nodes: usize,
-    pub max_id_bytes: usize,
+    pub frame: FrameLimits,
 }
 
 fn positive(flag: &str, value: i64) -> Result<usize, String> {
@@ -188,7 +179,7 @@ pub fn server_settings(options: &Options) -> Result<Settings, String> {
     config.guest_posting = options.guest.posting;
     config.retention = parse_retention(&options.history.retention)?;
     let f = &options.frame;
-    config.frame = FrameSettings {
+    config.frame = FrameLimits {
         max_bytes: positive("frame.max-bytes", f.max_bytes)?,
         max_text_bytes: positive("frame.max-text-bytes", f.max_text_bytes)?,
         max_depth: positive("frame.max-depth", f.max_depth)?,
