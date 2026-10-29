@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 
 use rust_stdlib::time::Time;
 
+use super::embeds::EmbedPurpose;
 use super::rooms::room_update;
 use super::server::State;
 use crate::obj;
@@ -90,7 +91,7 @@ impl State {
         let embeds: Vec<String> = self
             .embeds
             .values()
-            .filter(|e| e.message_id == message_id && e.avatar_for.is_none())
+            .filter(|e| e.message_id == message_id && e.purpose == EmbedPurpose::Message)
             .map(|e| e.id.clone())
             .collect();
         for id in embeds {

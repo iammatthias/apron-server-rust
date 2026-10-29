@@ -4,7 +4,9 @@
 
 use std::sync::Arc;
 
+use super::embeds::EmbedPurpose;
 use super::messages::{parse_message_ref, validate_body, MessageState};
+use super::metadata::one_upload;
 use super::protocol::*;
 use super::rooms::RoomState;
 use super::server::{Client, Server, State, DEFAULT_ROOM_ID};
@@ -146,6 +148,14 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         audience: Audience::Admins,
         writes: true,
         run: State::invite_command,
+    },
+    ServerCommand {
+        name: "server",
+        usage: "/server [title|description [<text>] | avatar]",
+        help: "show this server's title, description and avatar; set one, the avatar with one image attached; or clear one, back to the deployment's",
+        audience: Audience::Admins,
+        writes: true,
+        run: State::server_command,
     },
     ServerCommand {
         name: "toggle",
@@ -297,29 +307,17 @@ impl State {
         _args: &str,
     ) -> Result<Object, RpcError> {
         let embeds = body.get("embeds").map(Json::as_list).unwrap_or(&[]);
-        let one_upload = embeds.len() == 1
-            && embeds[0]
-                .as_object()
-                .and_then(|e| e.get("kind"))
-                .and_then(Json::as_str)
-                == Some("upload");
         if !self.feature_on(Feature::Uploads) {
             return Err(RpcError::new(CODE_DENIED, UPLOADS_OFF));
         }
-        if !one_upload {
+        if !one_upload(embeds) {
             return Err(invalid_params(
                 "/avatar takes exactly one upload embed: attach an image",
             ));
         }
         let user_id = self.client_user(c).unwrap_or_default();
         self.admit_post_locked(&user_id)?;
-        let id = self.next_embed_id();
-        self.new_write_locked(c, &id, "upload", "");
-        let e = self.embeds.get_mut(&id).expect("just registered");
-        e.avatar_for = Some(user_id);
-        Ok(obj! {
-            "embeds" => vec![Json::from(obj! {"embed_id" => id.as_str(), "kind" => "upload", "write_url" => e.write_url()})],
-        })
+        Ok(self.new_image_write_locked(c, EmbedPurpose::Avatar(user_id)))
     }
 
     /// `/kick <user_id>` removes a user, an account or a guest, from the

@@ -41,6 +41,34 @@ pub const LINK_KIND: &str = "link";
 /// the directory.
 pub const UPLOAD_SUFFIX: &str = ".upload";
 
+/// What a hosted upload is for. It decides the upload's size limit and
+/// types, whether eviction and retention may remove it, and how long
+/// clients may cache it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum EmbedPurpose {
+    /// An embed of `EmbedState.message_id`.
+    #[default]
+    Message,
+    /// The `/avatar` of this user (§4.8.6).
+    Avatar(String),
+    /// The server's avatar, from `/server avatar` (§3.1).
+    ServerAvatar,
+}
+
+impl EmbedPurpose {
+    /// Whether the upload is an image the server keeps apart from any
+    /// message: one of AVATAR_TYPES, never evicted or expired.
+    pub fn image(&self) -> bool {
+        *self != EmbedPurpose::Message
+    }
+
+    /// Whether the server keeps the upload's file URL for good, so clients
+    /// may cache it as long as they like.
+    fn immutable(&self) -> bool {
+        matches!(self, EmbedPurpose::ServerAvatar)
+    }
+}
+
 /// A server-hosted embed: an upload, a stream, or a link preview
 /// (`unfurl`). Other embed kinds are body content with only an embed_id.
 /// An embed that is no longer in `State.embeds` was removed; its write,
@@ -49,10 +77,9 @@ pub const UPLOAD_SUFFIX: &str = ".upload";
 pub struct EmbedState {
     pub id: String,
     pub kind: String,
-    /// The message the embed belongs to; `avatar_for` is set instead for a
-    /// /avatar upload (§4.8.6).
+    /// The message the embed belongs to, for `EmbedPurpose::Message`.
     pub message_id: String,
-    pub avatar_for: Option<String>,
+    pub purpose: EmbedPurpose,
     pub base_url: String,
     pub secret: String,
     pub token: String,
@@ -498,7 +525,9 @@ impl State {
         self.uploads
             .iter()
             .filter_map(|(_, id)| self.embeds.get(id))
-            .filter(|e| e.message_id == message_id && !e.is_link() && e.avatar_for.is_none())
+            .filter(|e| {
+                e.message_id == message_id && !e.is_link() && e.purpose == EmbedPurpose::Message
+            })
             .map(|e| e.size)
             .sum()
     }
@@ -507,8 +536,8 @@ impl State {
     /// max_upload_storage_bytes: link preview images first, then the
     /// oldest message uploads. Each affected message is republished once:
     /// a link keeps its card without `og.image`, and an upload embed leaves
-    /// the message, as for a failed write (§4.8.3). Avatars count toward the
-    /// total but are never removed.
+    /// the message, as for a failed write (§4.8.3). Avatars and custom emoji
+    /// count toward the total but are never removed.
     pub fn evict_uploads_locked(&mut self, keep: &str) {
         let (links, uploads): (Vec<String>, Vec<String>) = self
             .uploads
@@ -524,7 +553,7 @@ impl State {
             let Some(e) = self.embeds.get(&id) else {
                 continue;
             };
-            if id == keep || e.avatar_for.is_some() {
+            if id == keep || e.purpose.image() {
                 continue;
             }
             let (message_id, link) = (e.message_id.clone(), e.is_link());
@@ -730,16 +759,15 @@ pub(crate) fn new_upload_file(dir: &str) -> io::Result<File> {
     os::create_temp(dir, &format!("*{UPLOAD_SUFFIX}"))
 }
 
-/// Checks that an avatar upload's content decodes as the image type it
-/// declares.
-pub(crate) fn valid_avatar_image(content_type: &str, file: Option<&File>) -> bool {
-    let Some(file) = file else {
-        return false;
-    };
+/// The width and height of an image upload, an avatar's or a custom
+/// emoji's, whose content decodes as the image type it shows.
+pub(crate) fn image_size(content_type: &str, file: Option<&File>) -> Option<(i64, i64)> {
     if !avatar_type(content_type) {
-        return false;
+        return None;
     }
-    decode_image_config(file).is_some_and(|(_, format)| format!("image/{format}") == content_type)
+    let (config, format) = decode_image_config(file?)?;
+    (format!("image/{format}") == content_type)
+        .then(|| (i64::from(config.width), i64::from(config.height)))
 }
 
 /// Builds the og the server sets on a finished upload (§4.8.4): image for a
@@ -782,7 +810,8 @@ fn inline_type(content_type: &str) -> bool {
 /// Why an upload body was not stored.
 enum UploadError {
     TooLarge,
-    NotAvatar,
+    /// An avatar or a custom emoji that is not an image of AVATAR_TYPES.
+    NotImage,
     /// An attachment of a type Config.upload_types leaves out.
     NotAccepted,
     Other,
@@ -886,7 +915,7 @@ impl Server {
     }
 
     fn write_upload(self: &Arc<Self>, w: &mut dyn ResponseWriter, r: &mut HttpRequest, id: &str) {
-        let (limit, avatar_for, message_id) = {
+        let (limit, purpose, message_id) = {
             let st = self.lock();
             let Some(e) = st.embeds.get(id) else {
                 drop(st);
@@ -897,14 +926,16 @@ impl Server {
                 );
                 return;
             };
-            let limit = match &e.avatar_for {
-                Some(_) => self.config.max_avatar_bytes,
-                None => self.config.max_upload_bytes.min(
+            let limit = match &e.purpose {
+                EmbedPurpose::Message => self.config.max_upload_bytes.min(
                     self.config.max_message_upload_bytes
                         - st.message_upload_bytes_locked(&e.message_id),
                 ),
+                EmbedPurpose::Avatar(_) | EmbedPurpose::ServerAvatar => {
+                    self.config.max_avatar_bytes
+                }
             };
-            (limit, e.avatar_for.clone(), e.message_id.clone())
+            (limit, e.purpose.clone(), e.message_id.clone())
         };
         let _ = ResponseController::new(w).set_read_deadline(&time::now().add(UPLOAD_READ_TIMEOUT));
         let (file, size, mut err) = self.receive_upload(w, r, limit);
@@ -922,15 +953,12 @@ impl Server {
                 other => other,
             },
         };
-        if err.is_none()
-            && avatar_for.is_some()
-            && !valid_avatar_image(&content_type, file.as_ref())
-        {
-            err = Some(UploadError::NotAvatar);
+        if err.is_none() && purpose.image() && image_size(&content_type, file.as_ref()).is_none() {
+            err = Some(UploadError::NotImage);
         }
         let (declared_type, _) = mime::parse_media_type(&declared);
         if err.is_none()
-            && avatar_for.is_none()
+            && purpose == EmbedPurpose::Message
             && (!type_matches(&self.config.upload_types, &content_type)
                 || !(declared_type.is_empty()
                     || type_matches(&self.config.upload_types, &declared_type)))
@@ -978,13 +1006,12 @@ impl Server {
                 );
                 return;
             }
-            Some(UploadError::NotAvatar) => {
-                fail(
-                    &mut st,
-                    w,
-                    http::STATUS_UNSUPPORTED_MEDIA_TYPE,
-                    "Avatars must be PNG, JPEG, GIF, or WebP images",
-                );
+            Some(UploadError::NotImage) => {
+                let message = match purpose {
+                    EmbedPurpose::Avatar(_) => "Avatars must be PNG, JPEG, GIF, or WebP images",
+                    _ => "Only PNG, JPEG, GIF, and WebP images can be the server's avatar",
+                };
+                fail(&mut st, w, http::STATUS_UNSUPPORTED_MEDIA_TYPE, message);
                 return;
             }
             Some(UploadError::NotAccepted) => {
@@ -1010,7 +1037,7 @@ impl Server {
             }
             None => {}
         }
-        if avatar_for.is_none()
+        if purpose == EmbedPurpose::Message
             && st.message_upload_bytes_locked(&message_id) + size
                 > self.config.max_message_upload_bytes
         {
@@ -1041,30 +1068,32 @@ impl Server {
         if let Some(og) = og {
             e.owned.insert("og".into(), og.into());
         }
-        if let Some(user_id) = avatar_for {
-            if st.users.contains_key(&user_id) {
+        match purpose {
+            EmbedPurpose::Avatar(user_id) if st.users.contains_key(&user_id) => {
                 st.set_avatar_embed_locked(&user_id, Some(id.to_owned()));
                 if let Some(u) = st.users.get_mut(&user_id) {
                     u.avatar = file_url.clone();
                 }
                 st.touch_user(&user_id);
                 st.notify_profile_locked(&user_id, None, &ExtObject::new(), &[]);
-            } else {
-                st.remove_embed_locked(id);
             }
-        } else if st.messages.contains_key(&message_id) {
-            let owned = st
-                .embeds
-                .get(id)
-                .map(|e| e.owned.clone())
-                .unwrap_or_default();
-            st.republish_locked(&message_id, |body| {
-                replace_embed(
-                    body,
-                    id,
-                    Some(&|embed: &mut Object| embed.extend(owned.clone())),
-                )
-            });
+            EmbedPurpose::Avatar(_) => st.remove_embed_locked(id),
+            EmbedPurpose::ServerAvatar => st.set_server_avatar_locked(Some(id.to_owned())),
+            EmbedPurpose::Message if st.messages.contains_key(&message_id) => {
+                let owned = st
+                    .embeds
+                    .get(id)
+                    .map(|e| e.owned.clone())
+                    .unwrap_or_default();
+                st.republish_locked(&message_id, |body| {
+                    replace_embed(
+                        body,
+                        id,
+                        Some(&|embed: &mut Object| embed.extend(owned.clone())),
+                    )
+                });
+            }
+            EmbedPurpose::Message => {}
         }
         st.evict_uploads_locked(id);
         drop(st);
@@ -1127,7 +1156,7 @@ impl Server {
             return;
         }
         let path = r.url.path.strip_prefix(FILE_PATH).unwrap_or("").to_owned();
-        let (content, content_type, title) = {
+        let (content, content_type, title, immutable) = {
             let st = self.lock();
             let Some(e) = st
                 .lookup_embed_locked(&path)
@@ -1138,7 +1167,12 @@ impl Server {
                 return;
             };
             // An upload removed after this still reads from the open file.
-            (os::open(&e.path), e.content_type.clone(), e.title.clone())
+            (
+                os::open(&e.path),
+                e.content_type.clone(),
+                e.title.clone(),
+                e.purpose.immutable(),
+            )
         };
         let Ok(mut content) = content else {
             http::not_found(w, r);
@@ -1148,7 +1182,16 @@ impl Server {
         header.set("Content-Type", &content_type);
         header.set("X-Content-Type-Options", "nosniff");
         header.set("Content-Security-Policy", "sandbox; default-src 'none'");
-        header.set("Cache-Control", "private, max-age=3600");
+        // A custom emoji or the server's avatar keeps its URL until it is
+        // removed or replaced, as on apron-server-cloudflare.
+        header.set(
+            "Cache-Control",
+            if immutable {
+                "public, max-age=31536000, immutable"
+            } else {
+                "private, max-age=3600"
+            },
+        );
         let mut disposition = if inline_type(&content_type) {
             "inline".to_owned()
         } else {

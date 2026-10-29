@@ -21,6 +21,7 @@ use super::embeds::EmbedState;
 use super::embeds::{AVATAR_TYPES, UPLOAD_TYPES};
 use super::invites::{InviteTokens, JoinInvite};
 use super::messages::MessageState;
+use super::metadata::{ServerMetadata, StoredServer};
 use super::outbound;
 use super::persist::{DirtySet, StoredMeta};
 use super::protocol::*;
@@ -126,6 +127,9 @@ pub struct Config {
     pub max_private_rooms: usize,
     /// server.welcome (§3.2): Markdown shown on the sign-in screen.
     pub welcome: String,
+    /// The server frame's `title`, `description` and `avatar` (§3.1)
+    /// unless an admin's `/server` sets them.
+    pub server: ServerMetadata,
     /// Grants server roles (§3.3), such as "admin", to accounts: each role
     /// lists the user_ids or email addresses that hold it.
     pub roles: BTreeMap<String, Vec<String>>,
@@ -210,6 +214,7 @@ pub fn default_config() -> Config {
         max_listed_members: DEFAULT_MAX_LISTED_MEMBERS,
         max_private_rooms: 20,
         welcome: String::new(),
+        server: ServerMetadata::default(),
         roles: BTreeMap::new(),
         admin_token: None,
         email_sender: None,
@@ -682,6 +687,8 @@ pub struct State {
     pub join_invite: Option<JoinInvite>,
     /// The features an admin turned off with `/toggle` (toggles.rs).
     pub features_off: BTreeSet<Feature>,
+    /// What admins set with `/server` (metadata.rs).
+    pub server_meta: StoredServer,
     /// When the idle bot sweep is next due, in Unix milliseconds; 0 until
     /// the first sweep sets it (bots.rs).
     pub bot_sweep_at: i64,
@@ -869,6 +876,7 @@ pub fn open(config: Config) -> Result<Arc<Server>, store::StoreError> {
                 invites: InviteTokens::default(),
                 join_invite: None,
                 features_off: BTreeSet::new(),
+                server_meta: StoredServer::default(),
                 bot_sweep_at: 0,
                 email: EmailState::default(),
                 vapid,
@@ -1688,6 +1696,7 @@ impl State {
             params.insert("push".into(), super::push::server_push_params(self).into());
         }
         params.insert("welcome".into(), self.welcome(origin).into());
+        self.insert_server_metadata(&mut params);
         // ext:settings (EXTENSIONS.md): read cursors are kept with activity.
         // private_rooms is left out when unlimited, as an absent key says.
         // What each user may do is in `you` (ext:permissions).

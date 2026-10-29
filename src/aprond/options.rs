@@ -38,6 +38,7 @@ pub struct Options {
     pub apple: AppleOptions,
     pub unfurl: UnfurlOptions,
     pub guest: GuestOptions,
+    pub server: ServerOptions,
     pub history: HistoryOptions,
     pub frame: FrameOptions,
 }
@@ -105,6 +106,14 @@ pub struct UnfurlOptions {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct GuestOptions {
     pub posting: bool,
+}
+
+/// An extension Go lacks (docs/DEVIATIONS.md).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ServerOptions {
+    pub title: String,
+    pub description: String,
+    pub avatar: String,
 }
 
 /// An extension Go lacks (docs/DEVIATIONS.md).
@@ -293,6 +302,15 @@ pub static GROUPS: &[Group] = &[
             spec!("max-depth", Int, frame.max_depth, ["8"], [], "Deepest nesting of objects and arrays in a frame, the frame itself at depth 1 (not in the Go aprond)"),
             spec!("max-nodes", Int, frame.max_nodes, ["2048"], [], "Most JSON values in a frame, object keys not counted (not in the Go aprond)"),
             spec!("max-id-bytes", Int, frame.max_id_bytes, ["128"], [], "Longest request id, in bytes (not in the Go aprond)"),
+        ],
+    },
+    Group {
+        name: "Server",
+        namespace: "server",
+        options: &[
+            spec!("title", Str, server.title, [], [], "Plain name clients show for this server, as server.title, unless an admin's /server title sets one (default: none, so clients show the server's address; not in the Go aprond)"),
+            spec!("description", Str, server.description, [], [], "CommonMark of at most 500 bytes saying what this server is about, as server.description, unless an admin's /server description sets one (default: general's description; not in the Go aprond)"),
+            spec!("avatar", Str, server.avatar, [], [], "Server icon, as server.avatar: an https: URL or a small data:image/{png,jpeg,gif,webp};base64, URL, unless an admin's /server avatar sets one (not in the Go aprond)"),
         ],
     },
 ];

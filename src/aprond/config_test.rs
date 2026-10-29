@@ -418,3 +418,59 @@ fn test_flag_syntax() {
     assert_eq!(parser.options.email.sender, "smtp");
     assert_eq!(parser.options.tls.addr, ":443");
 }
+
+/// apron-server-cloudflare's `SERVER_*` variables, as `--server.*`: each
+/// trimmed, empty left out, and checked as `/server` checks it.
+#[test]
+fn test_server_metadata_flags() {
+    use crate::server::metadata::ServerMetadata;
+    let config = server_settings(&parse(&[]).options).unwrap();
+    assert_eq!(config.server, ServerMetadata::default());
+    let parser = parse(&[
+        "--server.title",
+        " Chat Club ",
+        "--server.description",
+        "Talk about *clubs*.\nAll welcome.",
+        "--server.avatar",
+        "https://chat.example/icon.png",
+    ]);
+    assert_eq!(
+        server_settings(&parser.options).unwrap().server,
+        ServerMetadata {
+            title: "Chat Club".into(),
+            description: "Talk about *clubs*.\nAll welcome.".into(),
+            avatar: "https://chat.example/icon.png".into(),
+        }
+    );
+    let parser = parse(&["--server.description", "   "]);
+    assert_eq!(
+        server_settings(&parser.options).unwrap().server,
+        ServerMetadata::default()
+    );
+    let data = "data:image/png;base64,iVBORw0KGgo=";
+    let parser = parse(&["--server.avatar", data]);
+    assert_eq!(
+        server_settings(&parser.options).unwrap().server.avatar,
+        data
+    );
+    let long_title = "x".repeat(65);
+    let long_description = "x".repeat(501);
+    for (flag, value) in [
+        ("--server.title", long_title.as_str()),
+        ("--server.title", "two\nlines"),
+        ("--server.description", long_description.as_str()),
+        ("--server.description", "a\u{7}b"),
+        ("--server.avatar", "http://chat.example/icon.png"),
+        ("--server.avatar", "data:image/svg+xml;base64,PHN2Zz4="),
+    ] {
+        let parser = parse(&[flag, value]);
+        assert!(
+            server_settings(&parser.options).is_err(),
+            "accepted {flag} {value:?}"
+        );
+    }
+    let parser = parse(&["--server.title", &"x".repeat(64)]);
+    assert!(server_settings(&parser.options).is_ok(), "64 characters");
+    let parser = parse(&["--server.description", &"x".repeat(500)]);
+    assert!(server_settings(&parser.options).is_ok(), "500 bytes");
+}

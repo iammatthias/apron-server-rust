@@ -103,6 +103,7 @@ fn server_config(settings: Settings) -> Result<server::Config, String> {
     config.apple_app_ids = settings.apple_app_ids;
     config.unfurl = settings.unfurl;
     config.guest_posting = settings.guest_posting;
+    config.server = settings.server.clone();
     config.retention = settings.retention;
     config.frame = settings.frame;
     if let Some(rp) = settings.webauthn {
