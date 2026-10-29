@@ -642,6 +642,15 @@ fn set_embed_cors(w: &mut dyn ResponseWriter, methods: &str) {
 /// server would otherwise read what is left of the body before answering, to
 /// reuse the connection, and wait for as long as the writer holds the body
 /// open, such as a stream writer waiting for the answer.
+/// Why an avatar, custom emoji or server avatar write was refused for its
+/// type.
+fn not_image_message(purpose: &EmbedPurpose) -> &'static str {
+    match purpose {
+        EmbedPurpose::Avatar(_) => "Avatars must be PNG, JPEG, GIF, or WebP images",
+        _ => "Only PNG, JPEG, GIF, and WebP images can be custom emoji or the server's avatar",
+    }
+}
+
 fn refuse_write(w: &mut dyn ResponseWriter, message: &str, status: u16) {
     w.header().set("Connection", "close");
     let _ = ResponseController::new(w).set_read_deadline(&time::now());
@@ -895,6 +904,21 @@ impl Server {
                 );
                 return;
             };
+            // An avatar's, a custom emoji's or the server's avatar's declared
+            // type, where it has one, must be an image type it keeps: one that
+            // is not is refused before the body is read, and the write stays
+            // open (ext:media).
+            let (declared, _) = mime::parse_media_type(r.header.get("Content-Type").unwrap_or(""));
+            if e.stream.is_none()
+                && e.purpose.image()
+                && !declared.is_empty()
+                && !AVATAR_TYPES.contains(&declared.as_str())
+            {
+                let message = not_image_message(&e.purpose);
+                drop(st);
+                refuse_write(w, message, http::STATUS_UNSUPPORTED_MEDIA_TYPE);
+                return;
+            }
             e.started = true;
             if let Some(timer) = e.timer.take() {
                 timer.stop();
@@ -1014,10 +1038,7 @@ impl Server {
                 return;
             }
             Some(UploadError::NotImage) => {
-                let message = match purpose {
-                    EmbedPurpose::Avatar(_) => "Avatars must be PNG, JPEG, GIF, or WebP images",
-                    _ => "Only PNG, JPEG, GIF, and WebP images can be custom emoji or the server's avatar",
-                };
+                let message = not_image_message(&purpose);
                 fail(&mut st, w, http::STATUS_UNSUPPORTED_MEDIA_TYPE, message);
                 return;
             }
@@ -1059,6 +1080,19 @@ impl Server {
                 ),
             );
             return;
+        }
+        if let EmbedPurpose::Emoji(key) = &purpose {
+            if !st.emoji_fits(key) {
+                // Another add filled the catalog while this one arrived.
+                let most = self.config.max_emoji;
+                fail(
+                    &mut st,
+                    w,
+                    http::STATUS_GONE,
+                    &format!("This server keeps at most {most} custom emoji; remove one first"),
+                );
+                return;
+            }
         }
         let Some(file_name) = file_name else {
             fail(

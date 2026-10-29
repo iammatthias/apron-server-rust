@@ -121,16 +121,15 @@ impl State {
         self.announce_server_locked();
     }
 
-    /// A finished `/emoji add` write: the image becomes the key's, replacing
-    /// the one it had. A new key past `Config.max_emoji`, which another add
-    /// took meanwhile, is dropped.
+    /// Whether the catalog has room for `key`: it holds it already, or
+    /// fewer than `Config.max_emoji`.
+    pub fn emoji_fits(&self, key: &str) -> bool {
+        self.emoji.entries.contains_key(key) || self.emoji.entries.len() < self.config.max_emoji
+    }
+
+    /// A finished `/emoji add` write that fits (emoji_fits): the image
+    /// becomes the key's, replacing the one it had.
     pub fn add_emoji_locked(&mut self, key: &str, embed: &str, width: i64, height: i64) {
-        if !self.emoji.entries.contains_key(key)
-            && self.emoji.entries.len() >= self.config.max_emoji
-        {
-            self.remove_embed_locked(embed);
-            return;
-        }
         let image = EmojiImage {
             embed: embed.to_owned(),
             width,
@@ -190,7 +189,7 @@ impl State {
             return Err(RpcError::new(CODE_DENIED, UPLOADS_OFF));
         }
         let most = self.config.max_emoji;
-        if !self.emoji.entries.contains_key(key) && self.emoji.entries.len() >= most {
+        if !self.emoji_fits(key) {
             return Err(RpcError::new(
                 CODE_DENIED,
                 format!("This server keeps at most {most} custom emoji; remove one first"),
