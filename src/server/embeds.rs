@@ -20,6 +20,7 @@ use super::protocol::*;
 use super::server::{Client, Server, State};
 use super::toggles::{Feature, UPLOADS_OFF};
 use super::unfurl::Preview;
+use super::users::EMOJI_ROLES;
 use crate::obj;
 
 /// HTTP paths for embed content (§4.8.3, §4.8.5). Write URLs carry a
@@ -82,6 +83,10 @@ pub struct EmbedState {
     /// The message the embed belongs to, for `EmbedPurpose::Message`.
     pub message_id: String,
     pub purpose: EmbedPurpose,
+    /// The user who asked for an image write (`/avatar`, `/emoji`,
+    /// `/server`), in memory only: a custom emoji needs them to hold an
+    /// EMOJI_ROLES role still when the write finishes.
+    pub uploader: String,
     pub base_url: String,
     pub secret: String,
     pub token: String,
@@ -1092,6 +1097,21 @@ impl Server {
             return;
         }
         if let EmbedPurpose::Emoji(key) = &purpose {
+            let uploader = &st.embeds[id].uploader;
+            if !st
+                .users
+                .get(uploader)
+                .is_some_and(|u| u.has_any_role(EMOJI_ROLES))
+            {
+                // The sender lost the roles /emoji needs while it arrived.
+                fail(
+                    &mut st,
+                    w,
+                    http::STATUS_FORBIDDEN,
+                    &format!("/emoji needs one of the roles {}", EMOJI_ROLES.join(", ")),
+                );
+                return;
+            }
             if !st.emoji_fits(key) {
                 // Another add filled the catalog while this one arrived.
                 let most = self.config.max_emoji;
