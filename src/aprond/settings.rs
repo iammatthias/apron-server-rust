@@ -50,6 +50,8 @@ pub struct Settings {
     pub vapid_subject: String,
     pub upload_dir: String,
     pub max_upload_bytes: i64,
+    pub max_avatar_bytes: i64,
+    pub upload_types: Vec<String>,
     pub max_message_upload_bytes: i64,
     pub max_upload_storage_bytes: i64,
     /// `None` keeps the server's default origin patterns.
@@ -145,6 +147,22 @@ pub fn server_settings(options: &Options) -> Result<Settings, String> {
     }
     config.upload_dir = options.upload.dir.clone();
     config.max_upload_bytes = options.upload.max_mb << 20;
+    config.max_avatar_bytes = options.upload.max_avatar_kb << 10;
+    for pattern in &options.upload.types {
+        let valid = pattern.split_once('/').is_some_and(|(major, minor)| {
+            !major.is_empty()
+                && !minor.is_empty()
+                && !pattern.contains(char::is_whitespace)
+                && (major != "*" || minor == "*")
+        });
+        if !valid {
+            return Err(format!(
+                "invalid --upload.type {}: use a MIME type, type/* or */*",
+                rust_stdlib::strconv::quote(pattern)
+            ));
+        }
+        config.upload_types.push(pattern.to_ascii_lowercase());
+    }
     config.max_message_upload_bytes = options.upload.max_message_mb << 20;
     config.max_upload_storage_bytes = options.upload.max_storage_mb << 20;
     if !options.origins.is_empty() {

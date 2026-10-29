@@ -85,6 +85,8 @@ fn server_config(settings: Settings) -> Result<server::Config, String> {
     config.vapid_subject = settings.vapid_subject;
     config.upload_dir = settings.upload_dir;
     config.max_upload_bytes = settings.max_upload_bytes;
+    config.max_avatar_bytes = settings.max_avatar_bytes;
+    config.upload_types = settings.upload_types.clone();
     config.max_message_upload_bytes = settings.max_message_upload_bytes;
     config.max_upload_storage_bytes = settings.max_upload_storage_bytes;
     if let Some(patterns) = settings.origin_patterns {

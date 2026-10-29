@@ -230,28 +230,140 @@ fn test_guest_auth() {
     c.expect_quiet();
 }
 
-/// ext.media (apron-web EXT.md §6) states the configured sizes: an
-/// attachment of any type, and an avatar of the image types /avatar keeps.
+/// ext.media (EXTENSIONS.md) states Cloudflare's defaults: attachments of
+/// its seven image and audio types up to 5 MiB, and avatars of the four
+/// image types up to 256 KiB.
 #[test]
 fn test_server_frame_media() {
-    let mut config = default_config();
-    config.max_upload_bytes = 5_242_880;
-    config.max_avatar_bytes = 262_144;
-    let server = new_test_server(config);
+    let server = new_test_server(default_config());
     let (_, frame) = dial_raw(&server);
+    let file = obj! {"max_bytes" => f(5_242_880)};
     let avatar = obj! {"max_bytes" => f(262_144)};
     assert_eq!(
         frame["params"].as_object().unwrap()["ext"]
             .as_object()
             .unwrap()["media"],
         Json::from(obj! {
-            "upload" => obj! {"*/*" => obj! {"max_bytes" => f(5_242_880)}},
+            "upload" => obj! {
+                "image/png" => file.clone(), "image/jpeg" => file.clone(),
+                "image/gif" => file.clone(), "image/webp" => file.clone(),
+                "audio/webm" => file.clone(), "audio/ogg" => file.clone(), "audio/mp4" => file,
+            },
             "avatar" => obj! {
                 "image/png" => avatar.clone(), "image/jpeg" => avatar.clone(),
                 "image/gif" => avatar.clone(), "image/webp" => avatar,
             },
         }),
     );
+    // Configured types and sizes are what it lists.
+    let mut config = default_config();
+    config.upload_types = vec!["image/*".into(), "*/*".into()];
+    config.max_upload_bytes = 1000;
+    let server = new_test_server(config);
+    let (_, frame) = dial_raw(&server);
+    let media = frame["params"].as_object().unwrap()["ext"]
+        .as_object()
+        .unwrap()["media"]
+        .as_object()
+        .unwrap()
+        .clone();
+    assert_eq!(
+        media["upload"],
+        Json::from(
+            obj! {"image/*" => obj! {"max_bytes" => f(1000)}, "*/*" => obj! {"max_bytes" => f(1000)}}
+        )
+    );
+}
+
+/// An attachment is kept only when its bytes show one of the configured
+/// types, whatever it declares: a PDF or text is 415 and a PNG is kept; a
+/// declared type the server does not take is 415 too. With `*/*`, any file
+/// is kept (apron-server-cloudflare's "a PDF write is 415").
+#[test]
+fn test_upload_types_are_sniffed() {
+    let upload =
+        |server: &TestServer, c: &mut TestClient, id: &str, body: &[u8], declared: &str| {
+            c.drain();
+            let result = post_embeds(
+                c,
+                id,
+                obj! {"body" => obj! {"embeds" => vec![Json::from(obj! {"kind" => "upload"})]}},
+            );
+            let write_url = result["embeds"].as_list()[0].as_object().unwrap()["write_url"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+            let status = http_do("PUT", &write_url, Some(body), declared).0;
+            let _ = server;
+            status
+        };
+    let server = new_test_server(default_config());
+    let mut c = dial_test_client(&server);
+    let pdf = b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\n1 0 obj\n";
+    assert_eq!(upload(&server, &mut c, "pdf", pdf, "application/pdf"), 415);
+    assert_eq!(upload(&server, &mut c, "disguised", pdf, "image/png"), 415);
+    assert_eq!(upload(&server, &mut c, "text", b"hello", ""), 415);
+    assert_eq!(
+        upload(&server, &mut c, "png", &test_png(), "image/png"),
+        201
+    );
+    assert_eq!(
+        upload(&server, &mut c, "png-as-text", &test_png(), "text/plain"),
+        415
+    );
+    let ogg = {
+        let mut page = b"OggS".to_vec();
+        page.resize(26, 0);
+        page.push(1);
+        page.push(19);
+        page.extend_from_slice(b"OpusHead");
+        page.resize(64, 0);
+        page
+    };
+    assert_eq!(upload(&server, &mut c, "ogg", &ogg, "audio/ogg"), 201);
+    let large = png_of_size(5 * 1024 * 1024 + 1);
+    assert_eq!(upload(&server, &mut c, "large", &large, "image/png"), 413);
+
+    let mut config = default_config();
+    config.upload_types = vec!["*/*".into()];
+    let server = new_test_server(config);
+    let mut c = dial_test_client(&server);
+    assert_eq!(upload(&server, &mut c, "any", pdf, "application/pdf"), 201);
+}
+
+/// The sniffer reads each type from its signature, never from a sender.
+#[test]
+fn test_sniff_upload() {
+    use crate::server::embeds::sniff_upload;
+    let mut webm = vec![0x1a, 0x45, 0xdf, 0xa3, 0x9f, 0x42, 0x86, 0x81, 0x01];
+    webm.extend_from_slice(&[0x42, 0x82, 0x84]);
+    webm.extend_from_slice(b"webm");
+    let mut mp4 = vec![0, 0, 0, 0x20];
+    mp4.extend_from_slice(b"ftypM4A ");
+    let mut heic = vec![0, 0, 0, 0x20];
+    heic.extend_from_slice(b"ftypheic");
+    for (body, want) in [
+        (test_png(), Some("image/png")),
+        (b"GIF89a\x01\0\x01\0".to_vec(), Some("image/gif")),
+        (b"RIFF\0\0\0\0WEBPVP8 ".to_vec(), Some("image/webp")),
+        (vec![0xff, 0xd8, 0xff, 0xe0], Some("image/jpeg")),
+        (webm, Some("audio/webm")),
+        (mp4, Some("audio/mp4")),
+        (heic, None),
+        (b"<html><script>".to_vec(), None),
+    ] {
+        assert_eq!(sniff_upload(&body), want, "{body:?}");
+    }
+    let mut ogg = b"OggS".to_vec();
+    ogg.resize(26, 0);
+    ogg.extend_from_slice(&[1, 19]);
+    ogg.extend_from_slice(b"OpusHead");
+    assert_eq!(sniff_upload(&ogg), Some("audio/ogg"));
+
+    use crate::server::embeds::type_matches;
+    let patterns = vec!["image/*".to_owned(), "Audio/Ogg".to_owned()];
+    assert!(type_matches(&patterns, "image/png") && type_matches(&patterns, "audio/ogg"));
+    assert!(!type_matches(&patterns, "audio/mp4") && !type_matches(&patterns, "imagex/png"));
 }
 
 #[test]

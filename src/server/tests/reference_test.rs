@@ -467,14 +467,14 @@ fn test_writes_are_put() {
         obj! {"room_id" => "general", "body" => obj! {"embeds" => vec![Json::from(obj! {"kind" => "upload"})]}},
     );
     let write_url = write_urls(&result).remove(0);
-    let (status, header, _) = http_do("POST", &write_url, Some(b"data"), "text/plain");
+    let (status, header, _) = http_do("POST", &write_url, Some(&png_of_size(16)), "image/png");
     assert!(
         status == 405 && header.get("Allow") == Some("PUT, OPTIONS"),
         "POST: {status}, Allow {:?}",
         header.get("Allow")
     );
     assert_eq!(
-        http_do("PUT", &write_url, Some(b"data"), "text/plain").0,
+        http_do("PUT", &write_url, Some(&png_of_size(16)), "image/png").0,
         201,
         "PUT after POST"
     );
