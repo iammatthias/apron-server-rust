@@ -49,7 +49,8 @@ impl RelayRequest {
 }
 
 /// Records the push deliveries it receives. A path ending in /gone answers
-/// 410 and one ending in /missing 404; while failing is set, one ending in
+/// 410, one ending in /missing 404 and one ending in /forbidden 403; while
+/// failing is set, one ending in
 /// /flaky answers 500.
 struct TestRelay {
     http: httptest::Server,
@@ -86,6 +87,8 @@ fn new_test_relay() -> TestRelay {
             410
         } else if path.ends_with("/missing") {
             404
+        } else if path.ends_with("/forbidden") {
+            403
         } else if path.ends_with("/flaky") && flaky.load(Ordering::SeqCst) {
             500
         } else {
@@ -993,6 +996,28 @@ fn test_web_push_delivery() {
     assert!(
         !has_push(&server, &c.user_id, &format!("{}/web/missing", relay.url)),
         "a webpush subscription answering 404 was kept"
+    );
+    // So is one that refuses the server's VAPID key with 403, as after a
+    // key change.
+    c.result(
+        "push_register",
+        "forbidden",
+        obj! {"kind" => "webpush", "url" => format!("{}/web/forbidden", relay.url), "keys" => keys.clone()},
+    );
+    save(
+        &mut poster,
+        "third",
+        obj! {"body" => obj! {"text" => "third", "mentions" => list(&["guest_1"])}},
+    );
+    c.notification("message");
+    assert_eq!(
+        paths(&relay.pushes(&server, &mut poster)),
+        strs(&["/relay", "/web", "/web/forbidden"]),
+        "deliveries"
+    );
+    assert!(
+        !has_push(&server, &c.user_id, &format!("{}/web/forbidden", relay.url)),
+        "a webpush subscription answering 403 was kept"
     );
 }
 
