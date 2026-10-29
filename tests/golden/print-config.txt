@@ -275,6 +275,15 @@ server-history-per-day = 40000
 # Seconds a status change a closed connection caused waits, so a reconnect within them shows others nothing; 0 to 60
 offline-grace-seconds = 60
 
+# Registrations from one client address a UTC day: new accounts, by passkey, email or invite, new bots and passkeys added to an account; 0 is unlimited
+registrations-per-ip-day = 5
+
+# Registrations of everyone on the server a UTC day; 0 is unlimited
+registrations-per-day = 300
+
+# Accounts and bots the server holds, past which a new one is refused with registration_closed; 0 is unlimited
+identities = 10000
+
 [server]
 
 # Plain name clients show for this server, as server.title, unless an admin's /server title sets one (default: none, so clients show the server's address)
@@ -564,6 +573,15 @@ server-history-per-day = 40000
 
 # Seconds a status change a closed connection caused waits, so a reconnect within them shows others nothing; 0 to 60
 offline-grace-seconds = 60
+
+# Registrations from one client address a UTC day: new accounts, by passkey, email or invite, new bots and passkeys added to an account; 0 is unlimited
+registrations-per-ip-day = 5
+
+# Registrations of everyone on the server a UTC day; 0 is unlimited
+registrations-per-day = 300
+
+# Accounts and bots the server holds, past which a new one is refused with registration_closed; 0 is unlimited
+identities = 10000
 
 [server]
 
@@ -856,6 +874,15 @@ server-history-per-day = 40000
 # Seconds a status change a closed connection caused waits, so a reconnect within them shows others nothing; 0 to 60
 offline-grace-seconds = 60
 
+# Registrations from one client address a UTC day: new accounts, by passkey, email or invite, new bots and passkeys added to an account; 0 is unlimited
+registrations-per-ip-day = 5
+
+# Registrations of everyone on the server a UTC day; 0 is unlimited
+registrations-per-day = 300
+
+# Accounts and bots the server holds, past which a new one is refused with registration_closed; 0 is unlimited
+identities = 10000
+
 [server]
 
 # Plain name clients show for this server, as server.title, unless an admin's /server title sets one (default: none, so clients show the server's address)
@@ -1145,6 +1172,15 @@ server-history-per-day = 40000
 
 # Seconds a status change a closed connection caused waits, so a reconnect within them shows others nothing; 0 to 60
 offline-grace-seconds = 60
+
+# Registrations from one client address a UTC day: new accounts, by passkey, email or invite, new bots and passkeys added to an account; 0 is unlimited
+registrations-per-ip-day = 5
+
+# Registrations of everyone on the server a UTC day; 0 is unlimited
+registrations-per-day = 300
+
+# Accounts and bots the server holds, past which a new one is refused with registration_closed; 0 is unlimited
+identities = 10000
 
 [server]
 

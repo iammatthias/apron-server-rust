@@ -149,6 +149,9 @@ pub struct LimitOptions {
     pub ip_history_burst: i64,
     pub ip_history_per_day: i64,
     pub server_history_per_day: i64,
+    pub registrations_per_ip_day: i64,
+    pub registrations_per_day: i64,
+    pub identities: i64,
 }
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FrameOptions {
@@ -366,6 +369,9 @@ pub static GROUPS: &[Group] = &[
             spec!("ip-history-per-day", Int, limit.ip_history_per_day, ["6000"], [], "History pages one client address may request a UTC day; 0 is unlimited"),
             spec!("server-history-per-day", Int, limit.server_history_per_day, ["40000"], [], "History pages everyone may request a UTC day; 0 is unlimited"),
             spec!("offline-grace-seconds", Int, limit.offline_grace_seconds, ["60"], [], "Seconds a status change a closed connection caused waits, so a reconnect within them shows others nothing; 0 to 60"),
+            spec!("registrations-per-ip-day", Int, limit.registrations_per_ip_day, ["5"], [], "Registrations from one client address a UTC day: new accounts, by passkey, email or invite, new bots and passkeys added to an account; 0 is unlimited"),
+            spec!("registrations-per-day", Int, limit.registrations_per_day, ["300"], [], "Registrations of everyone on the server a UTC day; 0 is unlimited"),
+            spec!("identities", Int, limit.identities, ["10000"], [], "Accounts and bots the server holds, past which a new one is refused with registration_closed; 0 is unlimited"),
         ],
     },
     Group {

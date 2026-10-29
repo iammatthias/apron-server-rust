@@ -74,6 +74,12 @@ pub struct Limits {
     pub user_history_day: u32,
     pub ip_history_day: u32,
     pub server_history_day: u32,
+    /// Registrations (new accounts and bots, and passkeys added to an
+    /// account) from one IP, and on the server, a UTC day; and the accounts
+    /// and bots the server holds, past which a new one is refused.
+    pub registrations_per_ip_day: u32,
+    pub registrations_per_day: u32,
+    pub identities: usize,
 }
 
 /// Posts a minute and a day; zero is no limit.
@@ -187,6 +193,9 @@ impl Default for Limits {
             user_history_day: 3_000,
             ip_history_day: 6_000,
             server_history_day: 40_000,
+            registrations_per_ip_day: 5,
+            registrations_per_day: 300,
+            identities: 10_000,
         }
     }
 }
@@ -219,6 +228,9 @@ impl Limits {
             user_history_day: 0,
             ip_history_day: 0,
             server_history_day: 0,
+            registrations_per_ip_day: 0,
+            registrations_per_day: 0,
+            identities: 0,
         }
     }
 }
@@ -284,6 +296,7 @@ pub enum Scope {
     Upload,
     Frame,
     History,
+    Registration,
 }
 
 /// What a client holds back after a refusal (EXTENSIONS.md `ext:limits`):
@@ -690,6 +703,42 @@ impl State {
         self.limits
             .charge(Scope::Upload, &charges, n)
             .map_err(|refusal| refusal.error(Some(Category::Upload)))
+    }
+
+    /// Charges one registration from `c`'s IP to its day and the server's,
+    /// as Cloudflare's chargeRegistration does: a new account or bot, or a
+    /// passkey added to an account. A new identity (`new_identity`) is first
+    /// refused with `registration_closed` when the server holds
+    /// Limits::identities accounts and bots.
+    pub fn charge_registration_locked(
+        &mut self,
+        c: &Client,
+        new_identity: bool,
+    ) -> Result<(), RpcError> {
+        let limits = &self.config.limits;
+        if new_identity
+            && limits.identities > 0
+            && self.users.values().filter(|u| u.persists()).count() >= limits.identities
+        {
+            return Err(RpcError::new(CODE_DENIED, "registration_closed"));
+        }
+        let ip = Principal::Ip(c.ip_key.clone());
+        let daily = |day| Allowance { minute: None, day };
+        let charges = [
+            Charge::new(
+                &ip,
+                daily(limits.registrations_per_ip_day),
+                "Registration limit reached for this network",
+            ),
+            Charge::new(
+                &Principal::Server,
+                daily(limits.registrations_per_day),
+                "Registration limit reached",
+            ),
+        ];
+        self.limits
+            .charge(Scope::Registration, &charges, 1)
+            .map_err(|refusal| refusal.error(None))
     }
 
     /// Charges a history page to the user's and the IP's minute and day, and

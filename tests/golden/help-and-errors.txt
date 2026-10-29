@@ -358,6 +358,18 @@ Limits:
                                             connection caused waits, so a
                                             reconnect within them shows others
                                             nothing; 0 to 60 (default: 60)
+      --limit.registrations-per-ip-day=     Registrations from one client
+                                            address a UTC day: new accounts, by
+                                            passkey, email or invite, new bots
+                                            and passkeys added to an account; 0
+                                            is unlimited (default: 5)
+      --limit.registrations-per-day=        Registrations of everyone on the
+                                            server a UTC day; 0 is unlimited
+                                            (default: 300)
+      --limit.identities=                   Accounts and bots the server holds,
+                                            past which a new one is refused
+                                            with registration_closed; 0 is
+                                            unlimited (default: 10000)
 
 Server:
       --server.title=                       Plain name clients show for this
@@ -743,6 +755,18 @@ Limits:
                                             connection caused waits, so a
                                             reconnect within them shows others
                                             nothing; 0 to 60 (default: 60)
+      --limit.registrations-per-ip-day=     Registrations from one client
+                                            address a UTC day: new accounts, by
+                                            passkey, email or invite, new bots
+                                            and passkeys added to an account; 0
+                                            is unlimited (default: 5)
+      --limit.registrations-per-day=        Registrations of everyone on the
+                                            server a UTC day; 0 is unlimited
+                                            (default: 300)
+      --limit.identities=                   Accounts and bots the server holds,
+                                            past which a new one is refused
+                                            with registration_closed; 0 is
+                                            unlimited (default: 10000)
 
 Server:
       --server.title=                       Plain name clients show for this
@@ -1128,6 +1152,18 @@ Limits:
                                             connection caused waits, so a
                                             reconnect within them shows others
                                             nothing; 0 to 60 (default: 60)
+      --limit.registrations-per-ip-day=     Registrations from one client
+                                            address a UTC day: new accounts, by
+                                            passkey, email or invite, new bots
+                                            and passkeys added to an account; 0
+                                            is unlimited (default: 5)
+      --limit.registrations-per-day=        Registrations of everyone on the
+                                            server a UTC day; 0 is unlimited
+                                            (default: 300)
+      --limit.identities=                   Accounts and bots the server holds,
+                                            past which a new one is refused
+                                            with registration_closed; 0 is
+                                            unlimited (default: 10000)
 
 Server:
       --server.title=                       Plain name clients show for this

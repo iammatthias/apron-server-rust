@@ -782,6 +782,10 @@ impl State {
             {
                 return Err(denied("This account has an email address already"));
             }
+            // A guest's address makes it an account: a new identity.
+            if self.users.get(&account).is_some_and(|u| !u.persists()) {
+                self.charge_registration_locked(c, true)?;
+            }
             if let Some(u) = self.users.get_mut(&account) {
                 u.email = p.email.clone();
             }
@@ -820,6 +824,7 @@ impl State {
                 requested = p.user_id.clone();
             }
         }
+        self.charge_registration_locked(c, true)?;
         let user_id = self.assign_account_id_locked(&requested);
         let mut user = self.new_user_locked(&user_id, &normalize_name(&name));
         user.email = p.email.clone();

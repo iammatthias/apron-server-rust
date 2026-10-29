@@ -439,6 +439,7 @@ impl State {
                 added: ms,
                 used: ms,
             };
+            self.charge_registration_locked(c, new_account)?;
             if new_account {
                 // Cloudflare's finish fails the same way when another
                 // registration took the user_id since begin.
