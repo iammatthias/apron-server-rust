@@ -138,6 +138,7 @@ fn test_admin_token_signs_in_as_admin() {
         obj! {"you" => obj! {
             "user_id" => "admin", "name" => "Admin", "status" => "online",
             "roles" => strings(&["admin"]),
+            "ext" => obj! {"permissions" => strings(&["move_any", "add_members", "push_joined"])},
         }},
         "admin sign-in"
     );
@@ -527,6 +528,7 @@ fn test_invite_token_makes_a_token_account() {
         result,
         obj! {"you" => obj! {
             "user_id" => "invited", "name" => "invited", "roles" => strings(&[]), "status" => "online",
+            "ext" => obj! {"permissions" => strings(&["add_members", "push_joined"])},
         }},
     );
     first.drain();

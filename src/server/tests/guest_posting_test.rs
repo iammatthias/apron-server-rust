@@ -168,7 +168,11 @@ fn test_server_frame_advertises_guest_posting() {
         assert_eq!(
             settings_of(&frame),
             (
-                vec!["ext:settings".to_owned(), "ext:media".to_owned()],
+                vec![
+                    "ext:settings".to_owned(),
+                    "ext:media".to_owned(),
+                    "ext:permissions".to_owned()
+                ],
                 want
             ),
             "{name}"

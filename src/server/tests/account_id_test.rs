@@ -200,6 +200,7 @@ fn test_guest_registration_frames() {
         Json::from(obj! {
             "user_id" => account.as_str(), "name" => "Ada Lovelace",
             "roles" => Vec::<Json>::new(), "status" => "online",
+            "ext" => obj! {"permissions" => strings(&["add_members", "push_joined"])},
         }),
         "auth result"
     );

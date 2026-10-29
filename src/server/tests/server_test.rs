@@ -84,7 +84,8 @@ fn test_server_frame() {
             "status",
             "ext",
             "ext:settings",
-            "ext:media"
+            "ext:media",
+            "ext:permissions"
         ]),
         "capabilities"
     );
