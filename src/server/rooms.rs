@@ -87,6 +87,13 @@ impl RoomState {
         u.has_role(ADMIN_ROLE) || (u.account() && (self.creator == u.id || owns_bot(u, target)))
     }
 
+    /// Reports whether the room goes once it empties or its log expires: a
+    /// thread or a private room. `general` and the top-level rooms admins
+    /// and mods create are permanent.
+    pub fn removable(&self) -> bool {
+        self.parent.is_some() || self.private
+    }
+
     /// The inclusive lower bound of the room's retained history (§4.3.3):
     /// its creation record, or the server's history floor once retention
     /// passed it, and `None` once retention discarded the whole log.
@@ -517,7 +524,46 @@ impl State {
         } else {
             self.unread_changed_locked(user_id, room_id);
         }
+        self.remove_if_empty_locked(room_id);
         true
+    }
+
+    /// Removes a thread or private room nobody is in any more, with its
+    /// threads and the messages in them, as apron-server-cloudflare's
+    /// removeIfEmpty does; their records stay in the log until they expire.
+    /// Everyone has left it, so nobody is told; a room_list delta from
+    /// before the removal is answered with a full listing.
+    fn remove_if_empty_locked(&mut self, room_id: &str) {
+        if !self
+            .rooms
+            .get(room_id)
+            .is_some_and(|r| r.removable() && r.members.is_empty())
+        {
+            return;
+        }
+        let mut doomed = vec![room_id.to_owned()];
+        let mut i = 0;
+        while i < doomed.len() {
+            doomed.extend(self.rooms[&doomed[i]].children.iter().cloned());
+            i += 1;
+        }
+        let messages: Vec<String> = self
+            .messages
+            .values()
+            .filter(|m| doomed.contains(&m.room_id))
+            .map(|m| m.id.clone())
+            .collect();
+        for id in messages {
+            self.remove_message_locked(&id);
+        }
+        // Threads first, so each parent has no children left when it goes.
+        for id in doomed.iter().rev() {
+            self.remove_thread_locked(id, false);
+        }
+        self.rooms_removed_at = self.last_id;
+        for u in self.users.values_mut() {
+            u.unread = None;
+        }
     }
 
     /// Follows u leaving the private room r: u can no longer see the threads
@@ -915,7 +961,7 @@ impl State {
         let only_user = parse_string(&req.params, "user_id", false)?;
         let has_user = req.params.contains_key("user_id");
         let mut since = parse_bound(&req.params, "latest_log_id")?;
-        // A delta cannot name the threads retention removed since then
+        // A delta cannot name the rooms removed since then
         // (§4.2.1 asks that it list deleted rooms in left), so the listing
         // is then full, which a server may always send.
         if since.is_some_and(|since| since <= self.rooms_removed_at) {

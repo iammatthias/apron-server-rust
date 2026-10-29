@@ -277,7 +277,7 @@ pub static GROUPS: &[Group] = &[
         name: "History",
         namespace: "history",
         options: &[
-            spec!("retention", Str, history.retention, [], [], "Delete messages, reactions, and their uploads older than this, such as 168h, checking hourly; emptied threads go, other rooms stay (default: keep forever; not in the Go aprond)"),
+            spec!("retention", Str, history.retention, [], [], "Delete messages, reactions, and their uploads older than this, such as 168h, checking hourly; emptied threads and private rooms go, other rooms stay (default: keep forever; not in the Go aprond)"),
         ],
     },
     Group {

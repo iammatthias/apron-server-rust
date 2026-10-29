@@ -16,8 +16,9 @@ impl State {
     /// Discards the records logged more than Config.retention before `now`,
     /// and the state they alone held: a message whose latest snapshot went,
     /// with its hosted files, a reaction set whose record went, and a thread
-    /// whose whole log went and that has no threads left. Permanent rooms,
-    /// those without a parent, stay and keep their latest_log_id. Members
+    /// or private room whose whole log went and that has no threads left.
+    /// Permanent rooms, public ones without a parent, stay and keep their
+    /// latest_log_id. Members
     /// of a removed thread, and everyone else who could see it, get
     /// room_update left; the members of every other room whose
     /// history_log_id moved get room_update updated.
@@ -66,10 +67,10 @@ impl State {
         while let Some(id) = self
             .rooms
             .values()
-            .find(|r| r.parent.is_some() && r.latest_id < floor && r.children.is_empty())
+            .find(|r| r.removable() && r.latest_id < floor && r.children.is_empty())
             .map(|r| r.id.clone())
         {
-            self.remove_thread_locked(&id);
+            self.remove_thread_locked(&id, true);
             self.rooms_removed_at = self.last_id;
         }
         for (id, start) in starts {
@@ -85,7 +86,7 @@ impl State {
     }
 
     /// Forgets a message and its hosted embeds.
-    fn remove_message_locked(&mut self, message_id: &str) {
+    pub(super) fn remove_message_locked(&mut self, message_id: &str) {
         let embeds: Vec<String> = self
             .embeds
             .values()
@@ -99,13 +100,13 @@ impl State {
         self.touch_message(message_id);
     }
 
-    /// Removes a thread retention emptied, telling everyone who could see it
-    /// that it is gone.
-    fn remove_thread_locked(&mut self, room_id: &str) {
+    /// Removes a thread or private room, and with `announce` tells
+    /// everyone who could see it that it is gone.
+    pub(super) fn remove_thread_locked(&mut self, room_id: &str, announce: bool) {
         let (everyone, audience) = self.audience(room_id);
         let frame = room_update("left", vec![obj! {"room_id" => room_id}.into()]);
         for user_id in self.users.keys() {
-            if everyone || audience.contains(user_id) {
+            if announce && (everyone || audience.contains(user_id)) {
                 self.send_to_user(user_id, &frame);
             }
         }

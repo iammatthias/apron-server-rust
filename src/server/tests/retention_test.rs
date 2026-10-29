@@ -376,3 +376,30 @@ fn test_retention_survives_restart() {
     drop(a);
     server.stop();
 }
+
+/// A private room whose whole log expired goes like a thread, its members
+/// told it left; a top-level room an admin made stays.
+#[test]
+fn test_retention_removes_expired_private_rooms() {
+    let server = new_test_server(retention_config());
+    let mut a = dial_test_client(&server);
+    make_account(&server, &a.user_id);
+    grant_role(&server, &a.user_id, "mod");
+    let (private, _) = save_room(&mut a, "private", obj! {"private" => true});
+    let (top, _) = save_room(&mut a, "top", obj! {"title" => "Top"});
+    let (new, _) = save(&mut a, "new", obj! {"body" => obj! {"text" => "new"}});
+    a.drain();
+    expire_before(&server, &new);
+    let left: Vec<Object> = a
+        .drain()
+        .iter()
+        .map(|f| notification_params(f, "room_update"))
+        .filter(|p| p.contains_key("left"))
+        .collect();
+    assert_eq!(
+        left,
+        vec![obj! {"left" => vec![Json::from(obj! {"room_id" => private.as_str()})]}]
+    );
+    let st = server.app.lock();
+    assert!(!st.rooms.contains_key(&private) && st.rooms.contains_key(&top));
+}
