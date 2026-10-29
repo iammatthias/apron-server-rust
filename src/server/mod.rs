@@ -10,6 +10,7 @@ pub mod embeds;
 pub mod invites;
 pub mod messages;
 pub mod outbound;
+pub mod passkeys;
 pub mod persist;
 pub mod protocol;
 pub mod push;

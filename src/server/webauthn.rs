@@ -34,6 +34,16 @@ pub const SESSION_LIFETIME: Duration = Duration::from_hours(30 * 24);
 pub struct PasskeyUser {
     pub handle: Vec<u8>,
     pub credentials: Vec<Credential>,
+    /// When each credential, by its ID, was added and last used, for
+    /// `/passkeys`; one stored before these were kept has none.
+    pub times: BTreeMap<Vec<u8>, PasskeyTimes>,
+}
+
+/// When a passkey was added and last signed in with, in Unix milliseconds.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct PasskeyTimes {
+    pub added: i64,
+    pub used: i64,
 }
 
 /// The `webauthn::User` of one ceremony: Go's `passkeyUser`, or, for a
@@ -254,7 +264,7 @@ impl State {
                 None => {
                     fresh = PasskeyUser {
                         handle: rand::text().into_bytes(),
-                        credentials: Vec::new(),
+                        ..PasskeyUser::default()
                     };
                     &fresh
                 }
@@ -401,6 +411,11 @@ impl State {
                 return Err(denied("Registration changed; try again"));
             }
             let credential_id = credential.id.0.clone();
+            let ms = time::now().unix_milli();
+            let times = PasskeyTimes {
+                added: ms,
+                used: ms,
+            };
             if new_account {
                 // Cloudflare's finish fails the same way when another
                 // registration took the user_id since begin.
@@ -419,20 +434,29 @@ impl State {
                 account.passkey = Some(PasskeyUser {
                     handle: ceremony.handle.clone(),
                     credentials: vec![credential],
+                    times: BTreeMap::from([(credential_id.clone(), times)]),
                 });
                 self.users.insert(user_id.clone(), account);
                 self.grant_roles_locked(&user_id);
             } else {
-                self.users
+                let passkey = self
+                    .users
                     .get_mut(&user_id)
                     .expect("the connection's user")
                     .passkey
                     .get_or_insert_with(|| PasskeyUser {
                         handle: ceremony.handle.clone(),
-                        credentials: Vec::new(),
-                    })
-                    .credentials
-                    .push(credential);
+                        ..PasskeyUser::default()
+                    });
+                passkey.credentials.push(credential);
+                passkey.times.insert(credential_id.clone(), times);
+                // An unexpected passkey can be spotted and removed with
+                // /passkeys.
+                self.send_to_others_locked(
+                    &user_id,
+                    c,
+                    "A passkey was added to your account from another connection. If it wasn't you, remove it with `/passkeys`.",
+                );
             }
             self.touch_user(&user_id);
             self.credentials.insert(credential_id, user_id.clone());
@@ -479,6 +503,12 @@ impl State {
                     *stored = credential.clone();
                 }
             }
+            passkey
+                .times
+                .entry(credential.id.0.clone())
+                .or_default()
+                .used = time::now().unix_milli();
+            self.touch_user(&user_id);
             user_id
         };
         // A passkey added to the signed-in connection's account, and a
