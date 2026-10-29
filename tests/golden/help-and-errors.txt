@@ -1,0 +1,543 @@
+$ aprond --help
+exit 0
+--- stdout
+Usage:
+  aprond [OPTIONS]
+
+Application Options:
+      --config=                   Load settings from a TOML file; flags given
+                                  on the command line take precedence (use
+                                  --print-config for an example)
+      --print-config              Print the current settings as TOML and exit
+      --addr=                     HTTP and WebSocket listen address; :8080
+                                  listens on every interface (default:
+                                  127.0.0.1:8080)
+      --static-dir=               Directory containing the built frontend
+      --origin=                   Allowed WebSocket origin pattern; repeat for
+                                  more (default: localhost, 127.0.0.1, and ::1)
+      --allow-any-origin          Disable WebSocket origin checks
+      --public-url=               External base URL of upload, file, and stream
+                                  links, such as https://chat.example (default:
+                                  each request's host, or https://<tls.domain>)
+      --max-connections=          Maximum concurrent WebSockets; 0 is unlimited
+      --max-listener-connections= Maximum concurrent TCP connections on the
+                                  listener, HTTP included; 0 is unlimited
+      --messages-per-minute=      Burst of new messages, room_set requests, and
+                                  /avatar commands per user, refilled over a
+                                  minute; 0 is unlimited
+      --max-listed-members=       Members listed per room in room_list and
+                                  room_update; a larger room lists its most
+                                  recently active ones and member_count. 0 is
+                                  unlimited (default: 1000)
+      --max-private-rooms=        Top-level private rooms one user may be in at
+                                  once, created or added to, such as on a
+                                  public deployment; 0 is unlimited
+      --debug-addr=               Listen address for unauthenticated pprof and
+                                  expvar under /debug/, such as 127.0.0.1:6060;
+                                  empty disables
+      --store=                    Where state is kept: sqlite:<path> for a
+                                  SQLite database, or memory to keep nothing
+                                  across restarts (default:
+                                  sqlite:/home/aprond/Library/Application
+                                  Support/aprond/aprond.db)
+      --client-ip-header=         Request header a reverse proxy puts the
+                                  client's address in, such as X-Forwarded-For
+                                  (its last entry) or X-Real-IP, for per-client
+                                  limits; set only behind a proxy that sets it
+      --welcome=                  Markdown clients show on their sign-in screen
+                                  (server.welcome), such as how this server's
+                                  sign-in methods fit together
+      --role=                     Grant a role to an account as role=user_id or
+                                  role=email, such as admin=ada; repeat for
+                                  more. admin and moderator may remove others
+                                  from rooms
+
+Passkeys:
+      --webauthn.rp-id=           Passkey relying party domain; empty disables
+                                  passkeys (default: localhost)
+      --webauthn.origin=          Exact frontend origin for passkeys; repeat
+                                  for more (default: http://localhost:5173,
+                                  http://localhost:8080)
+
+Uploads:
+      --upload.dir=               Directory holding uploaded files; upload
+                                  files the store does not refer to are removed
+                                  at start (default:
+                                  /home/aprond/Library/Application
+                                  Support/aprond/uploads)
+      --upload.max-mb=            Maximum size of one upload, in MiB (default:
+                                  20)
+      --upload.max-message-mb=    Maximum total size of one message's uploads,
+                                  in MiB (default: 20)
+      --upload.max-storage-mb=    Total size of hosted uploads, in MiB, beyond
+                                  which the oldest are removed from their
+                                  messages (default: 1000)
+
+Email sign-in:
+      --email.enable              Offer email sign-in (off by default)
+      --email.sender=[smtp|log]   How email sign-in codes are delivered, with
+                                  --email.enable: smtp sends them, log writes
+                                  them to the server log (development only;
+                                  refused with --public-url or --tls.domain)
+                                  (default: smtp)
+      --email.link-url=           Page that sign-in links in emails open, such
+                                  as https://chat.example/, with a sign-in
+                                  token in its fragment (default: --public-url;
+                                  empty sends codes without links)
+      --email.from=               Sender address of sign-in emails, for
+                                  --email.sender smtp
+      --email.smtp-addr=          SMTP relay as host:port, for --email.sender
+                                  smtp: STARTTLS is required (such as :587), or
+                                  TLS from the start on port 465
+      --email.smtp-user=          SMTP user name; empty sends without
+                                  authentication
+      --email.smtp-password=      SMTP password
+      --email.smtp-insecure       Send through a relay that does not offer
+                                  STARTTLS, in cleartext (a relay on the same
+                                  host only)
+
+Push:
+      --push.disable              Do not offer push registration
+      --push.allow-insecure       Accept http push endpoints and ones on
+                                  internal addresses, so any client can make
+                                  the server POST into its network (tests only;
+                                  refused with --public-url or --tls.domain)
+      --push.vapid-private-key=   Web Push VAPID private key, the P-256 scalar
+                                  in base64url as web-push tools print it
+                                  (default: one generated at the first start
+                                  and kept in the store)
+      --push.vapid-subject=       Contact push services may use, a mailto: or
+                                  https: URL, sent with Web Push (default:
+                                  --public-url)
+
+TLS:
+      --tls.domain=               Serve HTTPS with Let's Encrypt certificates
+                                  for this domain; repeat for more. Replaces
+                                  --addr with --tls.addr
+      --tls.addr=                 HTTPS listen address when --tls.domain is set
+                                  (default: :443)
+      --tls.http-addr=            HTTP listen address for ACME challenges and
+                                  redirects to HTTPS when --tls.domain is set
+                                  (default: :80)
+      --tls.cache-dir=            Directory caching certificates (default:
+                                  aprond/autocert in the user cache directory)
+                                  (default:
+                                  /home/aprond/Library/Caches/aprond/auto-
+
+                                  cert)
+      --tls.email=                Contact email given to Let's Encrypt
+
+Apple:
+      --apple.app-id=             iOS app allowed to use this server's
+                                  passkeys, as <team ID>.<bundle ID>, listed in
+                                  /.well-known/apple-app-site-association;
+                                  repeat for more (not in the Go aprond)
+
+Link previews:
+      --unfurl.enable             Fetch the pages that messages link to and
+                                  attach their OpenGraph previews, with images
+                                  hosted here; the server then requests any
+                                  public http(s) URL a user posts (off by
+                                  default; not in the Go aprond)
+
+Guests:
+      --guest.read-only           Guests may read but not post, react, join,
+                                  leave, or make rooms; server.ext.settings
+                                  says so (off by default; not in the Go aprond)
+
+History:
+      --history.retention=        Delete messages, reactions, and their uploads
+                                  older than this, such as 168h, checking
+                                  hourly; emptied threads go, other rooms stay
+                                  (default: keep forever; not in the Go aprond)
+
+Help Options:
+  -h, --help                      Show this help message
+
+--- stderr
+
+
+$ aprond -h
+exit 0
+--- stdout
+Usage:
+  aprond [OPTIONS]
+
+Application Options:
+      --config=                   Load settings from a TOML file; flags given
+                                  on the command line take precedence (use
+                                  --print-config for an example)
+      --print-config              Print the current settings as TOML and exit
+      --addr=                     HTTP and WebSocket listen address; :8080
+                                  listens on every interface (default:
+                                  127.0.0.1:8080)
+      --static-dir=               Directory containing the built frontend
+      --origin=                   Allowed WebSocket origin pattern; repeat for
+                                  more (default: localhost, 127.0.0.1, and ::1)
+      --allow-any-origin          Disable WebSocket origin checks
+      --public-url=               External base URL of upload, file, and stream
+                                  links, such as https://chat.example (default:
+                                  each request's host, or https://<tls.domain>)
+      --max-connections=          Maximum concurrent WebSockets; 0 is unlimited
+      --max-listener-connections= Maximum concurrent TCP connections on the
+                                  listener, HTTP included; 0 is unlimited
+      --messages-per-minute=      Burst of new messages, room_set requests, and
+                                  /avatar commands per user, refilled over a
+                                  minute; 0 is unlimited
+      --max-listed-members=       Members listed per room in room_list and
+                                  room_update; a larger room lists its most
+                                  recently active ones and member_count. 0 is
+                                  unlimited (default: 1000)
+      --max-private-rooms=        Top-level private rooms one user may be in at
+                                  once, created or added to, such as on a
+                                  public deployment; 0 is unlimited
+      --debug-addr=               Listen address for unauthenticated pprof and
+                                  expvar under /debug/, such as 127.0.0.1:6060;
+                                  empty disables
+      --store=                    Where state is kept: sqlite:<path> for a
+                                  SQLite database, or memory to keep nothing
+                                  across restarts (default:
+                                  sqlite:/home/aprond/Library/Application
+                                  Support/aprond/aprond.db)
+      --client-ip-header=         Request header a reverse proxy puts the
+                                  client's address in, such as X-Forwarded-For
+                                  (its last entry) or X-Real-IP, for per-client
+                                  limits; set only behind a proxy that sets it
+      --welcome=                  Markdown clients show on their sign-in screen
+                                  (server.welcome), such as how this server's
+                                  sign-in methods fit together
+      --role=                     Grant a role to an account as role=user_id or
+                                  role=email, such as admin=ada; repeat for
+                                  more. admin and moderator may remove others
+                                  from rooms
+
+Passkeys:
+      --webauthn.rp-id=           Passkey relying party domain; empty disables
+                                  passkeys (default: localhost)
+      --webauthn.origin=          Exact frontend origin for passkeys; repeat
+                                  for more (default: http://localhost:5173,
+                                  http://localhost:8080)
+
+Uploads:
+      --upload.dir=               Directory holding uploaded files; upload
+                                  files the store does not refer to are removed
+                                  at start (default:
+                                  /home/aprond/Library/Application
+                                  Support/aprond/uploads)
+      --upload.max-mb=            Maximum size of one upload, in MiB (default:
+                                  20)
+      --upload.max-message-mb=    Maximum total size of one message's uploads,
+                                  in MiB (default: 20)
+      --upload.max-storage-mb=    Total size of hosted uploads, in MiB, beyond
+                                  which the oldest are removed from their
+                                  messages (default: 1000)
+
+Email sign-in:
+      --email.enable              Offer email sign-in (off by default)
+      --email.sender=[smtp|log]   How email sign-in codes are delivered, with
+                                  --email.enable: smtp sends them, log writes
+                                  them to the server log (development only;
+                                  refused with --public-url or --tls.domain)
+                                  (default: smtp)
+      --email.link-url=           Page that sign-in links in emails open, such
+                                  as https://chat.example/, with a sign-in
+                                  token in its fragment (default: --public-url;
+                                  empty sends codes without links)
+      --email.from=               Sender address of sign-in emails, for
+                                  --email.sender smtp
+      --email.smtp-addr=          SMTP relay as host:port, for --email.sender
+                                  smtp: STARTTLS is required (such as :587), or
+                                  TLS from the start on port 465
+      --email.smtp-user=          SMTP user name; empty sends without
+                                  authentication
+      --email.smtp-password=      SMTP password
+      --email.smtp-insecure       Send through a relay that does not offer
+                                  STARTTLS, in cleartext (a relay on the same
+                                  host only)
+
+Push:
+      --push.disable              Do not offer push registration
+      --push.allow-insecure       Accept http push endpoints and ones on
+                                  internal addresses, so any client can make
+                                  the server POST into its network (tests only;
+                                  refused with --public-url or --tls.domain)
+      --push.vapid-private-key=   Web Push VAPID private key, the P-256 scalar
+                                  in base64url as web-push tools print it
+                                  (default: one generated at the first start
+                                  and kept in the store)
+      --push.vapid-subject=       Contact push services may use, a mailto: or
+                                  https: URL, sent with Web Push (default:
+                                  --public-url)
+
+TLS:
+      --tls.domain=               Serve HTTPS with Let's Encrypt certificates
+                                  for this domain; repeat for more. Replaces
+                                  --addr with --tls.addr
+      --tls.addr=                 HTTPS listen address when --tls.domain is set
+                                  (default: :443)
+      --tls.http-addr=            HTTP listen address for ACME challenges and
+                                  redirects to HTTPS when --tls.domain is set
+                                  (default: :80)
+      --tls.cache-dir=            Directory caching certificates (default:
+                                  aprond/autocert in the user cache directory)
+                                  (default:
+                                  /home/aprond/Library/Caches/aprond/auto-
+
+                                  cert)
+      --tls.email=                Contact email given to Let's Encrypt
+
+Apple:
+      --apple.app-id=             iOS app allowed to use this server's
+                                  passkeys, as <team ID>.<bundle ID>, listed in
+                                  /.well-known/apple-app-site-association;
+                                  repeat for more (not in the Go aprond)
+
+Link previews:
+      --unfurl.enable             Fetch the pages that messages link to and
+                                  attach their OpenGraph previews, with images
+                                  hosted here; the server then requests any
+                                  public http(s) URL a user posts (off by
+                                  default; not in the Go aprond)
+
+Guests:
+      --guest.read-only           Guests may read but not post, react, join,
+                                  leave, or make rooms; server.ext.settings
+                                  says so (off by default; not in the Go aprond)
+
+History:
+      --history.retention=        Delete messages, reactions, and their uploads
+                                  older than this, such as 168h, checking
+                                  hourly; emptied threads go, other rooms stay
+                                  (default: keep forever; not in the Go aprond)
+
+Help Options:
+  -h, --help                      Show this help message
+
+--- stderr
+
+
+$ aprond --addr :1 -h
+exit 0
+--- stdout
+Usage:
+  aprond [OPTIONS]
+
+Application Options:
+      --config=                   Load settings from a TOML file; flags given
+                                  on the command line take precedence (use
+                                  --print-config for an example)
+      --print-config              Print the current settings as TOML and exit
+      --addr=                     HTTP and WebSocket listen address; :8080
+                                  listens on every interface (default:
+                                  127.0.0.1:8080)
+      --static-dir=               Directory containing the built frontend
+      --origin=                   Allowed WebSocket origin pattern; repeat for
+                                  more (default: localhost, 127.0.0.1, and ::1)
+      --allow-any-origin          Disable WebSocket origin checks
+      --public-url=               External base URL of upload, file, and stream
+                                  links, such as https://chat.example (default:
+                                  each request's host, or https://<tls.domain>)
+      --max-connections=          Maximum concurrent WebSockets; 0 is unlimited
+      --max-listener-connections= Maximum concurrent TCP connections on the
+                                  listener, HTTP included; 0 is unlimited
+      --messages-per-minute=      Burst of new messages, room_set requests, and
+                                  /avatar commands per user, refilled over a
+                                  minute; 0 is unlimited
+      --max-listed-members=       Members listed per room in room_list and
+                                  room_update; a larger room lists its most
+                                  recently active ones and member_count. 0 is
+                                  unlimited (default: 1000)
+      --max-private-rooms=        Top-level private rooms one user may be in at
+                                  once, created or added to, such as on a
+                                  public deployment; 0 is unlimited
+      --debug-addr=               Listen address for unauthenticated pprof and
+                                  expvar under /debug/, such as 127.0.0.1:6060;
+                                  empty disables
+      --store=                    Where state is kept: sqlite:<path> for a
+                                  SQLite database, or memory to keep nothing
+                                  across restarts (default:
+                                  sqlite:/home/aprond/Library/Application
+                                  Support/aprond/aprond.db)
+      --client-ip-header=         Request header a reverse proxy puts the
+                                  client's address in, such as X-Forwarded-For
+                                  (its last entry) or X-Real-IP, for per-client
+                                  limits; set only behind a proxy that sets it
+      --welcome=                  Markdown clients show on their sign-in screen
+                                  (server.welcome), such as how this server's
+                                  sign-in methods fit together
+      --role=                     Grant a role to an account as role=user_id or
+                                  role=email, such as admin=ada; repeat for
+                                  more. admin and moderator may remove others
+                                  from rooms
+
+Passkeys:
+      --webauthn.rp-id=           Passkey relying party domain; empty disables
+                                  passkeys (default: localhost)
+      --webauthn.origin=          Exact frontend origin for passkeys; repeat
+                                  for more (default: http://localhost:5173,
+                                  http://localhost:8080)
+
+Uploads:
+      --upload.dir=               Directory holding uploaded files; upload
+                                  files the store does not refer to are removed
+                                  at start (default:
+                                  /home/aprond/Library/Application
+                                  Support/aprond/uploads)
+      --upload.max-mb=            Maximum size of one upload, in MiB (default:
+                                  20)
+      --upload.max-message-mb=    Maximum total size of one message's uploads,
+                                  in MiB (default: 20)
+      --upload.max-storage-mb=    Total size of hosted uploads, in MiB, beyond
+                                  which the oldest are removed from their
+                                  messages (default: 1000)
+
+Email sign-in:
+      --email.enable              Offer email sign-in (off by default)
+      --email.sender=[smtp|log]   How email sign-in codes are delivered, with
+                                  --email.enable: smtp sends them, log writes
+                                  them to the server log (development only;
+                                  refused with --public-url or --tls.domain)
+                                  (default: smtp)
+      --email.link-url=           Page that sign-in links in emails open, such
+                                  as https://chat.example/, with a sign-in
+                                  token in its fragment (default: --public-url;
+                                  empty sends codes without links)
+      --email.from=               Sender address of sign-in emails, for
+                                  --email.sender smtp
+      --email.smtp-addr=          SMTP relay as host:port, for --email.sender
+                                  smtp: STARTTLS is required (such as :587), or
+                                  TLS from the start on port 465
+      --email.smtp-user=          SMTP user name; empty sends without
+                                  authentication
+      --email.smtp-password=      SMTP password
+      --email.smtp-insecure       Send through a relay that does not offer
+                                  STARTTLS, in cleartext (a relay on the same
+                                  host only)
+
+Push:
+      --push.disable              Do not offer push registration
+      --push.allow-insecure       Accept http push endpoints and ones on
+                                  internal addresses, so any client can make
+                                  the server POST into its network (tests only;
+                                  refused with --public-url or --tls.domain)
+      --push.vapid-private-key=   Web Push VAPID private key, the P-256 scalar
+                                  in base64url as web-push tools print it
+                                  (default: one generated at the first start
+                                  and kept in the store)
+      --push.vapid-subject=       Contact push services may use, a mailto: or
+                                  https: URL, sent with Web Push (default:
+                                  --public-url)
+
+TLS:
+      --tls.domain=               Serve HTTPS with Let's Encrypt certificates
+                                  for this domain; repeat for more. Replaces
+                                  --addr with --tls.addr
+      --tls.addr=                 HTTPS listen address when --tls.domain is set
+                                  (default: :443)
+      --tls.http-addr=            HTTP listen address for ACME challenges and
+                                  redirects to HTTPS when --tls.domain is set
+                                  (default: :80)
+      --tls.cache-dir=            Directory caching certificates (default:
+                                  aprond/autocert in the user cache directory)
+                                  (default:
+                                  /home/aprond/Library/Caches/aprond/auto-
+
+                                  cert)
+      --tls.email=                Contact email given to Let's Encrypt
+
+Apple:
+      --apple.app-id=             iOS app allowed to use this server's
+                                  passkeys, as <team ID>.<bundle ID>, listed in
+                                  /.well-known/apple-app-site-association;
+                                  repeat for more (not in the Go aprond)
+
+Link previews:
+      --unfurl.enable             Fetch the pages that messages link to and
+                                  attach their OpenGraph previews, with images
+                                  hosted here; the server then requests any
+                                  public http(s) URL a user posts (off by
+                                  default; not in the Go aprond)
+
+Guests:
+      --guest.read-only           Guests may read but not post, react, join,
+                                  leave, or make rooms; server.ext.settings
+                                  says so (off by default; not in the Go aprond)
+
+History:
+      --history.retention=        Delete messages, reactions, and their uploads
+                                  older than this, such as 168h, checking
+                                  hourly; emptied threads go, other rooms stay
+                                  (default: keep forever; not in the Go aprond)
+
+Help Options:
+  -h, --help                      Show this help message
+
+--- stderr
+
+
+$ aprond --bogus
+exit 1
+--- stdout
+--- stderr
+unknown flag `bogus'
+
+$ aprond -x
+exit 1
+--- stdout
+--- stderr
+unknown flag `x'
+
+$ aprond --addr
+exit 1
+--- stdout
+--- stderr
+expected argument for flag `--addr'
+
+$ aprond --addr --store
+exit 1
+--- stdout
+--- stderr
+expected argument for flag `--addr', but got option `--store'
+
+$ aprond --max-connections many
+exit 1
+--- stdout
+--- stderr
+invalid argument for flag `--max-connections' (expected int): strconv.ParseInt: parsing "many": invalid syntax
+
+$ aprond --push.disable=true
+exit 1
+--- stdout
+--- stderr
+bool flag `--push.disable' cannot have an argument
+
+$ aprond --email.sender mail
+exit 1
+--- stdout
+--- stderr
+Invalid value `mail' for option `--email.sender'. Allowed values are: smtp or log
+
+$ aprond --help=1
+exit 1
+--- stdout
+--- stderr
+bool flag `-h, --help' cannot have an argument
+
+$ aprond --config /nonexistent/aprond.toml
+exit 1
+--- stdout
+--- stderr
+Failed to load /nonexistent/aprond.toml: open /nonexistent/aprond.toml: no such file or directory
+
+$ aprond --config $TMP/aprond.toml
+exit 1
+--- stdout
+--- stderr
+Failed to load $TMP/aprond.toml: unknown setting "upload.max"
+
+$ aprond --config $TMP2/aprond.toml
+exit 1
+--- stdout
+--- stderr
+Failed to load $TMP2/aprond.toml: setting "max-connections": strconv.ParseInt: parsing "many": invalid syntax
+

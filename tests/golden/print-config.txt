@@ -1,0 +1,597 @@
+$ aprond --print-config
+exit 0
+--- stdout
+# HTTP and WebSocket listen address; :8080 listens on every interface
+addr = "127.0.0.1:8080"
+
+# Directory containing the built frontend
+static-dir = ""
+
+# Allowed WebSocket origin pattern; repeat for more (default: localhost, 127.0.0.1, and ::1)
+# origin = []
+
+# Disable WebSocket origin checks
+allow-any-origin = false
+
+# External base URL of upload, file, and stream links, such as https://chat.example (default: each request's host, or https://<tls.domain>)
+public-url = ""
+
+# Maximum concurrent WebSockets; 0 is unlimited
+max-connections = 0
+
+# Maximum concurrent TCP connections on the listener, HTTP included; 0 is unlimited
+max-listener-connections = 0
+
+# Burst of new messages, room_set requests, and /avatar commands per user, refilled over a minute; 0 is unlimited
+messages-per-minute = 0
+
+# Members listed per room in room_list and room_update; a larger room lists its most recently active ones and member_count. 0 is unlimited
+max-listed-members = 1000
+
+# Top-level private rooms one user may be in at once, created or added to, such as on a public deployment; 0 is unlimited
+max-private-rooms = 0
+
+# Listen address for unauthenticated pprof and expvar under /debug/, such as 127.0.0.1:6060; empty disables
+debug-addr = ""
+
+# Where state is kept: sqlite:<path> for a SQLite database, or memory to keep nothing across restarts
+store = "sqlite:/home/aprond/Library/Application Support/aprond/aprond.db"
+
+# Request header a reverse proxy puts the client's address in, such as X-Forwarded-For (its last entry) or X-Real-IP, for per-client limits; set only behind a proxy that sets it
+client-ip-header = ""
+
+# Markdown clients show on their sign-in screen (server.welcome), such as how this server's sign-in methods fit together
+welcome = ""
+
+# Grant a role to an account as role=user_id or role=email, such as admin=ada; repeat for more. admin and moderator may remove others from rooms
+# role = []
+
+[webauthn]
+
+# Passkey relying party domain; empty disables passkeys
+rp-id = "localhost"
+
+# Exact frontend origin for passkeys; repeat for more
+origin = ["http://localhost:5173", "http://localhost:8080"]
+
+[upload]
+
+# Directory holding uploaded files; upload files the store does not refer to are removed at start
+dir = "/home/aprond/Library/Application Support/aprond/uploads"
+
+# Maximum size of one upload, in MiB
+max-mb = 20
+
+# Maximum total size of one message's uploads, in MiB
+max-message-mb = 20
+
+# Total size of hosted uploads, in MiB, beyond which the oldest are removed from their messages
+max-storage-mb = 1000
+
+[email]
+
+# Offer email sign-in (off by default)
+enable = false
+
+# How email sign-in codes are delivered, with --email.enable: smtp sends them, log writes them to the server log (development only; refused with --public-url or --tls.domain)
+sender = "smtp"
+
+# Page that sign-in links in emails open, such as https://chat.example/, with a sign-in token in its fragment (default: --public-url; empty sends codes without links)
+link-url = ""
+
+# Sender address of sign-in emails, for --email.sender smtp
+from = ""
+
+# SMTP relay as host:port, for --email.sender smtp: STARTTLS is required (such as :587), or TLS from the start on port 465
+smtp-addr = ""
+
+# SMTP user name; empty sends without authentication
+smtp-user = ""
+
+# SMTP password
+smtp-password = ""
+
+# Send through a relay that does not offer STARTTLS, in cleartext (a relay on the same host only)
+smtp-insecure = false
+
+[push]
+
+# Do not offer push registration
+disable = false
+
+# Accept http push endpoints and ones on internal addresses, so any client can make the server POST into its network (tests only; refused with --public-url or --tls.domain)
+allow-insecure = false
+
+# Web Push VAPID private key, the P-256 scalar in base64url as web-push tools print it (default: one generated at the first start and kept in the store)
+vapid-private-key = ""
+
+# Contact push services may use, a mailto: or https: URL, sent with Web Push (default: --public-url)
+vapid-subject = ""
+
+[tls]
+
+# Serve HTTPS with Let's Encrypt certificates for this domain; repeat for more. Replaces --addr with --tls.addr
+# domain = []
+
+# HTTPS listen address when --tls.domain is set
+addr = ":443"
+
+# HTTP listen address for ACME challenges and redirects to HTTPS when --tls.domain is set
+http-addr = ":80"
+
+# Directory caching certificates (default: aprond/autocert in the user cache directory)
+cache-dir = "/home/aprond/Library/Caches/aprond/autocert"
+
+# Contact email given to Let's Encrypt
+email = ""
+
+[apple]
+
+# iOS app allowed to use this server's passkeys, as <team ID>.<bundle ID>, listed in /.well-known/apple-app-site-association; repeat for more (not in the Go aprond)
+# app-id = []
+
+[unfurl]
+
+# Fetch the pages that messages link to and attach their OpenGraph previews, with images hosted here; the server then requests any public http(s) URL a user posts (off by default; not in the Go aprond)
+enable = false
+
+[guest]
+
+# Guests may read but not post, react, join, leave, or make rooms; server.ext.settings says so (off by default; not in the Go aprond)
+read-only = false
+
+[history]
+
+# Delete messages, reactions, and their uploads older than this, such as 168h, checking hourly; emptied threads go, other rooms stay (default: keep forever; not in the Go aprond)
+retention = ""
+--- stderr
+
+
+$ aprond --print-config --origin https://a.example --origin https://b.example --push.disable --tls.domain chat.example --tls.domain www.chat.example --role admin=ada
+exit 0
+--- stdout
+# HTTP and WebSocket listen address; :8080 listens on every interface
+addr = "127.0.0.1:8080"
+
+# Directory containing the built frontend
+static-dir = ""
+
+# Allowed WebSocket origin pattern; repeat for more (default: localhost, 127.0.0.1, and ::1)
+origin = ["https://a.example", "https://b.example"]
+
+# Disable WebSocket origin checks
+allow-any-origin = false
+
+# External base URL of upload, file, and stream links, such as https://chat.example (default: each request's host, or https://<tls.domain>)
+public-url = ""
+
+# Maximum concurrent WebSockets; 0 is unlimited
+max-connections = 0
+
+# Maximum concurrent TCP connections on the listener, HTTP included; 0 is unlimited
+max-listener-connections = 0
+
+# Burst of new messages, room_set requests, and /avatar commands per user, refilled over a minute; 0 is unlimited
+messages-per-minute = 0
+
+# Members listed per room in room_list and room_update; a larger room lists its most recently active ones and member_count. 0 is unlimited
+max-listed-members = 1000
+
+# Top-level private rooms one user may be in at once, created or added to, such as on a public deployment; 0 is unlimited
+max-private-rooms = 0
+
+# Listen address for unauthenticated pprof and expvar under /debug/, such as 127.0.0.1:6060; empty disables
+debug-addr = ""
+
+# Where state is kept: sqlite:<path> for a SQLite database, or memory to keep nothing across restarts
+store = "sqlite:/home/aprond/Library/Application Support/aprond/aprond.db"
+
+# Request header a reverse proxy puts the client's address in, such as X-Forwarded-For (its last entry) or X-Real-IP, for per-client limits; set only behind a proxy that sets it
+client-ip-header = ""
+
+# Markdown clients show on their sign-in screen (server.welcome), such as how this server's sign-in methods fit together
+welcome = ""
+
+# Grant a role to an account as role=user_id or role=email, such as admin=ada; repeat for more. admin and moderator may remove others from rooms
+role = ["admin=ada"]
+
+[webauthn]
+
+# Passkey relying party domain; empty disables passkeys
+rp-id = "localhost"
+
+# Exact frontend origin for passkeys; repeat for more
+origin = ["http://localhost:5173", "http://localhost:8080"]
+
+[upload]
+
+# Directory holding uploaded files; upload files the store does not refer to are removed at start
+dir = "/home/aprond/Library/Application Support/aprond/uploads"
+
+# Maximum size of one upload, in MiB
+max-mb = 20
+
+# Maximum total size of one message's uploads, in MiB
+max-message-mb = 20
+
+# Total size of hosted uploads, in MiB, beyond which the oldest are removed from their messages
+max-storage-mb = 1000
+
+[email]
+
+# Offer email sign-in (off by default)
+enable = false
+
+# How email sign-in codes are delivered, with --email.enable: smtp sends them, log writes them to the server log (development only; refused with --public-url or --tls.domain)
+sender = "smtp"
+
+# Page that sign-in links in emails open, such as https://chat.example/, with a sign-in token in its fragment (default: --public-url; empty sends codes without links)
+link-url = ""
+
+# Sender address of sign-in emails, for --email.sender smtp
+from = ""
+
+# SMTP relay as host:port, for --email.sender smtp: STARTTLS is required (such as :587), or TLS from the start on port 465
+smtp-addr = ""
+
+# SMTP user name; empty sends without authentication
+smtp-user = ""
+
+# SMTP password
+smtp-password = ""
+
+# Send through a relay that does not offer STARTTLS, in cleartext (a relay on the same host only)
+smtp-insecure = false
+
+[push]
+
+# Do not offer push registration
+disable = true
+
+# Accept http push endpoints and ones on internal addresses, so any client can make the server POST into its network (tests only; refused with --public-url or --tls.domain)
+allow-insecure = false
+
+# Web Push VAPID private key, the P-256 scalar in base64url as web-push tools print it (default: one generated at the first start and kept in the store)
+vapid-private-key = ""
+
+# Contact push services may use, a mailto: or https: URL, sent with Web Push (default: --public-url)
+vapid-subject = ""
+
+[tls]
+
+# Serve HTTPS with Let's Encrypt certificates for this domain; repeat for more. Replaces --addr with --tls.addr
+domain = ["chat.example", "www.chat.example"]
+
+# HTTPS listen address when --tls.domain is set
+addr = ":443"
+
+# HTTP listen address for ACME challenges and redirects to HTTPS when --tls.domain is set
+http-addr = ":80"
+
+# Directory caching certificates (default: aprond/autocert in the user cache directory)
+cache-dir = "/home/aprond/Library/Caches/aprond/autocert"
+
+# Contact email given to Let's Encrypt
+email = ""
+
+[apple]
+
+# iOS app allowed to use this server's passkeys, as <team ID>.<bundle ID>, listed in /.well-known/apple-app-site-association; repeat for more (not in the Go aprond)
+# app-id = []
+
+[unfurl]
+
+# Fetch the pages that messages link to and attach their OpenGraph previews, with images hosted here; the server then requests any public http(s) URL a user posts (off by default; not in the Go aprond)
+enable = false
+
+[guest]
+
+# Guests may read but not post, react, join, leave, or make rooms; server.ext.settings says so (off by default; not in the Go aprond)
+read-only = false
+
+[history]
+
+# Delete messages, reactions, and their uploads older than this, such as 168h, checking hourly; emptied threads go, other rooms stay (default: keep forever; not in the Go aprond)
+retention = ""
+--- stderr
+
+
+$ aprond --print-config --welcome Line one
+Say "hi" \ tab	here  del é --webauthn.origin https://only.example --max-connections=0x10 --upload.max-storage-mb -1 --email.sender log --email.enable
+exit 0
+--- stdout
+# HTTP and WebSocket listen address; :8080 listens on every interface
+addr = "127.0.0.1:8080"
+
+# Directory containing the built frontend
+static-dir = ""
+
+# Allowed WebSocket origin pattern; repeat for more (default: localhost, 127.0.0.1, and ::1)
+# origin = []
+
+# Disable WebSocket origin checks
+allow-any-origin = false
+
+# External base URL of upload, file, and stream links, such as https://chat.example (default: each request's host, or https://<tls.domain>)
+public-url = ""
+
+# Maximum concurrent WebSockets; 0 is unlimited
+max-connections = 16
+
+# Maximum concurrent TCP connections on the listener, HTTP included; 0 is unlimited
+max-listener-connections = 0
+
+# Burst of new messages, room_set requests, and /avatar commands per user, refilled over a minute; 0 is unlimited
+messages-per-minute = 0
+
+# Members listed per room in room_list and room_update; a larger room lists its most recently active ones and member_count. 0 is unlimited
+max-listed-members = 1000
+
+# Top-level private rooms one user may be in at once, created or added to, such as on a public deployment; 0 is unlimited
+max-private-rooms = 0
+
+# Listen address for unauthenticated pprof and expvar under /debug/, such as 127.0.0.1:6060; empty disables
+debug-addr = ""
+
+# Where state is kept: sqlite:<path> for a SQLite database, or memory to keep nothing across restarts
+store = "sqlite:/home/aprond/Library/Application Support/aprond/aprond.db"
+
+# Request header a reverse proxy puts the client's address in, such as X-Forwarded-For (its last entry) or X-Real-IP, for per-client limits; set only behind a proxy that sets it
+client-ip-header = ""
+
+# Markdown clients show on their sign-in screen (server.welcome), such as how this server's sign-in methods fit together
+welcome = "Line one\nSay \"hi\" \\ tab\there \u0001 del\u007f é"
+
+# Grant a role to an account as role=user_id or role=email, such as admin=ada; repeat for more. admin and moderator may remove others from rooms
+# role = []
+
+[webauthn]
+
+# Passkey relying party domain; empty disables passkeys
+rp-id = "localhost"
+
+# Exact frontend origin for passkeys; repeat for more
+origin = ["https://only.example"]
+
+[upload]
+
+# Directory holding uploaded files; upload files the store does not refer to are removed at start
+dir = "/home/aprond/Library/Application Support/aprond/uploads"
+
+# Maximum size of one upload, in MiB
+max-mb = 20
+
+# Maximum total size of one message's uploads, in MiB
+max-message-mb = 20
+
+# Total size of hosted uploads, in MiB, beyond which the oldest are removed from their messages
+max-storage-mb = -1
+
+[email]
+
+# Offer email sign-in (off by default)
+enable = true
+
+# How email sign-in codes are delivered, with --email.enable: smtp sends them, log writes them to the server log (development only; refused with --public-url or --tls.domain)
+sender = "log"
+
+# Page that sign-in links in emails open, such as https://chat.example/, with a sign-in token in its fragment (default: --public-url; empty sends codes without links)
+link-url = ""
+
+# Sender address of sign-in emails, for --email.sender smtp
+from = ""
+
+# SMTP relay as host:port, for --email.sender smtp: STARTTLS is required (such as :587), or TLS from the start on port 465
+smtp-addr = ""
+
+# SMTP user name; empty sends without authentication
+smtp-user = ""
+
+# SMTP password
+smtp-password = ""
+
+# Send through a relay that does not offer STARTTLS, in cleartext (a relay on the same host only)
+smtp-insecure = false
+
+[push]
+
+# Do not offer push registration
+disable = false
+
+# Accept http push endpoints and ones on internal addresses, so any client can make the server POST into its network (tests only; refused with --public-url or --tls.domain)
+allow-insecure = false
+
+# Web Push VAPID private key, the P-256 scalar in base64url as web-push tools print it (default: one generated at the first start and kept in the store)
+vapid-private-key = ""
+
+# Contact push services may use, a mailto: or https: URL, sent with Web Push (default: --public-url)
+vapid-subject = ""
+
+[tls]
+
+# Serve HTTPS with Let's Encrypt certificates for this domain; repeat for more. Replaces --addr with --tls.addr
+# domain = []
+
+# HTTPS listen address when --tls.domain is set
+addr = ":443"
+
+# HTTP listen address for ACME challenges and redirects to HTTPS when --tls.domain is set
+http-addr = ":80"
+
+# Directory caching certificates (default: aprond/autocert in the user cache directory)
+cache-dir = "/home/aprond/Library/Caches/aprond/autocert"
+
+# Contact email given to Let's Encrypt
+email = ""
+
+[apple]
+
+# iOS app allowed to use this server's passkeys, as <team ID>.<bundle ID>, listed in /.well-known/apple-app-site-association; repeat for more (not in the Go aprond)
+# app-id = []
+
+[unfurl]
+
+# Fetch the pages that messages link to and attach their OpenGraph previews, with images hosted here; the server then requests any public http(s) URL a user posts (off by default; not in the Go aprond)
+enable = false
+
+[guest]
+
+# Guests may read but not post, react, join, leave, or make rooms; server.ext.settings says so (off by default; not in the Go aprond)
+read-only = false
+
+[history]
+
+# Delete messages, reactions, and their uploads older than this, such as 168h, checking hourly; emptied threads go, other rooms stay (default: keep forever; not in the Go aprond)
+retention = ""
+--- stderr
+
+
+$ aprond --print-config --config $TMP/aprond.toml --upload.max-mb 9
+exit 0
+--- stdout
+# HTTP and WebSocket listen address; :8080 listens on every interface
+addr = "127.0.0.1:8080"
+
+# Directory containing the built frontend
+static-dir = ""
+
+# Allowed WebSocket origin pattern; repeat for more (default: localhost, 127.0.0.1, and ::1)
+# origin = []
+
+# Disable WebSocket origin checks
+allow-any-origin = false
+
+# External base URL of upload, file, and stream links, such as https://chat.example (default: each request's host, or https://<tls.domain>)
+public-url = "https://chat.example"
+
+# Maximum concurrent WebSockets; 0 is unlimited
+max-connections = 0
+
+# Maximum concurrent TCP connections on the listener, HTTP included; 0 is unlimited
+max-listener-connections = 0
+
+# Burst of new messages, room_set requests, and /avatar commands per user, refilled over a minute; 0 is unlimited
+messages-per-minute = 0
+
+# Members listed per room in room_list and room_update; a larger room lists its most recently active ones and member_count. 0 is unlimited
+max-listed-members = 1000
+
+# Top-level private rooms one user may be in at once, created or added to, such as on a public deployment; 0 is unlimited
+max-private-rooms = 0
+
+# Listen address for unauthenticated pprof and expvar under /debug/, such as 127.0.0.1:6060; empty disables
+debug-addr = ""
+
+# Where state is kept: sqlite:<path> for a SQLite database, or memory to keep nothing across restarts
+store = "sqlite:/home/aprond/Library/Application Support/aprond/aprond.db"
+
+# Request header a reverse proxy puts the client's address in, such as X-Forwarded-For (its last entry) or X-Real-IP, for per-client limits; set only behind a proxy that sets it
+client-ip-header = ""
+
+# Markdown clients show on their sign-in screen (server.welcome), such as how this server's sign-in methods fit together
+welcome = ""
+
+# Grant a role to an account as role=user_id or role=email, such as admin=ada; repeat for more. admin and moderator may remove others from rooms
+role = ["admin=ada"]
+
+[webauthn]
+
+# Passkey relying party domain; empty disables passkeys
+rp-id = "localhost"
+
+# Exact frontend origin for passkeys; repeat for more
+origin = ["http://localhost:5173", "http://localhost:8080"]
+
+[upload]
+
+# Directory holding uploaded files; upload files the store does not refer to are removed at start
+dir = "/home/aprond/Library/Application Support/aprond/uploads"
+
+# Maximum size of one upload, in MiB
+max-mb = 9
+
+# Maximum total size of one message's uploads, in MiB
+max-message-mb = 20
+
+# Total size of hosted uploads, in MiB, beyond which the oldest are removed from their messages
+max-storage-mb = 1000
+
+[email]
+
+# Offer email sign-in (off by default)
+enable = false
+
+# How email sign-in codes are delivered, with --email.enable: smtp sends them, log writes them to the server log (development only; refused with --public-url or --tls.domain)
+sender = "smtp"
+
+# Page that sign-in links in emails open, such as https://chat.example/, with a sign-in token in its fragment (default: --public-url; empty sends codes without links)
+link-url = ""
+
+# Sender address of sign-in emails, for --email.sender smtp
+from = ""
+
+# SMTP relay as host:port, for --email.sender smtp: STARTTLS is required (such as :587), or TLS from the start on port 465
+smtp-addr = ""
+
+# SMTP user name; empty sends without authentication
+smtp-user = ""
+
+# SMTP password
+smtp-password = ""
+
+# Send through a relay that does not offer STARTTLS, in cleartext (a relay on the same host only)
+smtp-insecure = false
+
+[push]
+
+# Do not offer push registration
+disable = false
+
+# Accept http push endpoints and ones on internal addresses, so any client can make the server POST into its network (tests only; refused with --public-url or --tls.domain)
+allow-insecure = false
+
+# Web Push VAPID private key, the P-256 scalar in base64url as web-push tools print it (default: one generated at the first start and kept in the store)
+vapid-private-key = ""
+
+# Contact push services may use, a mailto: or https: URL, sent with Web Push (default: --public-url)
+vapid-subject = ""
+
+[tls]
+
+# Serve HTTPS with Let's Encrypt certificates for this domain; repeat for more. Replaces --addr with --tls.addr
+# domain = []
+
+# HTTPS listen address when --tls.domain is set
+addr = ":443"
+
+# HTTP listen address for ACME challenges and redirects to HTTPS when --tls.domain is set
+http-addr = ":80"
+
+# Directory caching certificates (default: aprond/autocert in the user cache directory)
+cache-dir = "/home/aprond/Library/Caches/aprond/autocert"
+
+# Contact email given to Let's Encrypt
+email = ""
+
+[apple]
+
+# iOS app allowed to use this server's passkeys, as <team ID>.<bundle ID>, listed in /.well-known/apple-app-site-association; repeat for more (not in the Go aprond)
+# app-id = []
+
+[unfurl]
+
+# Fetch the pages that messages link to and attach their OpenGraph previews, with images hosted here; the server then requests any public http(s) URL a user posts (off by default; not in the Go aprond)
+enable = false
+
+[guest]
+
+# Guests may read but not post, react, join, leave, or make rooms; server.ext.settings says so (off by default; not in the Go aprond)
+read-only = false
+
+[history]
+
+# Delete messages, reactions, and their uploads older than this, such as 168h, checking hourly; emptied threads go, other rooms stay (default: keep forever; not in the Go aprond)
+retention = ""
+--- stderr
+
+

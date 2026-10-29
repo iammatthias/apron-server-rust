@@ -1,0 +1,42 @@
+$ aprond --upload.dir $TMP/uploads --store memory --addr $BUSY
+exit 1
+--- stdout
+--- stderr
+level=ERROR msg="server stopped" error="listen tcp $BUSY: bind: address already in use"
+
+$ aprond --upload.dir $TMP/uploads --store bogus:1
+exit 1
+--- stdout
+--- stderr
+level=ERROR msg="server stopped" error="unknown store \"bogus:1\"; use memory or sqlite:<path>"
+
+$ aprond --upload.dir $TMP/uploads --store sqlite:
+exit 1
+--- stdout
+--- stderr
+level=ERROR msg="server stopped" error="sqlite store needs a path, such as sqlite:aprond.db"
+
+$ aprond --upload.dir $TMP/uploads --store memory --role nope
+exit 1
+--- stdout
+--- stderr
+level=ERROR msg="server stopped" error="invalid --role \"nope\": use role=user_id, such as admin=ada"
+
+$ aprond --upload.dir $TMP/uploads --store memory --push.vapid-subject ops@example.test
+exit 1
+--- stdout
+--- stderr
+level=ERROR msg="server stopped" error="invalid --push.vapid-subject \"ops@example.test\": use a mailto: or https: URL"
+
+$ aprond --upload.dir $TMP/uploads --store memory --public-url https://chat.example --push.allow-insecure
+exit 1
+--- stdout
+--- stderr
+level=ERROR msg="server stopped" error="--push.allow-insecure lets any client make the server POST to http and internal addresses; it is for tests and refused with --public-url or --tls.domain"
+
+$ aprond --upload.dir $TMP/uploads --store sqlite:$TMP/bad.db
+exit 1
+--- stdout
+--- stderr
+level=ERROR msg="server stopped" error="creating the schema in $TMP/bad.db: file is not a database (26)"
+

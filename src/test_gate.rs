@@ -1,13 +1,12 @@
 //! Gates that need a tool outside Cargo, such as `go` or Pebble. A missing
 //! tool fails the test, so a green run proves the gate ran; setting the
-//! gate's variable to `1` skips it instead. `tests/aprond.rs` includes this
-//! file too.
+//! gate's variable to `1` skips it instead.
 
-/// Compares against the Go code; skipped with `APRON_SKIP_GO=1`.
+/// Runs the ACME differential against Go's x/crypto; skipped with
+/// `APRON_SKIP_GO=1`.
 pub const GO: Gate = Gate {
     skip_var: "APRON_SKIP_GO",
-    install: "install Go 1.27 and keep the apron-server-go clone at $APRON_GO_DIR \
-              (default ~/Developer/forks/apron-server-go)",
+    install: "install Go 1.27",
 };
 
 /// Issues certificates from Pebble; skipped with `APRON_SKIP_PEBBLE=1`.
