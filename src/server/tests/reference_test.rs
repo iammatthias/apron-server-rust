@@ -1422,8 +1422,8 @@ fn test_thread_messages_reach_only_thread_members() {
     react(&mut b, "react", &id, &["👍"]);
     a.notification("reactions");
     a.write(&obj! {"method" => "activity", "params" => obj! {"room_id" => thread.as_str(), "typing" => 3i64}});
-    a.notification("activity");
     b.notification("activity");
+    a.expect_quiet();
     c.expect_quiet();
 
     // An edited thread record reaches the parent's members too.

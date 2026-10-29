@@ -46,3 +46,15 @@ exit 1
 --- stderr
 level=ERROR msg="server stopped" error="invalid --frame.max-depth 0: use a positive number"
 
+$ aprond --upload.dir $TMP/uploads --store memory --upload.type image
+exit 1
+--- stdout
+--- stderr
+level=ERROR msg="server stopped" error="invalid --upload.type \"image\": use a MIME type, type/* or */*"
+
+$ aprond --upload.dir $TMP/uploads --store memory --server.avatar http://chat.example/icon.png
+exit 1
+--- stdout
+--- stderr
+level=ERROR msg="server stopped" error="invalid --server.avatar: use an https: URL or a small data:image/{png,jpeg,gif,webp};base64, URL"
+

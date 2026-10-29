@@ -247,7 +247,7 @@ fn test_room_set_merges_ext() {
         obj! {"room_id" => room_id.as_str(), "ext" => obj! {"irc" => "", "matrix" => Object::new()}},
     );
     assert!(
-        !cleared.contains_key("ext") && cleared.get("title").is_none_or(|t| *t == Json::Null),
+        !cleared.contains_key("ext") && cleared.get("title") == Some(&Json::from("Room")),
         "cleared: {cleared:?}"
     );
     let half = "x".repeat(MAX_ROOM_EXT_BYTES / 2);

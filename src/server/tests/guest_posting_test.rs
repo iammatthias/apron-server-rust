@@ -179,7 +179,8 @@ fn test_server_frame_advertises_guest_posting() {
     }
 }
 
-/// A guest keeps its assigned name, its own included, and may not start a
+/// A guest keeps its assigned name, its own included, sets no profile
+/// `ext`, and may not start a
 /// top-level room, whether or not guests post (apron-server-cloudflare's
 /// "rejects operations guests may not perform").
 #[test]
@@ -213,6 +214,23 @@ fn test_guests_keep_their_name() {
         obj! {"body" => obj! {"text" => "/avatar", "embeds" => vec![Json::from(obj! {"kind" => "upload"})]}},
     );
     assert_eq!(error_code(&frame), Some(CODE_DENIED), "a guest's /avatar");
+    // Nor does a guest keep a profile `ext`.
+    for (id, ext) in [
+        ("bio", obj! {"bio" => "Counts things."}),
+        ("none", Object::new()),
+    ] {
+        let frame = reply(&mut guest, "me", id, obj! {"ext" => ext});
+        assert_eq!(
+            frame["error"]
+                .as_object()
+                .map(|e| (e["code"].clone(), e["message"].clone())),
+            Some((
+                Json::from(CODE_DENIED),
+                Json::from("Only registered users may change their profile")
+            )),
+            "{id}"
+        );
+    }
     let you = you_of(&guest.result("me", "status", obj! {"status" => "dnd"}));
     assert_eq!(you["name"], Json::from("Guest 1"));
 }

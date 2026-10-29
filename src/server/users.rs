@@ -848,6 +848,13 @@ impl State {
                 "Only registered users may change their name",
             ));
         }
+        // A guest keeps no profile, as on Cloudflare.
+        if has_ext && !u.persists() {
+            return Err(RpcError::new(
+                CODE_DENIED,
+                "Only registered users may change their profile",
+            ));
+        }
         // A bot is named after its owner. The bot client sends its name on
         // every connection, so the name it already has is no change.
         if has_name && u.bot() && normalize_name(&name) != u.name {

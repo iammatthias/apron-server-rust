@@ -990,9 +990,10 @@ fn test_room_set_creates_and_edits_rooms_and_threads() {
         "top-level room: {top_record:?}"
     );
     let (_, cleared) = save_room(&mut observer, "clear", obj! {"room_id" => top.as_str()});
-    assert!(
-        !cleared.contains_key("title"),
-        "omitted title was retained on a top-level room: {cleared:?}"
+    assert_eq!(
+        cleared["title"],
+        Json::from("Room"),
+        "an omitted title on a top-level room is the default"
     );
     // An editor who has not joined the room still receives the update.
     grant_role(&server, &c.user_id, "mod");
@@ -1880,22 +1881,31 @@ fn test_http_endpoints() {
 fn test_activity_relays_typing_with_inline_identity() {
     let server = new_test_server(default_config());
     let mut c = dial_test_client(&server);
+    let mut d = dial_test_client(&server);
+    c.drain();
     let (thread, _) = save_room(&mut c, "thread", obj! {"parent_room_id" => "general"});
+    d.notification("room_update");
+    join_room(&mut d, &thread);
+    c.drain();
+    d.drain();
+    // Typing reaches the room's other members, not the typist's own
+    // connections.
     c.write(&obj! {"method" => "activity", "params" => obj! {"room_id" => thread.as_str(), "typing" => f(8), "from" => obj! {"user_id" => "forged"}}});
-    let params = c.notification("activity");
+    let params = d.notification("activity");
     let want = obj! {"room_id" => thread.as_str(), "from" => obj! {"user_id" => "guest_1", "name" => "Guest 1"}, "typing" => f(8)};
     assert_eq!(params, want, "activity");
     c.write(&obj! {"method" => "activity", "params" => obj! {"room_id" => thread.as_str(), "typing" => f(0)}});
-    let stop = c.notification("activity");
+    let stop = d.notification("activity");
     assert_eq!(stop["typing"], f(0), "stop: {stop:?}");
     // Invalid activity changes nothing, and, as a notification, is not
     // answered even when sent with an id (§1).
     c.write(&obj! {"method" => "activity", "id" => "missing", "params" => obj! {"room_id" => "missing", "typing" => f(8)}});
     c.write(&obj! {"method" => "activity", "params" => obj! {"room_id" => thread.as_str(), "typing" => f(-1)}});
     c.write(&obj! {"method" => "activity", "id" => "typing", "params" => obj! {"room_id" => thread.as_str(), "typing" => f(1)}});
-    let typing = c.notification("activity");
+    let typing = d.notification("activity");
     assert_eq!(typing["typing"], f(1), "typing sent with an id: {typing:?}");
     c.expect_quiet();
+    d.expect_quiet();
 }
 
 /// A notification-only method is never answered, whatever its id and even
@@ -2166,4 +2176,25 @@ fn test_client_og_is_kept_as_text() {
         obj! {"message_id" => id.as_str(), "body" => obj! {"text" => "see", "embeds" => vec![Json::from(bare)]}},
     );
     assert!(!embeds_of(&dropped)[0].contains_key("og"));
+}
+
+/// A public top-level room saved without a title is titled `Room`, and
+/// `general` `General`; a private room goes without (apron-server-cloudflare's
+/// ROOM_TITLE and DEFAULT_ROOM_TITLE).
+#[test]
+fn test_default_room_titles() {
+    let server = super::admin_test::admin_test_server();
+    let mut ada = super::admin_test::admin(&server);
+    let (room_id, created) = save_room(&mut ada, "create", obj! {"title" => "  "});
+    assert_eq!(created["title"], Json::from("Room"));
+    let (_, saved) = save_room(&mut ada, "save", obj! {"room_id" => room_id.as_str()});
+    assert_eq!(saved["title"], Json::from("Room"));
+    let (_, general) = save_room(
+        &mut ada,
+        "general",
+        obj! {"room_id" => "general", "title" => ""},
+    );
+    assert_eq!(general["title"], Json::from("General"));
+    let (_, private) = save_room(&mut ada, "private", obj! {"private" => true});
+    assert!(!private.contains_key("title"), "{private:?}");
 }
