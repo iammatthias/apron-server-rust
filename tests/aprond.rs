@@ -59,19 +59,21 @@ fn without_times(log: &[u8]) -> String {
 }
 
 /// Runs `aprond` with each case and compares its exit status, standard
-/// output and standard error (without log times) with `tests/golden/<name>`,
-/// recorded on macOS, whose default data directory differs from Linux's.
+/// output and standard error (without log times) with `tests/golden/<name>`.
 /// Each `(from, to)` in `masks` replaces a per-run value such as a temp path.
 /// `APRON_UPDATE_GOLDEN=1` rewrites the file instead.
 fn check_golden(name: &str, cases: &[Vec<&str>], masks: &[(String, &str)]) {
     let mut got = String::new();
     for args in cases {
-        // A fixed home keeps the default store and upload paths, which
-        // depend on the user's directories, the same for everyone.
+        // The default store, upload and certificate paths come from the
+        // user's directories, and `--help` wraps them. macOS derives them
+        // from HOME; Linux reads the XDG variables, set here to the same
+        // directories, so both print identical text.
         let out = Command::new(APROND)
             .args(args)
             .env("HOME", "/home/aprond")
-            .env_remove("XDG_DATA_HOME")
+            .env("XDG_DATA_HOME", "/home/aprond/Library/Application Support")
+            .env("XDG_CACHE_HOME", "/home/aprond/Library/Caches")
             .stdin(Stdio::null())
             .output()
             .unwrap();
