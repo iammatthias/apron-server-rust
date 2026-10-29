@@ -855,6 +855,11 @@ impl Server {
                 )));
             }
         }
+        // Every attempt counts, failed ones too, but not a guest auth that
+        // changes nothing (Cloudflare's handleAuth).
+        if scheme != "guest" || st.client_user(c).is_none() {
+            st.charge_auth_locked(c)?;
+        }
         // A user_id is never empty, nor contains whitespace or control
         // characters (§2.4): requesting one that could be no user_id is
         // invalid_params, with any scheme.

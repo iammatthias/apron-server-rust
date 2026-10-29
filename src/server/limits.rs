@@ -35,6 +35,8 @@ pub struct Limits {
     pub connections_per_user: usize,
     /// New connections one IP may open, a minute.
     pub admissions_per_ip_minute: u32,
+    /// `auth` requests one IP may send a minute, failed ones included.
+    pub auth_attempts_per_ip_minute: u32,
     /// Posts (every logged change, and joins and leaves) of the guests of
     /// one IP together; of an account; of an account holding any role, in
     /// place of `posts`; of one IP's users together, raised to
@@ -153,6 +155,7 @@ impl Default for Limits {
             guest_connections_per_ip: 6,
             connections_per_user: 3,
             admissions_per_ip_minute: 12,
+            auth_attempts_per_ip_minute: 10,
             guest_posts: Posts {
                 minute: 5,
                 day: 200,
@@ -209,6 +212,7 @@ impl Limits {
             guest_connections_per_ip: 0,
             connections_per_user: 0,
             admissions_per_ip_minute: 0,
+            auth_attempts_per_ip_minute: 0,
             guest_posts: Posts::default(),
             posts: Posts::default(),
             trusted_posts: Posts::default(),
@@ -291,6 +295,7 @@ impl Bucket {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Scope {
     Admission,
+    Auth,
     Post,
     RoomList,
     Upload,
@@ -631,6 +636,17 @@ impl State {
         let charge = Charge::new(&principal, allowance, "Connection admission limit reached");
         self.limits
             .charge(Scope::Admission, &[charge], 1)
+            .map_err(|refusal| refusal.error(None))
+    }
+
+    /// Charges one `auth` request of `c`'s IP (Cloudflare's
+    /// reserveAuthAttempt), or refuses it with retry_after.
+    pub fn charge_auth_locked(&mut self, c: &Client) -> Result<(), RpcError> {
+        let principal = Principal::Ip(c.ip_key.clone());
+        let allowance = Allowance::minute(self.config.limits.auth_attempts_per_ip_minute);
+        let charge = Charge::new(&principal, allowance, "Authentication attempts limited");
+        self.limits
+            .charge(Scope::Auth, &[charge], 1)
             .map_err(|refusal| refusal.error(None))
     }
 

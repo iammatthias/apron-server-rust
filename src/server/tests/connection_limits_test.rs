@@ -3,6 +3,7 @@
 //! integration tests.
 
 use super::helpers::*;
+use crate::obj;
 use crate::server::config::Config;
 use crate::server::config::RETRY_AFTER_SECONDS;
 use crate::server::limits::Limits;
@@ -174,4 +175,52 @@ fn test_probe_reports_the_ip_cap_without_admitting() {
     wait_for(|| server.app.lock().clients.is_empty());
     let (c, _) = dial_from(&server, "198.51.100.5");
     assert_eq!(refusal(&c).0, "Connection admission limit reached");
+}
+
+/// The error of a refused request, as (message, retry_after).
+fn request_refusal(reply: &Object) -> (String, i64) {
+    let error = reply["error"].as_object().expect("error");
+    assert_eq!(error["code"], Json::from(CODE_RETRY_AFTER), "{reply:?}");
+    (
+        error["message"].as_str().unwrap().to_owned(),
+        match error["data"].as_object().unwrap()["retry_after"] {
+            Json::Number(n) => n as i64,
+            ref other => panic!("retry_after {other:?}"),
+        },
+    )
+}
+
+#[test]
+fn test_auth_attempts_per_ip_minute() {
+    let server = proxied(Limits {
+        auth_attempts_per_ip_minute: 2,
+        ..Limits::unlimited()
+    });
+    let (mut c, _) = dial_from(&server, "203.0.113.20");
+    admitted(&c);
+    // A scheme that is not offered is refused before an attempt counts.
+    let unknown = c.call("auth", "unknown", obj! {"scheme" => "ext:nope"});
+    assert_eq!(
+        error_code(&unknown),
+        Some(CODE_INVALID_PARAMS),
+        "{unknown:?}"
+    );
+    let failed = c.call("auth", "bad", obj! {"scheme" => "token", "token" => "nope"});
+    assert_eq!(error_code(&failed), Some(CODE_DENIED), "{failed:?}");
+    c.request("auth", "guest", obj! {"scheme" => "guest"});
+    c.drain();
+    // A guest auth on a signed-in connection changes nothing and is free.
+    let again = c.call("auth", "again", obj! {"scheme" => "guest"});
+    assert!(again.contains_key("result"), "{again:?}");
+    let (mut other, _) = dial_from(&server, "203.0.113.20");
+    admitted(&other);
+    let refused = other.call("auth", "third", obj! {"scheme" => "guest"});
+    // A minute's allowance of 2 refills one every 30 s.
+    assert_eq!(
+        request_refusal(&refused),
+        ("Authentication attempts limited".to_owned(), 30)
+    );
+    let (mut elsewhere, _) = dial_from(&server, "203.0.113.21");
+    admitted(&elsewhere);
+    elsewhere.request("auth", "fresh", obj! {"scheme" => "guest"});
 }

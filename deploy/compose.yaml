@@ -34,6 +34,9 @@ services:
       # tools/deploy/live-check.mjs registers 6 accounts a run from one
       # address, so Cloudflare's 5 a day would stop it on its first run.
       - --limit.registrations-per-ip-day=30
+      # It also sends 18 auth requests a run while it connects at up to 12
+      # a minute, past Cloudflare's 10 auth attempts a minute.
+      - --limit.auth-attempts-per-ip-minute=30
       # The owner's account, renamed from guest_1 by /rename. A grant is given
       # once, so this only records who it went to.
       - --role=admin=matthias
