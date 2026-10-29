@@ -1,4 +1,4 @@
-//! `/passkeys`, an extension Go lacks (docs/DEVIATIONS.md), following
+//! `/passkeys`, following
 //! apron-server-cloudflare's (its SPEC.md, section 5, WebAuthn): an account
 //! lists its passkeys and removes one it no longer trusts.
 

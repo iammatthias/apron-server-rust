@@ -1,5 +1,5 @@
 //! The Apron server: the WebSocket protocol handlers and the state they
-//! share, ported file by file from `internal/server`.
+//! share.
 
 pub mod activity;
 pub mod admin;

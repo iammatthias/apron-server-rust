@@ -1,9 +1,9 @@
-//! Link previews, an extension Go lacks (docs/DEVIATIONS.md). With
-//! `Config.unfurl`, the first http(s) URLs of a message's text are fetched in
-//! the background, and the message is republished with a `link` embed for
-//! each page that describes itself, carrying its OpenGraph `og` (§4.8.1). The
-//! og:image is downloaded and hosted as an upload, so clients load it from
-//! the server's own origin.
+//! Link previews, which apron-server-cloudflare lacks (docs/DEVIATIONS.md).
+//! With `Config.unfurl`, the first http(s) URLs of a message's text are
+//! fetched in the background, and the message is republished with a `link`
+//! embed for each page that describes itself, carrying its OpenGraph `og`
+//! (§4.8.1). The og:image is downloaded and hosted as an upload, so clients
+//! load it from the server's own origin.
 
 use std::sync::mpsc;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak};

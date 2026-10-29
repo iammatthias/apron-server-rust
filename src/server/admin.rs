@@ -1,6 +1,6 @@
-//! The admin token and the user it signs in as, an extension Go lacks
-//! (docs/DEVIATIONS.md), following apron-server-cloudflare's
-//! `APRON_ADMIN_TOKEN` (its SPEC.md, section 5, Admins).
+//! The admin token and the user it signs in as, following
+//! apron-server-cloudflare's `APRON_ADMIN_TOKEN` (its SPEC.md, section 5,
+//! Admins).
 
 use std::sync::Arc;
 

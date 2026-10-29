@@ -1,4 +1,4 @@
-//! `/purge <user_id>`, an extension Go lacks (docs/DEVIATIONS.md), following
+//! `/purge <user_id>`, following
 //! apron-server-cloudflare's `/purge` (its SPEC.md, section 5, Admins, and
 //! store.ts `purgeUsers`).
 

@@ -1,8 +1,8 @@
-//! Accounts an admin makes without a passkey, an extension Go lacks
-//! (docs/DEVIATIONS.md), following apron-server-cloudflare's `/invite-token`
-//! and `/invite` (its SPEC.md, section 5, Admins): the account signs in with
-//! a bearer token through the `token` scheme (§3.2), from any origin, and a
-//! sign-up invite makes one such account per use (Appendix B).
+//! Accounts an admin makes without a passkey, following
+//! apron-server-cloudflare's `/invite-token` and `/invite` (its SPEC.md,
+//! section 5, Admins): the account signs in with a bearer token through the
+//! `token` scheme (§3.2), from any origin, and a sign-up invite makes one
+//! such account per use (Appendix B).
 
 use std::sync::Arc;
 

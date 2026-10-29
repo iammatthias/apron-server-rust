@@ -92,33 +92,25 @@ pub struct TlsOptions {
     pub email: String,
 }
 
-/// An extension Go lacks (docs/DEVIATIONS.md), so its group comes last.
+/// Its group comes last.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AppleOptions {
     pub app_ids: Vec<String>,
 }
-
-/// An extension Go lacks (docs/DEVIATIONS.md).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct UnfurlOptions {
     pub enable: bool,
 }
-
-/// An extension Go lacks (docs/DEVIATIONS.md).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct GuestOptions {
     pub posting: bool,
 }
-
-/// An extension Go lacks (docs/DEVIATIONS.md).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ServerOptions {
     pub title: String,
     pub description: String,
     pub avatar: String,
 }
-
-/// An extension Go lacks (docs/DEVIATIONS.md).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct HistoryOptions {
     pub retention: String,
@@ -158,8 +150,6 @@ pub struct LimitOptions {
     pub ip_history_per_day: i64,
     pub server_history_per_day: i64,
 }
-
-/// An extension Go lacks (docs/DEVIATIONS.md).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FrameOptions {
     pub max_bytes: i64,

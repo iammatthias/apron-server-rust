@@ -1,5 +1,5 @@
-//! cmd/aprond/email.go: email sign-in codes through an SMTP relay, and,
-//! an extension Go lacks, through an HTTP mail API.
+//! cmd/aprond/email.go: email sign-in codes through an SMTP relay or an
+//! HTTP mail API.
 
 use rust_stdlib::context::Context;
 use rust_stdlib::net::{self, http, mail, smtp, AddrRef, Conn, NetError};

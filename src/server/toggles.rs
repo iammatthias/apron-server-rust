@@ -1,4 +1,4 @@
-//! `/toggle`, an extension Go lacks (docs/DEVIATIONS.md), following
+//! `/toggle`, following
 //! apron-server-cloudflare's (its SPEC.md, section 5, Admins): an admin
 //! turns typing activity, uploads, user status or adding others to rooms
 //! off or on for everyone, kept across restarts.

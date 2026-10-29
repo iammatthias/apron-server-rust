@@ -1,8 +1,7 @@
-//! `/invite-bot`, an extension Go lacks (docs/DEVIATIONS.md): an account
-//! gets one bot of its own, made as `bot_<user_id>` and keeping that
-//! user_id when its owner is renamed, named after it, and a bearer
-//! token that signs in as the bot through the `token` scheme (§3.2), from any
-//! origin, until `/invite-bot` again mints a new one. It follows
+//! `/invite-bot`: an account gets one bot of its own, made as `bot_<user_id>`
+//! and keeping that user_id when its owner is renamed, named after it, and a
+//! bearer token that signs in as the bot through the `token` scheme (§3.2),
+//! from any origin, until `/invite-bot` again mints a new one. It follows
 //! apron-server-cloudflare's `/invite-bot`.
 //!
 //! A bot is a user with an owner and no credential: it persists as an
