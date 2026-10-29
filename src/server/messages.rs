@@ -6,10 +6,10 @@ use rust_stdlib::encoding::json::jsontext::Value;
 use super::client::{Client, Frame};
 use super::embeds::MAX_EMBEDS_PER_MESSAGE;
 use super::emoji::{is_emoji_key, normalize_entries, same_entries};
-use super::limits::{refused, Allowance, Category, Charge, Poster, Principal, Scope};
+use super::limits::Category;
 use super::protocol::*;
 use super::server::{LogRecord, RecordKind, Server, State, DEFAULT_ROOM_ID};
-use super::users::{json_equal, Identity, MODERATOR_ROLES};
+use super::users::{json_equal, MODERATOR_ROLES};
 use crate::obj;
 
 #[derive(Clone, Debug, Default)]
@@ -598,89 +598,6 @@ impl State {
             }
             self.touch_record(id);
         }
-    }
-
-    /// Charges one post of the user's (apron-server-cloudflare's posting
-    /// limits) to their own, their IP's and the server's minute and day, or
-    /// to none, refusing it with retry_after naming the limit. Every
-    /// accepted change is one: a message saved, a reaction set changed, a
-    /// room saved, a join or leave, a profile change.
-    /// `category` is `Write` for the requests ext:limits' write row lists,
-    /// and `None` for `me` and commands.
-    pub fn charge_post_locked(
-        &mut self,
-        c: &Client,
-        user_id: &str,
-        category: Option<Category>,
-    ) -> Result<(), RpcError> {
-        self.note_bot_active_locked(user_id);
-        let poster = match self.users.get(user_id).map(|u| (u.kind(), u)) {
-            Some((Identity::Account, u)) if !u.roles.is_empty() => Poster::Trusted,
-            Some((Identity::Account | Identity::Bot, _)) => Poster::Account,
-            _ => Poster::Guest,
-        };
-        let own = if poster == Poster::Guest {
-            Principal::Guests(c.ip_key.clone())
-        } else {
-            Principal::User(user_id.to_owned())
-        };
-        let ip = Principal::Ip(c.ip_key.clone());
-        let [own_allowance, ip_allowance, server_allowance] =
-            self.config.limits.post_allowances(poster);
-        let charges = [
-            Charge {
-                scope: Scope::Post,
-                principal: &own,
-                allowance: own_allowance,
-            },
-            Charge {
-                scope: Scope::Post,
-                principal: &ip,
-                allowance: ip_allowance,
-            },
-            Charge {
-                scope: Scope::Post,
-                principal: &Principal::Server,
-                allowance: server_allowance,
-            },
-        ];
-        self.limits.charge(&charges, 1).map_err(|refusal| {
-            let message = match (refusal.row, refusal.daily) {
-                (0, false) if poster == Poster::Guest => "Guest posting limit reached",
-                (_, false) => "Posting limit reached",
-                (2, true) => "Daily posting limit reached for the server",
-                (_, true) => "Daily posting limit reached",
-            };
-            refused(message, refusal.retry_after(), category)
-        })
-    }
-
-    /// Charges `n` new uploads of the user's to their day and the server's,
-    /// or none.
-    pub fn charge_uploads_locked(&mut self, user_id: &str, n: u32) -> Result<(), RpcError> {
-        let limits = &self.config.limits;
-        let user = Principal::User(user_id.to_owned());
-        let daily = |day| Allowance { minute: None, day };
-        let charges = [
-            Charge {
-                scope: Scope::Upload,
-                principal: &user,
-                allowance: daily(limits.uploads_per_user_day),
-            },
-            Charge {
-                scope: Scope::Upload,
-                principal: &Principal::Server,
-                allowance: daily(limits.uploads_per_day),
-            },
-        ];
-        self.limits.charge(&charges, n).map_err(|refusal| {
-            let message = if refusal.row == 0 {
-                "Daily upload limit reached"
-            } else {
-                "Daily upload limit reached for the server"
-            };
-            refused(message, refusal.retry_after(), Some(Category::Upload))
-        })
     }
 
     /// Replaces the caller's complete reaction set on one message (§4.7).

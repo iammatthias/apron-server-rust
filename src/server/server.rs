@@ -13,14 +13,14 @@ use rust_stdlib::time::{self, Duration, Time};
 
 use super::bots::BotTokens;
 use super::client::{Client, ClientId, Conn, Done, Frame, PING_FRAME};
-use super::config::{Config, RETRY_AFTER_SECONDS, UNTRUSTED_ADDRESS};
+use super::config::{Config, UNTRUSTED_ADDRESS};
 use super::custom_emoji::{EmojiCatalog, CATALOG_PATH};
 use super::devices::DeviceTokens;
 use super::dispatch::{methods, Method};
 use super::email::EmailState;
 use super::embeds::EmbedState;
 use super::invites::{InviteTokens, JoinInvite};
-use super::limits::{Allowance, Charge, IpKey, LimitTable, Principal, Scope, Window};
+use super::limits::{IpKey, LimitTable, Window};
 use super::messages::MessageState;
 use super::metadata::StoredServer;
 use super::outbound;
@@ -894,85 +894,6 @@ impl Drop for ConnectionDone<'_> {
 impl State {
     pub fn client_user(&self, c: &Client) -> Option<String> {
         self.clients.get(&c.id).and_then(|conn| conn.user.clone())
-    }
-
-    /// Charges one frame of `c`'s to the server's minute and its address's.
-    pub fn charge_frame_locked(&mut self, c: &Client) -> Result<(), super::limits::Refusal> {
-        let ip = Principal::Ip(c.ip_key.clone());
-        let limits = &self.config.limits;
-        let charges = [
-            Charge {
-                scope: Scope::Frame,
-                principal: &Principal::Server,
-                allowance: Allowance::minute(limits.server_frames_per_minute),
-            },
-            Charge {
-                scope: Scope::Frame,
-                principal: &ip,
-                allowance: Allowance::minute(limits.frames_per_ip_minute),
-            },
-        ];
-        self.limits.charge(&charges, 1)
-    }
-
-    /// Why a new connection from `ip` would be refused now, with the
-    /// seconds to wait: the server's connection cap, then the IP's caps.
-    /// A connection not signed in to an account counts as a guest's.
-    pub fn capacity_locked(&self, ip: &IpKey) -> Option<(&'static str, i64)> {
-        let limits = &self.config.limits;
-        let full = |max: usize, n: usize| max > 0 && n >= max;
-        if full(self.config.max_connections, self.clients.len()) {
-            return Some(("Server at capacity", RETRY_AFTER_SECONDS));
-        }
-        let from_ip: Vec<&Conn> = self
-            .clients
-            .values()
-            .filter(|conn| conn.client.ip_key == *ip)
-            .collect();
-        let guests = from_ip
-            .iter()
-            .filter(|conn| {
-                conn.user
-                    .as_ref()
-                    .and_then(|id| self.users.get(id))
-                    .is_none_or(|u| !u.persists())
-            })
-            .count();
-        if full(limits.connections_per_ip, from_ip.len())
-            || full(limits.guest_connections_per_ip, guests)
-        {
-            return Some((
-                "Connection limit reached for this network",
-                RETRY_AFTER_SECONDS,
-            ));
-        }
-        None
-    }
-
-    /// Admits a new connection from `ip`, or the retry_after error that
-    /// refuses it: the caps of `capacity_locked`, then the IP's admissions
-    /// a minute.
-    pub fn admit_locked(&mut self, ip: &IpKey) -> Result<(), RpcError> {
-        if let Some((message, retry_after)) = self.capacity_locked(ip) {
-            return Err(RpcError::with_data(
-                CODE_RETRY_AFTER,
-                message,
-                obj! {"retry_after" => retry_after},
-            ));
-        }
-        let principal = Principal::Ip(ip.clone());
-        let charge = Charge {
-            scope: Scope::Admission,
-            principal: &principal,
-            allowance: Allowance::minute(self.config.limits.admissions_per_ip_minute),
-        };
-        self.limits.charge(&[charge], 1).map_err(|refusal| {
-            RpcError::with_data(
-                CODE_RETRY_AFTER,
-                "Connection admission limit reached",
-                obj! {"retry_after" => refusal.retry_after()},
-            )
-        })
     }
 
     /// Queues a frame to every connection of the user.

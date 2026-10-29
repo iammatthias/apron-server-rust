@@ -153,6 +153,15 @@ fn test_printed_config_loads_back() {
     assert_eq!(fresh.options, parser.options, "round trip");
 }
 
+/// The `--limit.*` flags default to the server's own defaults, which are
+/// written down twice: as flag defaults for help and --print-config, and as
+/// `Limits::default()` for servers built without flags.
+#[test]
+fn test_limit_flag_defaults_are_the_server_defaults() {
+    let config = server_settings(&parse(&[]).options).unwrap();
+    assert_eq!(config.limits, crate::server::limits::Limits::default());
+}
+
 #[test]
 fn test_tls_domain_is_the_public_url() {
     let parser = parse(&["--tls.domain", "chat.example", "--webauthn.rp-id", ""]);

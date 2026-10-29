@@ -4,43 +4,10 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use super::client::{Client, Frame};
-use super::limits::{refused, Allowance, Category, Charge, Principal, Scope};
 use super::protocol::*;
 use super::rooms::{parse_bound, profiles, RoomState};
 use super::server::{Server, State};
 use crate::obj;
-
-impl State {
-    /// Charges a `room_list` to the user's minute, except the first
-    /// `joined` listing after a sign-in, which is how a client learns its
-    /// rooms.
-    fn charge_room_list_locked(&mut self, c: &Client, req: &Request) -> Result<(), RpcError> {
-        let Some(conn) = self.clients.get_mut(&c.id) else {
-            return Ok(());
-        };
-        let Some(user_id) = conn.user.clone() else {
-            return Ok(());
-        };
-        let joined = parse_string(&req.params, "filter", false).is_ok_and(|f| f == "joined");
-        if joined && !conn.listed_joined {
-            conn.listed_joined = true;
-            return Ok(());
-        }
-        let user = Principal::User(user_id);
-        let charge = Charge {
-            scope: Scope::RoomList,
-            principal: &user,
-            allowance: Allowance::minute(self.config.limits.room_lists_per_user_minute),
-        };
-        self.limits.charge(&[charge], 1).map_err(|refusal| {
-            refused(
-                "Room listing limited",
-                refusal.retry_after(),
-                Some(Category::Read),
-            )
-        })
-    }
-}
 
 impl State {
     /// Answers room_list (§4.2.1): the rooms matching its filters, joined
