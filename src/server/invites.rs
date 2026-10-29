@@ -32,7 +32,7 @@ pub const JOIN_DEFAULT_NAME: &str = "Member";
 
 /// The one live sign-up invite (`/invite`): the SHA-256 of its token, the
 /// sign-ups it has left, and when it expires, in Unix milliseconds.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct JoinInvite {
     pub key: SessionKey,
     pub remaining: i64,
