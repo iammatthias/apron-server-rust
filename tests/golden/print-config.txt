@@ -31,6 +31,9 @@ max-listed-members = 1000
 # Top-level private rooms one user may be in at once, created or added to, such as on a public deployment; 0 is unlimited
 max-private-rooms = 20
 
+# Relay each user's read cursors to everyone in the room, and list them after room_list; without it they go only to the user's own connections (not in the Go aprond)
+read-receipts = false
+
 # Listen address for unauthenticated pprof and expvar under /debug/, such as 127.0.0.1:6060; empty disables
 debug-addr = ""
 
@@ -43,7 +46,7 @@ client-ip-header = ""
 # Markdown clients show on their sign-in screen (server.welcome), such as how this server's sign-in methods fit together (default: general's description, else a summary of how guests and sign-in work here)
 welcome = ""
 
-# Grant a role to an account as role=user_id or role=email, such as admin=ada, once: the account keeps it until an admin takes it away; repeat for more. admin and mod (or moderator) may remove others from rooms
+# Grant a role to an account as role=user_id or role=email, such as admin=ada, once: the account keeps it until an admin takes it away; repeat for more. admin and mod (or moderator) may create top-level rooms
 # role = []
 
 # File holding a token that signs in as the user admin from any origin, without a passkey; at least 16 bytes (default: $APRON_ADMIN_TOKEN; unset or empty disables it)
@@ -206,6 +209,9 @@ max-listed-members = 1000
 # Top-level private rooms one user may be in at once, created or added to, such as on a public deployment; 0 is unlimited
 max-private-rooms = 20
 
+# Relay each user's read cursors to everyone in the room, and list them after room_list; without it they go only to the user's own connections (not in the Go aprond)
+read-receipts = false
+
 # Listen address for unauthenticated pprof and expvar under /debug/, such as 127.0.0.1:6060; empty disables
 debug-addr = ""
 
@@ -218,7 +224,7 @@ client-ip-header = ""
 # Markdown clients show on their sign-in screen (server.welcome), such as how this server's sign-in methods fit together (default: general's description, else a summary of how guests and sign-in work here)
 welcome = ""
 
-# Grant a role to an account as role=user_id or role=email, such as admin=ada, once: the account keeps it until an admin takes it away; repeat for more. admin and mod (or moderator) may remove others from rooms
+# Grant a role to an account as role=user_id or role=email, such as admin=ada, once: the account keeps it until an admin takes it away; repeat for more. admin and mod (or moderator) may create top-level rooms
 role = ["admin=ada"]
 
 # File holding a token that signs in as the user admin from any origin, without a passkey; at least 16 bytes (default: $APRON_ADMIN_TOKEN; unset or empty disables it)
@@ -382,6 +388,9 @@ max-listed-members = 1000
 # Top-level private rooms one user may be in at once, created or added to, such as on a public deployment; 0 is unlimited
 max-private-rooms = 20
 
+# Relay each user's read cursors to everyone in the room, and list them after room_list; without it they go only to the user's own connections (not in the Go aprond)
+read-receipts = false
+
 # Listen address for unauthenticated pprof and expvar under /debug/, such as 127.0.0.1:6060; empty disables
 debug-addr = ""
 
@@ -394,7 +403,7 @@ client-ip-header = ""
 # Markdown clients show on their sign-in screen (server.welcome), such as how this server's sign-in methods fit together (default: general's description, else a summary of how guests and sign-in work here)
 welcome = "Line one\nSay \"hi\" \\ tab\there \u0001 del\u007f é"
 
-# Grant a role to an account as role=user_id or role=email, such as admin=ada, once: the account keeps it until an admin takes it away; repeat for more. admin and mod (or moderator) may remove others from rooms
+# Grant a role to an account as role=user_id or role=email, such as admin=ada, once: the account keeps it until an admin takes it away; repeat for more. admin and mod (or moderator) may create top-level rooms
 # role = []
 
 # File holding a token that signs in as the user admin from any origin, without a passkey; at least 16 bytes (default: $APRON_ADMIN_TOKEN; unset or empty disables it)
@@ -557,6 +566,9 @@ max-listed-members = 1000
 # Top-level private rooms one user may be in at once, created or added to, such as on a public deployment; 0 is unlimited
 max-private-rooms = 20
 
+# Relay each user's read cursors to everyone in the room, and list them after room_list; without it they go only to the user's own connections (not in the Go aprond)
+read-receipts = false
+
 # Listen address for unauthenticated pprof and expvar under /debug/, such as 127.0.0.1:6060; empty disables
 debug-addr = ""
 
@@ -569,7 +581,7 @@ client-ip-header = ""
 # Markdown clients show on their sign-in screen (server.welcome), such as how this server's sign-in methods fit together (default: general's description, else a summary of how guests and sign-in work here)
 welcome = ""
 
-# Grant a role to an account as role=user_id or role=email, such as admin=ada, once: the account keeps it until an admin takes it away; repeat for more. admin and mod (or moderator) may remove others from rooms
+# Grant a role to an account as role=user_id or role=email, such as admin=ada, once: the account keeps it until an admin takes it away; repeat for more. admin and mod (or moderator) may create top-level rooms
 role = ["admin=ada"]
 
 # File holding a token that signs in as the user admin from any origin, without a passkey; at least 16 bytes (default: $APRON_ADMIN_TOKEN; unset or empty disables it)

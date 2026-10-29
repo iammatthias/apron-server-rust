@@ -28,6 +28,21 @@ pub const MAX_CREATED_ROOMS: usize = 16;
 pub const MAX_THREADS: usize = 100;
 /// Most live threads one account created (Cloudflare's threadsPerUser).
 pub const MAX_THREADS_PER_USER: usize = 25;
+/// The longest typing a relay carries, in seconds (Cloudflare's
+/// activityMaxTypingSeconds).
+pub const MAX_TYPING_SECONDS: i64 = 30;
+/// Typing relays, and separately read cursor relays, one user may cause a
+/// minute (Cloudflare's activityBroadcastsPerUserMinute).
+pub const ACTIVITY_RELAYS_PER_MINUTE: i64 = 10;
+
+fn activity_limiter() -> crate::rate::Limiter {
+    crate::rate::Limiter::new(
+        crate::rate::every(rust_stdlib::time::Duration::from_nanos(
+            rust_stdlib::time::MINUTE.as_nanos() / ACTIVITY_RELAYS_PER_MINUTE,
+        )),
+        ACTIVITY_RELAYS_PER_MINUTE,
+    )
+}
 
 /// A room's current record, its log, and its members. Every room, including
 /// threads (rooms with parent_room_id), is visible to every authenticated
@@ -293,7 +308,7 @@ impl State {
     pub fn cursor_frames_locked(&self, u: &UserState, r: &RoomState) -> Vec<Frame> {
         let mut frames = Vec::new();
         for (user_id, cursor) in &r.reads {
-            if !u.joined.contains(&r.id) && *user_id != u.id {
+            if *user_id != u.id && !(self.config.read_receipts && u.joined.contains(&r.id)) {
                 continue;
             }
             let frame = obj! {"method" => "activity", "params" => obj! {
@@ -615,6 +630,45 @@ impl State {
         for member in audience {
             self.send_to_user(&member, &frame);
         }
+    }
+
+    /// Sends a read cursor to the user's other connections, within
+    /// ACTIVITY_RELAYS_PER_MINUTE; one past it is kept but not relayed, and
+    /// devices learn of it at their next listing.
+    fn relay_read_locked(&mut self, c: &Client, user_id: &str, frame: &Object) {
+        let u = self.users.get_mut(user_id).expect("user exists");
+        if u.clients.len() < 2 || !u.read_relays.get_or_insert_with(activity_limiter).allow() {
+            return;
+        }
+        let Some(frame) = super::server::render(frame) else {
+            return;
+        };
+        for id in &self.users[user_id].clients {
+            if *id != c.id {
+                if let Some(conn) = self.clients.get(id) {
+                    conn.client.enqueue_frame(frame.clone());
+                }
+            }
+        }
+    }
+
+    /// Reports whether the user's typing may be relayed, within
+    /// ACTIVITY_RELAYS_PER_MINUTE; past it the sender is told once a
+    /// minute with a ~private notice.
+    fn admit_typing_locked(&mut self, c: &Client, user_id: &str, room_id: &str) -> bool {
+        let u = self.users.get_mut(user_id).expect("user exists");
+        if u.typing_relays.get_or_insert_with(activity_limiter).allow() {
+            return true;
+        }
+        let now = rust_stdlib::time::now().unix_milli();
+        if now - u.typing_notice_at >= 60_000 {
+            u.typing_notice_at = now;
+            c.enqueue(&super::commands::private_notice(
+                &self.rooms[room_id],
+                &format!("Typing updates are limited to {ACTIVITY_RELAYS_PER_MINUTE} per minute, so others may not see you typing for a moment."),
+            ));
+        }
+        false
     }
 
     /// Checks that u may save r's client fields: only an admin saves
@@ -1219,10 +1273,12 @@ impl State {
         Ok((Json::Raw(Value::from(result)), true))
     }
 
-    /// Applies a connection's activity (§4.6). typing and a read cursor in a
-    /// room are relayed to the room's members; a read cursor must name a
-    /// message and only advances, and the server keeps the latest per user
-    /// and sends it after the room is listed.
+    /// Applies a connection's activity (§4.6). typing is relayed to the
+    /// room's members, at most MAX_TYPING_SECONDS and within
+    /// ACTIVITY_RELAYS_PER_MINUTE. A read cursor must name a message and only
+    /// advances; an account's is kept, sent after the room is listed, and
+    /// relayed to its other connections, or with Config.read_receipts to the
+    /// room's members; a guest's is dropped.
     pub fn activity_locked(
         &mut self,
         c: &Arc<Client>,
@@ -1268,9 +1324,12 @@ impl State {
         }
         let from = self.users[&user_id].from();
         let mut params = obj! {"room_id" => room_id.as_str(), "from" => from.clone()};
+        // Whether the cursor goes to the room's members, with read receipts.
         let mut read = false;
-        if has_read {
+        // A guest's read cursor is dropped: guests keep nothing.
+        if has_read && self.users[&user_id].persists() {
             let id: i64 = read_id.parse().unwrap_or(0);
+            let joined = self.users[&user_id].joined.contains(&room_id);
             let r = self.rooms.get_mut(&room_id).expect("room exists");
             let advances = r.reads.get(&user_id).is_none_or(|cursor| id > cursor.id);
             if advances {
@@ -1284,42 +1343,50 @@ impl State {
                 );
                 let latest = r.latest_id;
                 self.touch_room(&room_id);
-                if !self.users[&user_id].joined.contains(&room_id) {
-                    // A cursor for a room the user has not joined still
-                    // syncs across their own connections.
-                    let frame = obj! {"method" => "activity", "params" => obj! {
-                        "room_id" => room_id.as_str(), "from" => from.clone(), "read_message_id" => read_id.as_str(),
-                    }};
-                    if let Some(frame) = super::server::render(&frame) {
-                        self.send_to_user(&user_id, &frame);
-                    }
-                    if id >= latest {
-                        // Read to the end: no earlier mention there counts.
-                        self.users
-                            .get_mut(&user_id)
-                            .expect("user exists")
-                            .pings
-                            .remove(&room_id);
-                        self.touch_user(&user_id);
-                    }
+                if !joined && id >= latest {
+                    // Read to the end: no earlier mention there counts.
+                    self.users
+                        .get_mut(&user_id)
+                        .expect("user exists")
+                        .pings
+                        .remove(&room_id);
+                    self.touch_user(&user_id);
                 }
-                params.insert("read_message_id".into(), read_id.as_str().into());
-                read = true;
+                let frame = obj! {"method" => "activity", "params" => obj! {
+                    "room_id" => room_id.as_str(), "from" => from.clone(), "read_message_id" => read_id.as_str(),
+                }};
+                if !self.config.read_receipts {
+                    self.relay_read_locked(c, &user_id, &frame);
+                } else {
+                    // Read receipts go to the room's members, and a cursor
+                    // for a room the user has not joined to their own
+                    // connections as well.
+                    if !joined {
+                        if let Some(frame) = super::server::render(&frame) {
+                            self.send_to_user(&user_id, &frame);
+                        }
+                    }
+                    params.insert("read_message_id".into(), read_id.as_str().into());
+                    read = true;
+                }
+                // Reading lowers the unread count the user's other devices
+                // show.
+                self.unread_changed_locked(&user_id, &room_id);
             }
         }
+        let mut typed = false;
         if let Some(typing) = typing {
-            params.insert("typing".into(), typing.into());
+            if self.admit_typing_locked(c, &user_id, &room_id) {
+                params.insert("typing".into(), typing.min(MAX_TYPING_SECONDS).into());
+                typed = true;
+            }
         }
-        if typing.is_some() || read {
+        if typed || read {
             if let Some(frame) =
                 super::server::render(&obj! {"method" => "activity", "params" => params})
             {
                 self.deliver_locked(&frame, &[room_id.clone()]);
             }
-        }
-        if read {
-            // Reading lowers the unread count the user's other devices show.
-            self.unread_changed_locked(&user_id, &room_id);
         }
         Ok((result.into(), false))
     }

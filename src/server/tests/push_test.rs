@@ -826,7 +826,7 @@ fn server_message(server: &TestServer, user_id: &str, text: &str) -> i64 {
 }
 
 /// Badge pushes wait badge_delay, so one push carries the count after a
-/// burst of changes; a guest's retirement sends none.
+/// burst of changes.
 #[test]
 fn test_badge_pushes_coalesce() {
     let relay = new_test_relay();
@@ -834,6 +834,7 @@ fn test_badge_pushes_coalesce() {
     server.app.lock().badge_delay = Duration::from_millis(300);
     let mut clients = dial_group(&server, 2);
     let mut b = clients.pop().unwrap();
+    make_account(&server, &b.user_id);
     let mut a = clients.pop().unwrap();
     b.result(
         "push_register",
@@ -853,8 +854,8 @@ fn test_badge_pushes_coalesce() {
     }
     for id in &ids[..2] {
         b.write(&obj! {"method" => "activity", "params" => obj! {"room_id" => "general", "read_message_id" => id.as_str()}});
-        a.notification("activity");
-        b.notification("activity");
+        // A reply on the same connection follows the cursor's handling.
+        b.result("me", &format!("after-{id}"), Object::new());
     }
     let got = relay.pushes(&server, &mut a);
     assert!(
@@ -862,8 +863,23 @@ fn test_badge_pushes_coalesce() {
         "coalesced badge pushes: {:?}",
         paths(&got)
     );
-    // A guest that leaves takes its registrations with it: its leaves send
-    // nothing.
+}
+
+/// A guest that leaves takes its registrations with it: its leaves send
+/// nothing.
+#[test]
+fn test_guest_retirement_sends_no_badge() {
+    let relay = new_test_relay();
+    let server = push_test_server();
+    server.app.lock().badge_delay = Duration::from_millis(300);
+    let mut clients = dial_group(&server, 2);
+    let mut b = clients.pop().unwrap();
+    let mut a = clients.pop().unwrap();
+    b.result(
+        "push_register",
+        "phone",
+        obj! {"kind" => "relay", "url" => format!("{}/phone", relay.url), "wake" => list(&["badge"])},
+    );
     save(&mut a, "more", obj! {"body" => obj! {"text" => "more"}});
     b.notification("message");
     let b_id = b.user_id.clone();
@@ -1164,6 +1180,7 @@ fn test_push_unread_and_badge() {
     let server = push_test_server();
     let mut clients = dial_group(&server, 2);
     let mut b = clients.pop().unwrap();
+    make_account(&server, &b.user_id);
     let mut a = clients.pop().unwrap();
     b.result(
         "push_register",
@@ -1224,12 +1241,16 @@ fn test_push_unread_and_badge() {
         b.notification("message");
         message_id
     };
-    let read = |b: &mut TestClient, others: &[&TestClient], room_id: &str, message_id: &str| {
+    let read = |b: &mut TestClient, _others: &[&TestClient], room_id: &str, message_id: &str| {
         b.write(&obj! {"method" => "activity", "params" => obj! {"room_id" => room_id, "read_message_id" => message_id}});
-        for c in others {
-            c.notification("activity");
-        }
-        b.notification("activity");
+        // A reply on the same connection follows the cursor's handling.
+        let id = b.next_id("after-read");
+        reply(
+            b,
+            "history",
+            &id,
+            obj! {"room_id" => "general", "limit" => 1i64},
+        );
     };
     // A message no scope of /mentions selects still changes the count it
     // shows: it gets a badge push.

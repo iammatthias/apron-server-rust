@@ -97,6 +97,12 @@ pub struct UserState {
     pub posts: Option<Limiter>,
     /// Bounds the URLs of the user's messages that are unfurled.
     pub unfurls: Option<Limiter>,
+    /// Bound the user's typing relays and read cursor relays, each
+    /// ACTIVITY_RELAYS_PER_MINUTE; `typing_notice_at` is when the user was
+    /// last told typing was throttled, in Unix milliseconds.
+    pub typing_relays: Option<Limiter>,
+    pub read_relays: Option<Limiter>,
+    pub typing_notice_at: i64,
 
     /// The chosen status, set with `me` (§4.5.1); `mute` and `room_mutes`
     /// their mutes; `shown` the shown status as last noted, and `offline_at`
@@ -160,6 +166,9 @@ impl UserState {
             status_limit: None,
             status_timer: None,
             status_requests: None,
+            typing_relays: None,
+            read_relays: None,
+            typing_notice_at: 0,
             pings: BTreeMap::new(),
             unread: None,
             badge_timer: None,

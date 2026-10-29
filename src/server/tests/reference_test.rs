@@ -17,6 +17,7 @@ use crate::server::embeds::{
 use crate::server::protocol::*;
 use crate::server::rooms::{MAX_CREATED_ROOMS, MAX_THREADS, MAX_THREADS_PER_USER};
 use crate::server::users::{normalize_name, MAX_NAME_RUNES};
+use crate::server::Config;
 use crate::ws;
 
 /// After a guest joins general and posts one message, room_list reports the
@@ -1490,8 +1491,14 @@ fn test_prev_log_id_links_records() {
 
 #[test]
 fn test_read_cursors() {
-    let server = new_test_server(default_config());
+    let server = new_test_server(Config {
+        read_receipts: true,
+        ..default_config()
+    });
     let mut clients = dial_group(&server, 2);
+    for c in &clients {
+        make_account(&server, &c.user_id);
+    }
     let (mut a, mut b) = (clients.remove(0), clients.remove(0));
     let (first, _) = save(&mut a, "one", obj! {"body" => obj! {"text" => "one"}});
     b.notification("message");
@@ -1516,6 +1523,7 @@ fn test_read_cursors() {
     // Kept cursors follow a room_list result that lists the room: every
     // member's for a joined room, only the user's own for another.
     let mut c = dial_test_client(&server);
+    make_account(&server, &c.user_id);
     expect_membership(&a, "general", &c.user_id, true);
     expect_membership(&b, "general", &c.user_id, true);
     c.write(
