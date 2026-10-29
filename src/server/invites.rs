@@ -141,6 +141,7 @@ impl State {
         if self.used_ids.contains(&user_id.to_lowercase()) || self.room_named_locked(user_id) {
             return Err(taken);
         }
+        self.charge_registration_locked(c, true)?;
         let token = self.create_invited_locked(user_id, user_id);
         self.join_default_room_locked(user_id);
         let mut parts = vec![
@@ -282,6 +283,7 @@ impl State {
                 "This invite is used up or has expired; ask an admin for a new one",
             ));
         }
+        self.charge_registration_locked(c, true)?;
         if let Some(invite) = &mut self.join_invite {
             invite.remaining -= 1;
         }

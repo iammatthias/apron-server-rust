@@ -319,6 +319,12 @@ pub fn server_settings(options: &Options) -> Result<Settings, String> {
         user_history_day: rate("limit.history-per-day", l.history_per_day)?,
         ip_history_day: rate("limit.ip-history-per-day", l.ip_history_per_day)?,
         server_history_day: rate("limit.server-history-per-day", l.server_history_per_day)?,
+        registrations_per_ip_day: rate(
+            "limit.registrations-per-ip-day",
+            l.registrations_per_ip_day,
+        )?,
+        registrations_per_day: rate("limit.registrations-per-day", l.registrations_per_day)?,
+        identities: nonnegative("limit.identities", l.identities)?,
     };
     Ok(config)
 }

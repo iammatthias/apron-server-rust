@@ -176,16 +176,13 @@ working.
 
 ### `/invite-bot` and bot users (§4.1, §3.2, §3.3)
 
-**Reference.** apron-server-cloudflare counts a new bot against its
-registration limits, ends the token notice with a `Say hello when you join`
-line, closes a replaced token's connections with 1008, and makes a second
-bot, `bot_<new>`, for an owner renamed with `/rename`.
+**Reference.** apron-server-cloudflare ends the token notice with a `Say
+hello when you join` line, closes a replaced token's connections with
+1008, and makes a second bot, `bot_<new>`, for an owner renamed with
+`/rename`.
 
 **This server.**
 
-- No registration limits (see
-  [Registration limits](#registration-limits-spec-6)). One bot per account
-  bounds the bots.
 - No `Say hello` line, so bots do not greet rooms.
 - A replaced token's connections close as described in
   [Closing a connection](#closing-a-connection).
@@ -565,22 +562,19 @@ its `auth`. There is no daily admission budget.
 **Why.** A client sees the reason in the protocol instead of a failed
 handshake. The daily budget guards Cloudflare's bill.
 
-### Registration limits (SPEC §6)
+### Registration limits (SPEC §6), `--limit.registrations-*`, `--limit.identities`
 
-**Reference.** apron-server-cloudflare counts each new account, bot and
-added passkey as a registration: 5 a UTC day per IP key and 300 a day for
-the server. Past either, the request is `retry_after` with `Registration
-limit reached for this network` or `Registration limit reached` until the
-day ends. A new account or bot past 10,000 identities is `denied` with
-`registration_closed`.
+**Reference.** apron-server-cloudflare keeps its registration counts in
+SQLite, so a restart keeps them.
 
-**This server.** Has no registration limits. Passkey registration, email
-sign-in, `/invite-token`, `/invite` sign-ups and `/invite-bot` make
-accounts without a count.
+**This server.** Has the same counts, defaults, refusals and texts, each a
+flag (0 is unlimited): 5 registrations a UTC day per IP key, 300 for the
+server, and 10,000 accounts and bots. An email sign-up, and a guest's
+added email address, count as a new account. The counts live in memory,
+so a restart starts each address's day and the server's afresh.
 
-**Why.** Cloudflare's counts bound the rows sign-ups write against its
-storage budget, and this server has no storage budget (see
-[Budget stops](#budget-stops-storage-failures-and-admin-alerts-spec-6)).
+**Why.** Durable counts guard Cloudflare's bill across evictions. A
+self-hosted server restarts rarely.
 
 ### Posting limits (SPEC §6, Posting), `--limit.*posts*`
 

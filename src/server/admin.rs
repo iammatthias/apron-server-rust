@@ -49,6 +49,7 @@ impl State {
                 ))
             }
             None => {
+                self.charge_registration_locked(c, true)?;
                 self.used_ids.insert(ADMIN_USER_ID.to_owned());
                 self.touch_used_id(ADMIN_USER_ID);
                 let mut admin = self.new_user_locked(ADMIN_USER_ID, ADMIN_USER_NAME);

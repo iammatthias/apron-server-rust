@@ -151,6 +151,9 @@ impl State {
             }
             None => false,
         };
+        if !exists {
+            self.charge_registration_locked(c, true)?;
+        }
         // A user_id is never reissued (§3.3): one a user held before the
         // bot_ prefix was reserved stays theirs.
         if !exists && !self.claim_user_id_locked(&bot_id) {

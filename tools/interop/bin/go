@@ -43,6 +43,9 @@ if [[ "${1:-}" == run && "${2:-}" == ./cmd/aprond ]]; then
 		--limit.ip-history-per-minute=0
 		--limit.ip-history-per-day=0
 		--limit.server-history-per-day=0
+		--limit.registrations-per-ip-day=0
+		--limit.registrations-per-day=0
+		--limit.identities=0
 	)
 	# shellcheck disable=SC2206
 	exec "$APROND_BIN" "${@:3}" "${extra[@]}" ${APROND_EXTRA_FLAGS:-}
