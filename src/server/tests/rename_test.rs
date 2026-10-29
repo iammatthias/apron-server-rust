@@ -449,7 +449,7 @@ fn test_rename_persists() {
         "the bot's owner"
     );
     assert!(
-        st.bots.of_bot(&bot).is_some(),
+        st.bots.last_of(&bot).is_some(),
         "the bot's token did not survive the restart"
     );
     assert_eq!(st.messages[&made.upload_message].owner, "david");

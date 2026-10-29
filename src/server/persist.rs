@@ -409,6 +409,71 @@ pub struct StoredEmbed {
     pub seq: i64,
 }
 
+/// The entries of one write to the store.
+#[derive(Default)]
+struct Batch(Vec<Entry>);
+
+impl Batch {
+    fn put<T: json::MarshalTo>(&mut self, kind: &str, id: &str, value: &T) {
+        match encode_json(value) {
+            Some(encoded) => self.0.push(Entry::put(kind, id, encoded)),
+            None => slog::error(
+                "cannot encode state for the store",
+                &[
+                    "kind".into(),
+                    slog::Value::from(kind).into(),
+                    "id".into(),
+                    slog::Value::from(id).into(),
+                ],
+            ),
+        }
+    }
+
+    /// Puts `value` under `id`, or deletes the entry without one.
+    fn put_or_delete<T: json::MarshalTo>(&mut self, kind: &str, id: &str, value: Option<T>) {
+        match value {
+            Some(value) => self.put(kind, id, &value),
+            None => self.0.push(Entry::delete(kind, id)),
+        }
+    }
+
+    /// Writes each of `ids` of `kind` as the store keeps it, under
+    /// `store_id(id)`: `stored(id)` when it still exists, else a delete.
+    fn sync<'a, I: ?Sized + 'a, T: json::MarshalTo>(
+        &mut self,
+        kind: &str,
+        ids: impl IntoIterator<Item = &'a I>,
+        store_id: impl Fn(&I) -> String,
+        stored: impl Fn(&I) -> Option<T>,
+    ) {
+        for id in ids {
+            self.put_or_delete(kind, &store_id(id), stored(id));
+        }
+    }
+}
+
+/// A push registration as the store keeps it.
+fn stored_push_of(p: &PushRegistration) -> StoredPush {
+    let mut stored = StoredPush {
+        user: p.user_id.clone(),
+        kind: p.kind.clone(),
+        url: p.url.clone(),
+        token: p.token.clone(),
+        push_id: p.push_id.clone(),
+        wake: p.wake.names(),
+        renewed: p.renewed.clone(),
+        ..StoredPush::default()
+    };
+    if p.device != [0; 32] {
+        stored.device = session_id(&p.device);
+    }
+    if let Some(keys) = &p.keys {
+        stored.p256dh = encode_base64_url(&keys.p256dh);
+        stored.auth = encode_base64_url(&keys.auth);
+    }
+    stored
+}
+
 impl State {
     /// The counters entry of the current state.
     pub fn meta_locked(&self) -> StoredMeta {
@@ -448,188 +513,112 @@ impl State {
     }
 
     pub fn entries_for(&self, d: &DirtySet) -> Vec<Entry> {
-        let mut batch: Vec<Entry> = Vec::new();
-        fn put<T: json::MarshalTo>(batch: &mut Vec<Entry>, kind: &str, id: &str, value: &T) {
-            match encode_json(value) {
-                Some(encoded) => batch.push(Entry::put(kind, id, encoded)),
-                None => slog::error(
-                    "cannot encode state for the store",
-                    &[
-                        "kind".into(),
-                        slog::Value::from(kind).into(),
-                        "id".into(),
-                        slog::Value::from(id).into(),
-                    ],
-                ),
-            }
+        let DirtySet {
+            records,
+            rooms,
+            messages,
+            users,
+            sessions,
+            devices,
+            bots,
+            invites,
+            embeds,
+            pushes,
+            dedup,
+            used_ids,
+            vapid,
+            server,
+            emoji,
+        } = d;
+        let mut batch = Batch::default();
+        for id in used_ids {
+            batch.put(ENTRY_USED_ID, id, &true);
         }
-        for id in &d.used_ids {
-            put(&mut batch, ENTRY_USED_ID, id, &true);
+        batch.sync(
+            ENTRY_RECORD,
+            records,
+            |id| format_id(*id),
+            |id| {
+                self.records.get(id).map(|r| StoredRecord {
+                    kind: r.kind as i64,
+                    raw: Value::from(r.raw.clone()),
+                    rooms: r.rooms.clone(),
+                })
+            },
+        );
+        batch.sync(ENTRY_ROOM, rooms, String::clone, |id| {
+            self.rooms.get(id).map(|r| self.stored_room_locked(r))
+        });
+        batch.sync(ENTRY_MESSAGE, messages, String::clone, |id| {
+            self.messages.get(id).map(stored_message_of)
+        });
+        batch.sync(ENTRY_USER, users, String::clone, |id| {
+            self.users.get(id).map(stored_user_of)
+        });
+        batch.sync(ENTRY_SESSION, sessions, session_id, |key| {
+            self.sessions.get(key).map(|session| StoredSession {
+                user: session.user.clone(),
+                origin: session.origin.clone(),
+                expires: session.expires.clone(),
+            })
+        });
+        batch.sync(ENTRY_DEVICE, devices, session_id, |key| {
+            self.devices.get(key).map(|device| StoredDevice {
+                user: device.user.clone(),
+                name: device.name.clone(),
+                created: device.created.clone(),
+            })
+        });
+        batch.sync(ENTRY_BOT, bots, session_id, |key| {
+            self.bots.get(key).map(|bot| StoredBot {
+                bot: bot.bot.clone(),
+                owner: bot.owner.clone(),
+                created: bot.created.clone(),
+            })
+        });
+        batch.sync(ENTRY_INVITE, invites, session_id, |key| {
+            self.invites.get(key).map(|invite| StoredInvite {
+                user: invite.user.clone(),
+                created: invite.created.clone(),
+            })
+        });
+        batch.sync(ENTRY_EMBED, embeds, String::clone, |id| {
+            self.embeds.get(id).map(stored_embed_of)
+        });
+        batch.sync(ENTRY_PUSH, pushes, String::clone, |key| {
+            self.pushes.get(key).map(stored_push_of)
+        });
+        batch.sync(
+            ENTRY_DEDUP,
+            dedup,
+            |(user_id, request_id)| format!("{user_id} {request_id}"),
+            |(user_id, request_id)| {
+                let u = self.users.get(user_id).filter(|u| u.persists())?;
+                let e = u.dedup.get(request_id)?;
+                let result = e.result()?;
+                Some(StoredDedup {
+                    fingerprint: hex::encode(&e.fingerprint),
+                    at: e.at,
+                    result: Value::from(encode_json(&result)?),
+                })
+            },
+        );
+        if *server {
+            let stored = self.server_meta.clone();
+            let stored = (stored != StoredServer::default()).then_some(stored);
+            batch.put_or_delete(ENTRY_META, "server", stored);
         }
-        for id in &d.records {
-            match self.records.get(id) {
-                Some(r) => put(
-                    &mut batch,
-                    ENTRY_RECORD,
-                    &format_id(r.id),
-                    &StoredRecord {
-                        kind: r.kind as i64,
-                        raw: Value::from(r.raw.clone()),
-                        rooms: r.rooms.clone(),
-                    },
-                ),
-                None => batch.push(Entry::delete(ENTRY_RECORD, &format_id(*id))),
-            }
-        }
-        for id in &d.rooms {
-            match self.rooms.get(id) {
-                Some(r) => put(&mut batch, ENTRY_ROOM, id, &self.stored_room_locked(r)),
-                None => batch.push(Entry::delete(ENTRY_ROOM, id)),
-            }
-        }
-        for id in &d.messages {
-            match self.messages.get(id) {
-                Some(m) => put(&mut batch, ENTRY_MESSAGE, id, &stored_message_of(m)),
-                None => batch.push(Entry::delete(ENTRY_MESSAGE, id)),
-            }
-        }
-        for id in &d.users {
-            match self.users.get(id) {
-                Some(u) => put(&mut batch, ENTRY_USER, id, &stored_user_of(u)),
-                None => batch.push(Entry::delete(ENTRY_USER, id)),
-            }
-        }
-        for key in &d.sessions {
-            match self.sessions.get(key) {
-                Some(session) => put(
-                    &mut batch,
-                    ENTRY_SESSION,
-                    &session_id(key),
-                    &StoredSession {
-                        user: session.user.clone(),
-                        origin: session.origin.clone(),
-                        expires: session.expires.clone(),
-                    },
-                ),
-                None => batch.push(Entry::delete(ENTRY_SESSION, &session_id(key))),
-            }
-        }
-        for key in &d.devices {
-            match self.devices.get(key) {
-                Some(device) => put(
-                    &mut batch,
-                    ENTRY_DEVICE,
-                    &session_id(key),
-                    &StoredDevice {
-                        user: device.user.clone(),
-                        name: device.name.clone(),
-                        created: device.created.clone(),
-                    },
-                ),
-                None => batch.push(Entry::delete(ENTRY_DEVICE, &session_id(key))),
-            }
-        }
-        for key in &d.bots {
-            match self.bots.get(key) {
-                Some(bot) => put(
-                    &mut batch,
-                    ENTRY_BOT,
-                    &session_id(key),
-                    &StoredBot {
-                        bot: bot.bot.clone(),
-                        owner: bot.owner.clone(),
-                        created: bot.created.clone(),
-                    },
-                ),
-                None => batch.push(Entry::delete(ENTRY_BOT, &session_id(key))),
-            }
-        }
-        for key in &d.invites {
-            match self.invites.get(key) {
-                Some(invite) => put(
-                    &mut batch,
-                    ENTRY_INVITE,
-                    &session_id(key),
-                    &StoredInvite {
-                        user: invite.user.clone(),
-                        created: invite.created.clone(),
-                    },
-                ),
-                None => batch.push(Entry::delete(ENTRY_INVITE, &session_id(key))),
-            }
-        }
-        for id in &d.embeds {
-            match self.embeds.get(id) {
-                Some(e) => put(&mut batch, ENTRY_EMBED, id, &stored_embed_of(e)),
-                None => batch.push(Entry::delete(ENTRY_EMBED, id)),
-            }
-        }
-        for key in &d.pushes {
-            match self.pushes.get(key) {
-                Some(p) => {
-                    let mut stored = StoredPush {
-                        user: p.user_id.clone(),
-                        kind: p.kind.clone(),
-                        url: p.url.clone(),
-                        token: p.token.clone(),
-                        push_id: p.push_id.clone(),
-                        wake: p.wake.names(),
-                        renewed: p.renewed.clone(),
-                        ..StoredPush::default()
-                    };
-                    if p.device != [0; 32] {
-                        stored.device = session_id(&p.device);
-                    }
-                    if let Some(keys) = &p.keys {
-                        stored.p256dh = encode_base64_url(&keys.p256dh);
-                        stored.auth = encode_base64_url(&keys.auth);
-                    }
-                    put(&mut batch, ENTRY_PUSH, key, &stored);
-                }
-                None => batch.push(Entry::delete(ENTRY_PUSH, key)),
-            }
-        }
-        for (user_id, request_id) in &d.dedup {
-            let key = format!("{user_id} {request_id}");
-            let stored = self
-                .users
-                .get(user_id)
-                .filter(|u| u.persists())
-                .and_then(|u| u.dedup.get(request_id))
-                .and_then(|e| {
-                    let result = e.result()?;
-                    Some(StoredDedup {
-                        fingerprint: hex::encode(&e.fingerprint),
-                        at: e.at,
-                        result: Value::from(encode_json(&result)?),
-                    })
-                });
-            match stored {
-                Some(stored) => put(&mut batch, ENTRY_DEDUP, &key, &stored),
-                None => batch.push(Entry::delete(ENTRY_DEDUP, &key)),
-            }
-        }
-        if d.server {
-            if self.server_meta == StoredServer::default() {
-                batch.push(Entry::delete(ENTRY_META, "server"));
-            } else {
-                put(&mut batch, ENTRY_META, "server", &self.server_meta);
-            }
-        }
-        if d.emoji {
+        if *emoji {
             let stored = self.stored_emoji();
-            if stored == StoredEmoji::default() {
-                batch.push(Entry::delete(ENTRY_META, "emoji"));
-            } else {
-                put(&mut batch, ENTRY_META, "emoji", &stored);
-            }
+            let stored = (stored != StoredEmoji::default()).then_some(stored);
+            batch.put_or_delete(ENTRY_META, "emoji", stored);
         }
-        if d.vapid && self.vapid_stored {
+        if *vapid && self.vapid_stored {
             if let Some(vapid) = &self.vapid {
-                put(&mut batch, ENTRY_META, "vapid", &vapid.encoded());
+                batch.put(ENTRY_META, "vapid", &vapid.encoded());
             }
         }
-        batch
+        batch.0
     }
 
     pub fn stored_room_locked(&self, r: &RoomState) -> StoredRoom {
@@ -768,6 +757,11 @@ pub fn stored_user_of(u: &UserState) -> StoredUser {
             .collect(),
         pings: u.pings.clone(),
     }
+}
+
+/// The key a token entry's id encodes (`session_id`), if any.
+fn token_key(id: &str) -> Option<[u8; 32]> {
+    hex::decode(id).ok().and_then(|key| key.try_into().ok())
 }
 
 fn decode<T: json::UnmarshalFrom>(kind: &str, id: &str, raw: &[u8]) -> Result<T, StoreError> {
@@ -1178,10 +1172,7 @@ impl Server {
         }
 
         for (id, raw) in of(ENTRY_SESSION) {
-            let Some(key) = hex::decode(id)
-                .ok()
-                .and_then(|key| <[u8; 32]>::try_from(key).ok())
-            else {
+            let Some(key) = token_key(id) else {
                 continue;
             };
             let stored = decode::<StoredSession>(ENTRY_SESSION, id, raw)?;
@@ -1203,10 +1194,7 @@ impl Server {
 
         let mut devices = Vec::new();
         for (id, raw) in of(ENTRY_DEVICE) {
-            let Some(key) = hex::decode(id)
-                .ok()
-                .and_then(|key| <[u8; 32]>::try_from(key).ok())
-            else {
+            let Some(key) = token_key(id) else {
                 continue;
             };
             let stored = decode::<StoredDevice>(ENTRY_DEVICE, id, raw)?;
@@ -1230,10 +1218,7 @@ impl Server {
         }
 
         for (id, raw) in of(ENTRY_INVITE) {
-            let Some(key) = hex::decode(id)
-                .ok()
-                .and_then(|key| <[u8; 32]>::try_from(key).ok())
-            else {
+            let Some(key) = token_key(id) else {
                 continue;
             };
             let stored = decode::<StoredInvite>(ENTRY_INVITE, id, raw)?;
@@ -1254,10 +1239,7 @@ impl Server {
         // two; one that does keeps the newest.
         let mut bots = Vec::new();
         for (id, raw) in of(ENTRY_BOT) {
-            let Some(key) = hex::decode(id)
-                .ok()
-                .and_then(|key| <[u8; 32]>::try_from(key).ok())
-            else {
+            let Some(key) = token_key(id) else {
                 continue;
             };
             let stored = decode::<StoredBot>(ENTRY_BOT, id, raw)?;
@@ -1273,7 +1255,7 @@ impl Server {
         }
         bots.sort_by_key(|(_, stored)| stored.created.unix_nano());
         for (key, stored) in bots {
-            if let Some(older) = st.bots.of_bot(&stored.bot) {
+            if let Some(older) = st.bots.last_of(&stored.bot) {
                 st.bots.remove(&older);
                 st.touch_bot(older);
             }
@@ -1304,7 +1286,7 @@ impl Server {
             let u = &st.users[&id];
             if u.roles == [BOT_ROLE]
                 && u.active == 0
-                && (st.bots.of_bot(&id).is_some() || st.invites.of_user(&id).is_some())
+                && (st.bots.last_of(&id).is_some() || st.invites.last_of(&id).is_some())
             {
                 st.users.get_mut(&id).expect("user exists").active = now.unix_milli();
                 st.touch_user(&id);

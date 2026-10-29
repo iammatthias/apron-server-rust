@@ -14,9 +14,10 @@ use super::bots::{BOT_SIGNS_IN_WITH_TOKEN, BOT_TOKEN_PREFIX};
 use super::client::Client;
 use super::devices::DEVICE_TOKEN_PREFIX;
 use super::protocol::*;
-use super::remap::{Fate, Remap};
+use super::remap::Remap;
 use super::rooms::room_update;
 use super::server::State;
+use super::tokens::{Held, TokenTable};
 use super::user_ids::{candidate_user_id, normalize_name};
 use crate::obj;
 use crate::webauthn::protocol::{
@@ -113,35 +114,45 @@ pub struct Session {
 /// The SHA-256 of a bearer token.
 pub type SessionKey = [u8; 32];
 
+impl Held for Session {
+    const ONE_PER_HOLDER: bool = false;
+    fn holder(&self) -> &str {
+        &self.user
+    }
+    fn set_holder(&mut self, to: &str) {
+        self.user = to.to_owned();
+    }
+}
+
 /// The sessions by key, with an index by expiry every change keeps in step,
 /// so a prune visits only the expired sessions.
 #[derive(Default)]
 pub struct Sessions {
-    by_key: BTreeMap<SessionKey, Session>,
+    tokens: TokenTable<Session>,
     by_expiry: BTreeSet<(i64, SessionKey)>,
 }
 
 impl Sessions {
     pub fn get(&self, key: &SessionKey) -> Option<&Session> {
-        self.by_key.get(key)
+        self.tokens.get(key)
     }
 
     pub fn keys(&self) -> impl Iterator<Item = &SessionKey> {
-        self.by_key.keys()
+        self.tokens.keys()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.by_key.is_empty()
+        self.tokens.is_empty()
     }
 
     pub fn insert(&mut self, key: SessionKey, session: Session) {
         self.remove(&key);
         self.by_expiry.insert((session.expires.unix_nano(), key));
-        self.by_key.insert(key, session);
+        self.tokens.insert(key, session);
     }
 
     pub fn remove(&mut self, key: &SessionKey) -> Option<Session> {
-        let session = self.by_key.remove(key)?;
+        let session = self.tokens.remove(key)?;
         self.by_expiry.remove(&(session.expires.unix_nano(), *key));
         Some(session)
     }
@@ -149,14 +160,9 @@ impl Sessions {
     /// Removes the sessions of every user `remap` drops or renames, so a
     /// renamed user signs in again, and returns their keys.
     pub(super) fn remap(&mut self, remap: &Remap) -> Vec<SessionKey> {
-        let keys: Vec<SessionKey> = self
-            .by_key
-            .iter()
-            .filter(|(_, s)| remap.fate(&s.user) != Fate::Keep)
-            .map(|(key, _)| *key)
-            .collect();
+        let keys = self.tokens.remove_holders(remap);
         for key in &keys {
-            self.remove(key);
+            self.by_expiry.retain(|(_, k)| k != key);
         }
         keys
     }
@@ -173,7 +179,7 @@ impl Sessions {
         self.by_expiry
             .range(..=(now.unix_nano(), [u8::MAX; 32]))
             .map(|(_, key)| *key)
-            .filter(|key| !now.before(&self.by_key[key].expires))
+            .filter(|key| !now.before(&self.tokens.get(key).expect("indexed").expires))
             .collect()
     }
 }

@@ -3,7 +3,6 @@
 //! the `token` scheme (§3.2), from any origin, until the same name mints a
 //! new one. It follows apron-server-cloudflare's `/invite-device`.
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use rust_stdlib::time::{self, Time};
@@ -13,8 +12,8 @@ use super::client::{Client, ClientId};
 use super::commands::CommandCtx;
 use super::email::web_socket_url;
 use super::protocol::*;
-use super::remap::{Fate, Remap};
 use super::server::State;
+use super::tokens::{Held, TokenTable};
 use super::webauthn::SessionKey;
 
 /// Device tokens an account may hold at once, each under its own name.
@@ -30,79 +29,17 @@ pub struct DeviceToken {
     pub created: Time,
 }
 
-/// The device tokens by key, and each account's keys oldest first, so a
-/// name again finds its token and the cap names them in order.
-#[derive(Default)]
-pub struct DeviceTokens {
-    by_key: BTreeMap<SessionKey, DeviceToken>,
-    by_user: BTreeMap<String, Vec<SessionKey>>,
-}
+/// The device tokens, each account's oldest first, so a name again finds its
+/// token and the cap names them in order.
+pub type DeviceTokens = TokenTable<DeviceToken>;
 
-impl DeviceTokens {
-    pub fn get(&self, key: &SessionKey) -> Option<&DeviceToken> {
-        self.by_key.get(key)
+impl Held for DeviceToken {
+    const ONE_PER_HOLDER: bool = false;
+    fn holder(&self) -> &str {
+        &self.user
     }
-
-    pub fn keys(&self) -> impl Iterator<Item = &SessionKey> {
-        self.by_key.keys()
-    }
-
-    /// Adds a token after the account's others.
-    pub fn insert(&mut self, key: SessionKey, token: DeviceToken) {
-        self.by_user
-            .entry(token.user.clone())
-            .or_default()
-            .push(key);
-        self.by_key.insert(key, token);
-    }
-
-    pub fn remove(&mut self, key: &SessionKey) -> Option<DeviceToken> {
-        let token = self.by_key.remove(key)?;
-        if let Some(held) = self.by_user.get_mut(&token.user) {
-            held.retain(|k| k != key);
-            if held.is_empty() {
-                self.by_user.remove(&token.user);
-            }
-        }
-        Some(token)
-    }
-
-    /// Removes the tokens of the accounts `remap` drops, or moves the
-    /// renamed account's, and returns their keys.
-    pub(super) fn remap(&mut self, remap: &Remap) -> Vec<SessionKey> {
-        let mut changed = Vec::new();
-        for from in remap.sources() {
-            let keys = self.by_user.remove(from).unwrap_or_default();
-            changed.extend(keys.iter().copied());
-            match remap.fate(from) {
-                Fate::Rename(to) if !keys.is_empty() => {
-                    for key in &keys {
-                        if let Some(token) = self.by_key.get_mut(key) {
-                            token.user = to.to_owned();
-                        }
-                    }
-                    self.by_user.insert(to.to_owned(), keys);
-                }
-                _ => {
-                    for key in &keys {
-                        self.by_key.remove(key);
-                    }
-                }
-            }
-        }
-        changed
-    }
-
-    /// An account's tokens, oldest first.
-    pub fn of_user<'a>(
-        &'a self,
-        user_id: &str,
-    ) -> impl Iterator<Item = (SessionKey, &'a DeviceToken)> + 'a {
-        self.by_user
-            .get(user_id)
-            .into_iter()
-            .flatten()
-            .map(|key| (*key, &self.by_key[key]))
+    fn set_holder(&mut self, to: &str) {
+        self.user = to.to_owned();
     }
 }
 
@@ -153,7 +90,7 @@ impl State {
         }
         let held: Vec<(SessionKey, String)> = self
             .devices
-            .of_user(&user_id)
+            .of(&user_id)
             .map(|(key, token)| (key, token.name.clone()))
             .collect();
         let previous = held
