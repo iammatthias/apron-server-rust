@@ -125,40 +125,45 @@ fn test_push_wake_scopes() {
     );
 }
 
-/// A wake list's names past the first MAX_WAKE_SCOPES, and names longer
-/// than MAX_WAKE_SCOPE_BYTES, are ignored rather than refused (§4.9).
+/// A wake list of more than 16 names is denied, and a name past 64
+/// characters too_large, as on Cloudflare; at the bounds it registers.
 #[test]
-fn test_wake_names_past_the_bounds_are_ignored() {
+fn test_wake_names_past_the_bounds_are_refused() {
     let server = push_test_server();
     let mut a = push_client(&server);
     let endpoint = "http://127.0.0.1:1/p";
-    let mut wake_of = |id: &str, wake: Vec<String>| -> WakeScope {
-        a.result(
+    let mut register = |id: &str, wake: Vec<String>| -> Json {
+        let frame = a.call(
             "push_register",
             id,
             obj! {"kind" => "relay", "url" => endpoint, "wake" => wake},
         );
-        server.app.lock().pushes[&push_key(&a.user_id, endpoint)].wake
+        frame.get("error").or(frame.get("result")).cloned().unwrap()
     };
-    let mut many = vec!["ext:filler".to_owned(); MAX_WAKE_SCOPES + 4];
+    let mut many = vec!["ext:filler".to_owned(); 16];
     many[0] = "replies".into();
-    many[MAX_WAKE_SCOPES] = "mentions".into();
+    assert_eq!(register("sixteen", many.clone()), Json::from(Object::new()));
+    many.push("mentions".into());
     assert_eq!(
-        wake_of("many", many),
-        WakeScope::REPLIES,
-        "wake of {} names",
-        MAX_WAKE_SCOPES + 4
+        register("seventeen", many),
+        Json::from(obj! {"code" => CODE_DENIED, "message" => "wake lists at most 16 scope names"})
+    );
+    // 64 characters, each two bytes in UTF-8: JavaScript's length counts
+    // them as 64.
+    assert_eq!(
+        register("long", vec!["é".repeat(64)]),
+        Json::from(Object::new())
     );
     assert_eq!(
-        wake_of(
-            "long",
-            vec![
-                format!("mentions{}", " ".repeat(MAX_WAKE_SCOPE_BYTES)),
-                "private".into()
-            ]
-        ),
-        WakeScope::PRIVATE,
-        "wake with a long name"
+        register("longer", vec!["é".repeat(65), "private".into()]),
+        Json::from(
+            obj! {"code" => CODE_TOO_LARGE, "message" => "a wake scope name is at most 64 characters"}
+        )
+    );
+    assert_eq!(
+        server.app.lock().pushes[&push_key(&a.user_id, endpoint)].wake,
+        WakeScope(0),
+        "the last registration that took"
     );
 }
 

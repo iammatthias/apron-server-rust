@@ -11,7 +11,6 @@ use rust_stdlib::time::{self, Duration, Time};
 
 use super::client::Client as Connection;
 use super::messages::mentions;
-use super::outbound::public_address;
 use super::protocol::*;
 use super::push_delivery::DoneFn;
 use super::server::{Server, State};
@@ -27,10 +26,11 @@ pub const MAX_PUSH_URL_BYTES: usize = 512;
 pub const MAX_PUSH_TOKEN_LEN: usize = 4096;
 /// Bounds the JSON payload every kind delivers (§4.9).
 pub const MAX_PUSH_PAYLOAD_BYTES: usize = 2048;
-/// Bound the wake names a server reads: those beyond the first
-/// MAX_WAKE_SCOPES, and longer ones, are ignored.
+/// Bound a registration's wake list: more names than MAX_WAKE_SCOPES are
+/// `denied`, and a name longer than MAX_WAKE_SCOPE_CHARS UTF-16 code units
+/// (JavaScript's length) is `too_large`, as on Cloudflare.
 pub const MAX_WAKE_SCOPES: usize = 16;
-pub const MAX_WAKE_SCOPE_BYTES: usize = 64;
+pub const MAX_WAKE_SCOPE_CHARS: usize = 64;
 /// How long a registration lasts unless registered again (§4.9); clients
 /// register on each connection. PUSH_SWEEP_INTERVAL is how often expired
 /// registrations are looked for.
@@ -611,58 +611,77 @@ pub fn push_payload(push_id: &str, unread: i64, snapshot: &Object) -> Vec<u8> {
     payload
 }
 
+/// Host names that resolve only inside a network, never to a public push
+/// service (Cloudflare's INTERNAL_HOST_SUFFIXES).
+const INTERNAL_HOST_SUFFIXES: [&str; 9] = [
+    "localhost",
+    "localdomain",
+    "local",
+    "internal",
+    "intranet",
+    "lan",
+    "home.arpa",
+    "corp",
+    "private",
+];
+
 /// An endpoint in the one form a registration is kept under: an absolute
-/// URL without credentials, whitespace, or a host ending in a dot, with its
-/// scheme and host lowercased and no default port. The error says why it is
-/// not one.
-pub fn normalize_push_url(endpoint: &str) -> Result<String, &'static str> {
-    let mut parsed = match url::parse(endpoint) {
-        Ok(parsed)
-            if !parsed.host.is_empty()
-                && parsed.user.is_none()
-                && parsed.opaque.is_empty()
-                && !endpoint.chars().any(|c| c <= ' ') =>
-        {
-            parsed
-        }
-        _ => return Err("url must be an absolute URL"),
-    };
+/// URL with a host and no whitespace, with its scheme and host lowercased
+/// and no default port, returned with the parsed URL. None when it is not
+/// one.
+pub fn normalize_push_url(endpoint: &str) -> Option<(String, url::Url)> {
+    let mut parsed = url::parse(endpoint)
+        .ok()
+        .filter(|u| !u.host.is_empty() && u.opaque.is_empty())
+        .filter(|_| !endpoint.chars().any(|c| c <= ' '))?;
     parsed.scheme = parsed.scheme.to_lowercase();
-    let host = parsed.hostname().to_lowercase();
-    if host.is_empty() || host.ends_with('.') {
-        return Err("url must name a host without a trailing dot");
-    }
     parsed.host = webpush::host_port(&parsed.scheme.clone(), &parsed);
     parsed.host_raw = None;
-    Ok(parsed.to_string())
+    Some((parsed.to_string(), parsed))
 }
 
-/// Normalizes an endpoint (normalize_push_url) and requires https (http too
-/// with allow_insecure), a host that is not an internal address literal or
-/// localhost, and one `hosts` allows. Names that resolve to internal
-/// addresses are refused when dialing.
+/// Normalizes an endpoint (normalize_push_url) and checks it as
+/// Cloudflare's pushEndpointError does: https, no credentials, no port but
+/// https's own, no trailing dot, a host that names a public push service
+/// rather than an address, a single label or an internal suffix, and one
+/// `hosts` allows. allow_insecure, for tests, admits http, ports and
+/// internal hosts. Names that resolve to internal addresses are refused when
+/// dialing.
 pub fn check_push_url(
     endpoint: &str,
     allow_insecure: bool,
     hosts: &PushHosts,
 ) -> Result<String, &'static str> {
-    let endpoint = normalize_push_url(endpoint)?;
-    let parsed = url::parse(&endpoint).map_err(|_| "url must be an absolute URL")?;
+    let Some((normalized, parsed)) = normalize_push_url(endpoint) else {
+        return Err("url must be an https URL");
+    };
     if parsed.scheme != "https" && !(allow_insecure && parsed.scheme == "http") {
-        return Err("url must use https");
+        return Err("url must be an https URL");
     }
-    let host = parsed.hostname();
-    if !allow_insecure
-        && ((host.parse::<Addr>().is_ok() && !public_address(&host))
-            || host == "localhost"
-            || host.ends_with(".localhost"))
-    {
-        return Err("url must name a public host");
+    // normalize_push_url dropped a default port, so any port left is another.
+    if parsed.user.is_some() || (!allow_insecure && !parsed.port().is_empty()) {
+        return Err("url must not carry credentials or a port");
+    }
+    let host = parsed.hostname().to_lowercase();
+    if host.ends_with('.') {
+        return Err("url must not end its host with a dot");
+    }
+    let internal = || {
+        host.contains(':')
+            || host.bytes().all(|b| b.is_ascii_digit() || b == b'.')
+            || host.parse::<Addr>().is_ok()
+            || !host.contains('.')
+            || INTERNAL_HOST_SUFFIXES
+                .iter()
+                .any(|suffix| host == *suffix || host.ends_with(&format!(".{suffix}")))
+    };
+    if !allow_insecure && internal() {
+        return Err("url must name a public push service");
     }
     if !hosts.allows(&host) {
         return Err("push service not allowed here");
     }
-    Ok(endpoint)
+    Ok(normalized)
 }
 
 impl Server {
@@ -710,29 +729,53 @@ impl Server {
         let mut st = self.lock();
         let user_id = st.push_user(c)?;
         admit_push_register(st.users.get_mut(&user_id).expect("user exists"))?;
+        // In Cloudflare's order, so a request with several problems gets
+        // the same error.
         let kind = parse_string(&req.params, "kind", true)?;
         if kind != "relay" && kind != "webpush" {
-            return Err(invalid_params(format!(
-                "Unknown push kind {}; this server supports relay and webpush",
-                quote(&kind)
-            )));
+            return Err(invalid_params(
+                "Unknown push kind; this server offers relay and webpush",
+            ));
         }
         let endpoint = parse_string(&req.params, "url", true)?;
-        let mut token = parse_string(&req.params, "token", false)?;
-        let too_large = |endpoint: &str| {
-            (endpoint.len() > MAX_PUSH_URL_BYTES || token.len() > MAX_PUSH_TOKEN_LEN).then(|| {
-                RpcError::new(
+        let mut wake = WakeScope::DEFAULT;
+        if let Some(raw) = req.params.get("wake") {
+            let Some(names) = decode_non_null::<Vec<String>>(&raw.0) else {
+                return Err(invalid_params("wake must be an array of scope names"));
+            };
+            if names.len() > MAX_WAKE_SCOPES {
+                return Err(RpcError::new(
+                    CODE_DENIED,
+                    format!("wake lists at most {MAX_WAKE_SCOPES} scope names"),
+                ));
+            }
+            if names
+                .iter()
+                .any(|name| name.encode_utf16().count() > MAX_WAKE_SCOPE_CHARS)
+            {
+                return Err(RpcError::new(
                     CODE_TOO_LARGE,
-                    format!(
-                        "url is at most {MAX_PUSH_URL_BYTES} bytes and token at most {MAX_PUSH_TOKEN_LEN}"
-                    ),
-                )
-            })
+                    format!("a wake scope name is at most {MAX_WAKE_SCOPE_CHARS} characters"),
+                ));
+            }
+            wake = parse_wake_names(&names);
+        }
+        let push_id = parse_string(&req.params, "push_id", false)?;
+        if req.params.contains_key("push_id") && !valid_push_id(&push_id) {
+            return Err(invalid_params(
+                "push_id must be 1 to 64 letters, digits, _ or -",
+            ));
+        }
+        let url_too_large = || {
+            RpcError::new(
+                CODE_TOO_LARGE,
+                format!("url is at most {MAX_PUSH_URL_BYTES} bytes"),
+            )
         };
         // Its size first, so a url past it is too_large whatever else is
         // wrong with it (§1.1), then again as kept.
-        if let Some(err) = too_large(&endpoint) {
-            return Err(err);
+        if endpoint.len() > MAX_PUSH_URL_BYTES {
+            return Err(url_too_large());
         }
         let endpoint = check_push_url(
             &endpoint,
@@ -740,12 +783,15 @@ impl Server {
             &self.config.push_hosts,
         )
         .map_err(invalid_params)?;
-        if let Some(err) = too_large(&endpoint) {
-            return Err(err);
+        if endpoint.len() > MAX_PUSH_URL_BYTES {
+            return Err(url_too_large());
         }
-        let push_id = parse_string(&req.params, "push_id", false)?;
-        if req.params.contains_key("push_id") && !valid_push_id(&push_id) {
-            return Err(invalid_params("push_id is 1 to 64 letters, digits, _ or -"));
+        let mut token = parse_string(&req.params, "token", false)?;
+        if token.len() > MAX_PUSH_TOKEN_LEN {
+            return Err(RpcError::new(
+                CODE_TOO_LARGE,
+                format!("token is at most {MAX_PUSH_TOKEN_LEN} bytes"),
+            ));
         }
         let keys = parse_keys_param(&req.params)?;
         if kind == "webpush" {
@@ -756,16 +802,6 @@ impl Server {
             }
             // A webpush subscription has no bearer token.
             token.clear();
-        }
-        let mut wake = WakeScope::DEFAULT;
-        if let Some(raw) = req.params.get("wake") {
-            let Some(mut names) = decode_non_null::<Vec<String>>(&raw.0) else {
-                return Err(invalid_params("wake must be an array of scope names"));
-            };
-            // Past the bounds, names are ignored like unknown scopes.
-            names.truncate(MAX_WAKE_SCOPES);
-            names.retain(|name| name.len() <= MAX_WAKE_SCOPE_BYTES);
-            wake = parse_wake_names(&names);
         }
 
         // joined is kept only for those who may wake for it.
@@ -810,7 +846,7 @@ impl Server {
         req: &Request,
     ) -> Result<(Json, bool), RpcError> {
         let mut endpoint = parse_string(&req.params, "url", true)?;
-        if let Ok(normalized) = normalize_push_url(&endpoint) {
+        if let Some((normalized, _)) = normalize_push_url(&endpoint) {
             endpoint = normalized;
         }
         let mut st = self.lock();
@@ -866,10 +902,9 @@ fn parse_keys_param(params: &Params) -> Result<Option<PushKeys>, RpcError> {
             "keys must be an object with p256dh and auth",
         ));
     };
-    let p256dh = parse_string(&raw, "p256dh", true)
-        .map_err(|_| invalid_params("keys.p256dh must be a string"))?;
-    let auth = parse_string(&raw, "auth", true)
-        .map_err(|_| invalid_params("keys.auth must be a string"))?;
+    let p256dh =
+        parse_string(&raw, "p256dh", true).map_err(|_| invalid_params(webpush::BAD_P256DH))?;
+    let auth = parse_string(&raw, "auth", true).map_err(|_| invalid_params(webpush::BAD_AUTH))?;
     webpush::parse_push_keys(&p256dh, &auth)
         .map(Some)
         .map_err(invalid_params)

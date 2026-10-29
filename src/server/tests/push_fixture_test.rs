@@ -238,10 +238,7 @@ fn test_push_fixture_registrations() {
         if valid {
             assert_eq!(
                 failure["message"],
-                Json::from(format!(
-                    "Unknown push kind {}; this server supports relay and webpush",
-                    quote(&kind)
-                )),
+                Json::from("Unknown push kind; this server offers relay and webpush"),
                 "{name}"
             );
         }

@@ -51,28 +51,43 @@ fn test_push_refuses_internal_addresses() {
         check_push_url("http://relay.example/p", false, &PushHosts::Any).is_err(),
         "http push URL accepted without allow_insecure_push"
     );
-    // Internal address literals, localhost, and hosts ending in a dot are
-    // refused at registration.
-    for endpoint in [
-        "https://10.0.0.1/p",
-        "https://[::1]/p",
-        "https://[fd00::1]:8443/p",
-        "https://169.254.169.254/p",
-        "https://localhost/p",
-        "https://push.localhost/p",
-        "https://192.0.2.1/p",
-        "https://push.example.net./p",
-        "mailto:a@b.example",
+    // Cloudflare's pushEndpointError: no address literal, single label or
+    // internal suffix, no credentials or port but https's own, and no
+    // trailing dot.
+    let public = "url must name a public push service";
+    let port = "url must not carry credentials or a port";
+    for (endpoint, want) in [
+        ("https://10.0.0.1/p", public),
+        ("https://93.184.215.14/p", public),
+        ("https://[::1]/p", public),
+        ("https://[2606:4700::1111]/p", public),
+        ("https://169.254.169.254/p", public),
+        ("https://2130706433/p", public),
+        ("https://localhost/p", public),
+        ("https://push.localhost/p", public),
+        ("https://push/p", public),
+        ("https://printer.local/p", public),
+        ("https://push.corp.internal/p", public),
+        ("https://router.home.arpa/p", public),
+        ("https://push.example.net:8443/p", port),
+        ("https://user:pass@push.example.net/p", port),
+        (
+            "https://push.example.net./p",
+            "url must not end its host with a dot",
+        ),
+        ("http://push.example.net/p", "url must be an https URL"),
+        ("mailto:a@b.example", "url must be an https URL"),
+        ("not a url", "url must be an https URL"),
     ] {
-        assert!(
-            check_push_url(endpoint, false, &PushHosts::Any).is_err(),
-            "{endpoint} accepted"
+        assert_eq!(
+            check_push_url(endpoint, false, &PushHosts::Any),
+            Err(want),
+            "{endpoint}"
         );
     }
     // Endpoints are kept in one form: scheme and host lowercased, no
     // default port.
     for (endpoint, want) in [
-        ("https://93.184.215.14/p", "https://93.184.215.14/p"),
         (
             "https://fcm.googleapis.com/fcm/send/x",
             "https://fcm.googleapis.com/fcm/send/x",
@@ -82,12 +97,8 @@ fn test_push_refuses_internal_addresses() {
             "https://fcm.googleapis.com/fcm/send/x",
         ),
         (
-            "https://push.example.net:8443/A?b=C",
-            "https://push.example.net:8443/A?b=C",
-        ),
-        (
-            "https://[2606:4700::1111]:443/p",
-            "https://[2606:4700::1111]/p",
+            "https://push.example.net/A?b=C",
+            "https://push.example.net/A?b=C",
         ),
     ] {
         assert_eq!(
@@ -96,6 +107,11 @@ fn test_push_refuses_internal_addresses() {
             "{endpoint}"
         );
     }
+    // allow_insecure, for tests, admits http, ports and internal hosts.
+    assert_eq!(
+        check_push_url("http://127.0.0.1:8080/p", true, &PushHosts::Any),
+        Ok("http://127.0.0.1:8080/p".to_owned())
+    );
 }
 
 /// `--push.hosts` (apron-server-cloudflare's `PUSH_HOSTS`): host names and
