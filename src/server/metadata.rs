@@ -426,8 +426,10 @@ impl State {
     ) -> Object {
         let id = self.next_embed_id();
         self.new_write_locked(c, &id, "upload", "");
+        let uploader = self.client_user(c).unwrap_or_default();
         let e = self.embeds.get_mut(&id).expect("just registered");
         e.purpose = purpose;
+        e.uploader = uploader;
         obj! {
             "embeds" => vec![Json::from(obj! {"embed_id" => id.as_str(), "kind" => "upload", "write_url" => e.write_url()})],
         }

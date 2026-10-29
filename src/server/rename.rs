@@ -257,5 +257,8 @@ impl State {
             self.embeds.get_mut(&id).expect("listed").purpose = EmbedPurpose::Avatar(to.to_owned());
             self.touch_embed(&id);
         }
+        for e in self.embeds.values_mut().filter(|e| e.uploader == from) {
+            e.uploader = to.to_owned();
+        }
     }
 }

@@ -421,3 +421,45 @@ fn test_declared_non_image_types_are_refused_before_the_body() {
         ada.drain();
     }
 }
+
+/// An add whose key is removed while its image is on the way is dropped,
+/// and the key stays removed.
+#[test]
+fn test_emoji_add_dropped_when_its_key_is_removed() {
+    let server = admin_test_server();
+    let mut ada = admin(&server);
+    assert_eq!(add(&mut ada, ":x:", &png(1, 1), "image/png"), 201);
+    let (_, replacing) = command_with(&mut ada, "/emoji add :x:", upload_embed());
+    private_reply(&mut ada, "/emoji remove :x:");
+    let status = http_do("PUT", &write_url(&replacing), Some(&png(1, 1)), "image/png").0;
+    assert_eq!(status, 404, "the write after the removal");
+    let st = server.app.lock();
+    assert!(st.emoji.entries.is_empty(), "the removed key came back");
+}
+
+/// An add whose sender lost every emoji role while its image was on the
+/// way is dropped.
+#[test]
+fn test_emoji_add_dropped_when_the_sender_loses_the_role() {
+    let server = admin_test_server();
+    let mut user = account(&server);
+    let id = user.user_id.clone();
+    grant_role(&server, &id, "friend");
+    let (_, started) = command_with(&mut user, "/emoji add :mine:", upload_embed());
+    revoke_role(&server, &id, "friend");
+    let (status, _, body) = http_do("PUT", &write_url(&started), Some(&png(1, 1)), "image/png");
+    assert_eq!(status, 403, "{}", String::from_utf8_lossy(&body));
+    let st = server.app.lock();
+    assert!(st.emoji.entries.is_empty(), "the image became an emoji");
+    assert!(st.embeds.is_empty(), "the refused image was kept");
+    drop(st);
+
+    // A rename keeps the sender's add, as they keep their roles.
+    grant_role(&server, &id, "friend");
+    let mut ada = admin(&server);
+    let (_, started) = command_with(&mut user, "/emoji add :mine:", upload_embed());
+    private_reply(&mut ada, &format!("/rename {id} renamed"));
+    let status = http_do("PUT", &write_url(&started), Some(&png(1, 1)), "image/png").0;
+    assert_eq!(status, 201, "an add across a rename");
+    assert!(server.app.lock().emoji.entries.contains_key(":mine:"));
+}

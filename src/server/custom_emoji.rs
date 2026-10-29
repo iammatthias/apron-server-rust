@@ -172,6 +172,16 @@ impl State {
             let Some(image) = self.emoji.entries.remove(key) else {
                 return Err(invalid_params(format!("{key} is not a custom emoji here")));
             };
+            // An add of the key still on its way would bring it back.
+            let pending: Vec<String> = self
+                .embeds
+                .values()
+                .filter(|e| !e.finished && e.purpose == EmbedPurpose::Emoji(key.to_owned()))
+                .map(|e| e.id.clone())
+                .collect();
+            for id in pending {
+                self.remove_embed_locked(&id);
+            }
             self.publish_emoji_locked(Some(image.embed));
             c.enqueue(&private_notice(
                 &self.rooms[room_id],
