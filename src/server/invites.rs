@@ -11,8 +11,9 @@ use rust_stdlib::time::{self, Time};
 use rust_stdlib_crypto::{rand, sha256};
 
 use super::admin::ADMIN_USER_ID;
-use super::client::Client;
-use super::commands::{private_notice, user_id_args, CommandCtx};
+use super::bots::BOT_ID_PREFIX;
+use super::client::{Client, ClientId};
+use super::commands::{no_user, private_notice, user_id_args, CommandCtx};
 use super::devices::apron_link;
 use super::email::web_socket_url;
 use super::protocol::*;
@@ -144,19 +145,113 @@ impl State {
         self.charge_registration_locked(c, true)?;
         let token = self.create_invited_locked(user_id, user_id);
         self.join_default_room_locked(user_id);
-        let mut parts = vec![
+        let text = self.invite_token_notice(
             format!("Created `{user_id}`, who signs in with this token instead of a passkey. It does not expire, and anyone who has it signs in as `{user_id}`, so hand it over privately."),
-            format!("```\n{token}\n```"),
-        ];
+            &token,
+        );
+        c.enqueue(&private_notice(&self.rooms[room_id], &text));
+        Ok(Object::new())
+    }
+
+    /// The notice that hands an admin a user's invite token: `lead`, the
+    /// token, a link any Apron app opens (Appendix A.4) when the server has
+    /// a public URL, and how to sign in with it.
+    fn invite_token_notice(&self, lead: String, token: &str) -> String {
+        let mut parts = vec![lead, format!("```\n{token}\n```")];
         let server = web_socket_url(&self.config.public_url);
         if !server.is_empty() {
             parts.push(format!(
                 "Or send them this link, which signs them in with any Apron app: <{}>",
-                apron_link(&server, &token)
+                apron_link(&server, token)
             ));
         }
         parts.push(format!("To sign in, authenticate with the token scheme: `{{\"method\": \"auth\", \"params\": {{\"scheme\": \"token\", \"token\": \"{token}\"}}}}`"));
-        c.enqueue(&private_notice(&self.rooms[room_id], &parts.join("\n\n")));
+        parts.join("\n\n")
+    }
+
+    /// `/invite-purge <user_id>` (a leading `@` is allowed): takes away every
+    /// way an account signs in and gives it a new one. Its invite and device
+    /// tokens, passkeys and sessions go, its connections close, its push
+    /// registrations are deleted, and a new invite token goes to the sender
+    /// in a ~private notice before the result (§1). The account, its posts,
+    /// rooms, roles, email address and bot stay. Not the sender, `admin` or a
+    /// bot.
+    pub(super) fn invite_purge_command(&mut self, cx: &CommandCtx) -> Result<Object, RpcError> {
+        let CommandCtx {
+            client: c,
+            room_id,
+            args,
+            ..
+        } = *cx;
+        let [user_id] = user_id_args(args, "Usage: /invite-purge <user_id>")?;
+        if user_id == cx.user_id {
+            return Err(RpcError::new(
+                CODE_DENIED,
+                "You can't /invite-purge yourself",
+            ));
+        }
+        if user_id == ADMIN_USER_ID {
+            return Err(RpcError::new(
+                CODE_DENIED,
+                "The admin user signs in with APRON_ADMIN_TOKEN only",
+            ));
+        }
+        let user = self.users.get(user_id);
+        if user_id.starts_with(BOT_ID_PREFIX) || user.is_some_and(|u| u.bot()) {
+            return Err(RpcError::new(
+                CODE_DENIED,
+                "A bot signs in with its token only; its owner replaces it with /invite-bot",
+            ));
+        }
+        if !user.is_some_and(|u| u.account()) {
+            return Err(no_user("user", user_id));
+        }
+        let user_id = user_id.to_owned();
+        // The account keeps persisting once its passkeys are gone: it signs
+        // in with the new invite token.
+        let u = self.users.get_mut(&user_id).expect("checked above");
+        u.invited = true;
+        let passkey = u.passkey.take();
+        self.touch_user(&user_id);
+        let credentials = passkey.map(|p| p.credentials).unwrap_or_default();
+        for credential in &credentials {
+            self.credentials.remove(&credential.id.0);
+        }
+        let invites: Vec<SessionKey> = self.invites.of(&user_id).map(|(key, _)| key).collect();
+        for key in invites {
+            self.invites.remove(&key);
+            self.touch_invite(key);
+        }
+        let devices: Vec<SessionKey> = self.devices.of(&user_id).map(|(key, _)| key).collect();
+        for key in devices {
+            self.devices.remove(&key);
+            self.touch_device(key);
+        }
+        for key in self.sessions.remove_of(&user_id) {
+            self.touch_session(key);
+        }
+        let (token, key) = new_token(INVITE_TOKEN_PREFIX);
+        self.invites.insert(
+            key,
+            InviteToken {
+                user: user_id.clone(),
+                created: time::now(),
+            },
+        );
+        self.touch_invite(key);
+        let connections: Vec<ClientId> = self.users[&user_id].clients.iter().copied().collect();
+        for id in connections {
+            self.revoke_connection_locked(id, RpcError::new(CODE_DENIED, "Signed out by an admin"));
+        }
+        for key in self.sorted_pushes(&user_id) {
+            self.remove_push_locked(&key);
+        }
+        let n = credentials.len();
+        let text = self.invite_token_notice(
+            format!("Signed `{user_id}` out everywhere and removed {n} passkey{} and every token they had. This new token signs in as them; it does not expire, and anyone who has it signs in as `{user_id}`, so hand it over privately.", if n == 1 { "" } else { "s" }),
+            &token,
+        );
+        c.enqueue(&private_notice(&self.rooms[room_id], &text));
         Ok(Object::new())
     }
 

@@ -327,6 +327,9 @@ pub struct StoredDevice {
     pub name: String,
     #[json("created")]
     pub created: Time,
+    /// When it last signed in, written at most once a UTC day; none if never.
+    #[json("used,omitzero")]
+    pub used: Time,
 }
 
 #[derive(Clone, Debug, Default, MarshalTo, UnmarshalFrom)]
@@ -645,6 +648,7 @@ impl State {
                 user: device.user.clone(),
                 name: device.name.clone(),
                 created: device.created.clone(),
+                used: device.used.clone(),
             })
         });
         batch.sync(ENTRY_BOT, bots, session_id, |key| {

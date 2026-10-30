@@ -14,7 +14,8 @@
 //   --slow                  also waits out the 30 s authentication timeout
 //
 // It posts nothing in general or any public room. The admin checks make
-// accounts named livecheck_<random>: one from /invite-token and one from a
+// accounts named livecheck_<random>: one from /invite-token, which
+// /invite-purge then signs out and gives a new token, and one from a
 // /invite-code sign-up, one that is renamed and purged, and one given the role mod
 // to run /emoji. At the end the admin
 // purges every livecheck_ account in general, this run's and any an earlier
@@ -333,7 +334,7 @@ if (!tokenFile) {
     }
   });
 
-  await check("account: /invite-device add mints device_1, /invite-device remove revokes it and closes its connection", async () => {
+  await check("account: /invite-device add mints device_1, list shows it used today, remove revokes it and closes its connection", async () => {
     if (!accountToken) return "no /invite-token account";
     const owner = await connect();
     const phone = await connect();
@@ -351,16 +352,59 @@ if (!tokenFile) {
       await phone.server();
       const onPhone = await phone.call("auth", { scheme: "token", token });
       if (onPhone.error) return `device sign-in error ${JSON.stringify(onPhone.error)}`;
+      const listed = await ownerRun("/invite-device list");
+      if (listed.error) return `list error ${JSON.stringify(listed.error)}`;
+      const today = new Date().toISOString().slice(0, 10);
+      const want = `Your device tokens:\n- \`device_1\`, added ${today}, last used ${today}`;
+      if (noticeText(listed.frames) !== want) return `list notice ${noticeText(listed.frames)}`;
       const removed = await ownerRun("/invite-device remove device_1");
       if (removed.error) return `remove error ${JSON.stringify(removed.error)}`;
       if (!noticeText(removed.frames).includes("Revoked the device token for **device_1**.")) return `remove notice ${noticeText(removed.frames)}`;
       await phone.until(() => phone.closed, 8000, "the removed device's close").catch(() => {});
       if (!phone.closed) return "the removed device's connection stayed open";
       const usage = await ownerRun("/invite-device");
-      return usage.error?.message === "Usage: /invite-device add|remove [<id>]" || `usage ${JSON.stringify(usage.error)}`;
+      return usage.error?.message === "Usage: /invite-device list|add|remove [<id>]" || `usage ${JSON.stringify(usage.error)}`;
     } finally {
       owner.close();
       phone.close();
+    }
+  });
+
+  await check("admin: /help marks /invite-purge (admin-only)", async () => {
+    const { frames, error } = await run("/help");
+    if (error) return `error ${JSON.stringify(error)}`;
+    return noticeText(frames).includes("- `/invite-purge <user_id>`: sign a user out everywhere, remove their passkeys and tokens, and get a new token for them (admin-only)") || "no marked /invite-purge line";
+  });
+
+  await check("admin: /invite-purge signs the account out, revokes its token and hands over a new one", async () => {
+    if (!accountToken) return "no /invite-token account";
+    const owner = await connect();
+    const old = await connect();
+    const fresh = await connect();
+    try {
+      await owner.server();
+      const signIn = await owner.call("auth", { scheme: "token", token: accountToken });
+      if (signIn.error) return `sign-in error ${JSON.stringify(signIn.error)}`;
+      const { frames, error } = await run(`/invite-purge ${accountID}`);
+      if (error) return `error ${JSON.stringify(error)}`;
+      const text = noticeText(frames);
+      if (!text.startsWith(`Signed \`${accountID}\` out everywhere and removed 0 passkeys and every token they had.`)) return "purge notice";
+      const token = linkToken(text);
+      if (!token?.startsWith("apron_invite_")) return "no new token link in the notice";
+      await owner.until(() => owner.closed, 8000, "the purged account's close").catch(() => {});
+      if (!owner.closed) return "the purged account's connection stayed open";
+      await old.server();
+      const before = await old.call("auth", { scheme: "token", token: accountToken });
+      if (!before.error) return "the old token still signs in";
+      await fresh.server();
+      const after = await fresh.call("auth", { scheme: "token", token });
+      if (after.error) return `new token error ${JSON.stringify(after.error)}`;
+      accountToken = token;
+      return after.result.you.user_id === accountID || `user_id ${after.result.you.user_id}`;
+    } finally {
+      owner.close();
+      old.close();
+      fresh.close();
     }
   });
 

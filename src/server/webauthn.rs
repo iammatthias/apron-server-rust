@@ -169,6 +169,15 @@ impl Sessions {
         keys
     }
 
+    /// Removes every session of user, and returns their keys.
+    pub fn remove_of(&mut self, user: &str) -> Vec<SessionKey> {
+        let keys: Vec<SessionKey> = self.tokens.of(user).map(|(key, _)| key).collect();
+        for key in &keys {
+            self.remove(key);
+        }
+        keys
+    }
+
     pub fn renew(&mut self, key: &SessionKey, expires: Time) {
         if let Some(mut session) = self.remove(key) {
             session.expires = expires;

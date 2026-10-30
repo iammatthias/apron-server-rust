@@ -489,6 +489,7 @@ impl Server {
                     user: stored.user,
                     name: stored.name,
                     created: stored.created,
+                    used: stored.used,
                 },
             );
         }

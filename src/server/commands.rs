@@ -1,7 +1,10 @@
-//! Server commands (§4.1): /help, /avatar, /invite-device, /invite-bot,
-//! /kick and the admin commands, run from a `command` request and answered
-//! with scoped system notices (Appendix A.1).
+//! Server commands (§4.1), run from a `command` request and answered with
+//! scoped system notices (Appendix A.1). In the order /help lists them:
+//! /admin, /avatar, /emoji, /help, /invite-bot, /invite-code,
+//! /invite-device, /invite-purge, /invite-token, /kick, /passkeys, /purge,
+//! /rename, /role, /server and /toggle.
 
+use std::cell::Cell;
 use std::sync::Arc;
 
 use super::client::Client;
@@ -22,6 +25,8 @@ pub const PRIVATE_NOTICE_NAME: &str = "System message to you";
 
 /// What a command runs with: the connection and user that sent it, the room
 /// it runs in, the message body, and the arguments after the command word.
+/// A command that revokes the asking connection's own sign-in sets
+/// `close_after`, which closes it once its result is sent.
 #[derive(Clone, Copy)]
 pub(super) struct CommandCtx<'a> {
     pub client: &'a Arc<Client>,
@@ -29,6 +34,7 @@ pub(super) struct CommandCtx<'a> {
     pub room_id: &'a str,
     pub body: &'a Object,
     pub args: &'a str,
+    pub close_after: &'a Cell<Option<RpcError>>,
 }
 
 /// Executes a command.
@@ -159,13 +165,23 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
     },
     ServerCommand {
         name: "invite-device",
-        usage: "/invite-device add|remove [<id>]",
-        help: "get a token that signs in as you on another device, or revoke one",
+        usage: "/invite-device list|add|remove [<id>]",
+        help: "list, get or revoke tokens that sign in as you on another device",
         audience: Audience::Accounts,
         forgives_params: true,
         writes: true,
         feature: None,
         run: State::invite_device_command,
+    },
+    ServerCommand {
+        name: "invite-purge",
+        usage: "/invite-purge <user_id>",
+        help: "sign a user out everywhere, remove their passkeys and tokens, and get a new token for them",
+        audience: Audience::Admins,
+        forgives_params: true,
+        writes: true,
+        feature: None,
+        run: State::invite_purge_command,
     },
     ServerCommand {
         name: "invite-token",
@@ -343,12 +359,14 @@ impl State {
                 if let Some(feature) = command.feature.filter(|f| !self.feature_on(*f)) {
                     return Err(RpcError::new(CODE_DENIED, feature.off_message()));
                 }
+                let close_after = Cell::new(None);
                 let cx = CommandCtx {
                     client: c,
                     user_id: &user_id,
                     room_id: &room_id,
                     body: &body,
                     args: args.trim(),
+                    close_after: &close_after,
                 };
                 let result = (command.run)(self, &cx).map_err(|err| {
                     if command.forgives_params && err.code == CODE_INVALID_PARAMS {
@@ -358,6 +376,9 @@ impl State {
                     }
                 })?;
                 c.send_result(req, result.clone().into());
+                if let Some(why) = close_after.take() {
+                    self.revoke_connection_locked(c.id, why);
+                }
                 return Ok((result.into(), true));
             }
         }
@@ -378,7 +399,14 @@ impl State {
             .filter(|command| !(command.writes && read_only))
             .filter(|command| command.audience.lists(u))
             .filter(|command| command.feature.is_none_or(|f| self.feature_on(f)))
-            .map(|command| format!("- `{}`: {}", command.usage, command.help))
+            .map(|command| {
+                let marked = if command.audience == Audience::Admins {
+                    " (admin-only)"
+                } else {
+                    ""
+                };
+                format!("- `{}`: {}{marked}", command.usage, command.help)
+            })
             .collect();
         c.enqueue(&private_notice(r, &lines.join("\n")));
         Ok(Object::new())

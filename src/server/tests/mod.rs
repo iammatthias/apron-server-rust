@@ -22,6 +22,7 @@ mod helpers;
 mod idle_bots_test;
 mod invite_bot_test;
 mod invite_device_test;
+mod invite_purge_test;
 mod limits_test;
 mod membership_test;
 mod metadata_test;

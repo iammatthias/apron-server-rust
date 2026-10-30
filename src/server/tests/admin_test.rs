@@ -155,6 +155,7 @@ fn test_admin_commands_for_admins_only() {
             "invite-bot",
             "invite-code",
             "invite-device",
+            "invite-purge",
             "invite-token",
             "kick",
             "passkeys",
@@ -166,9 +167,19 @@ fn test_admin_commands_for_admins_only() {
         ],
         "admin help, alphabetical"
     );
+    // Admins' commands say so; everyone else's don't.
+    assert!(
+        help.contains("- `/kick <user_id>`: remove a user from this room (admin-only)")
+            && help.contains("- `/invite-purge <user_id>`: sign a user out everywhere, remove their passkeys and tokens, and get a new token for them (admin-only)")
+            && help.lines().any(|line| line.starts_with("- `/invite-bot`") && !line.contains("(admin-only)")),
+        "admin help marks: {help}"
+    );
     let plain = private_reply(&mut alice, "/help");
     assert!(
-        plain.contains("/invite-bot") && !plain.contains("/admin") && !plain.contains("/role"),
+        plain.contains("/invite-bot")
+            && !plain.contains("/admin")
+            && !plain.contains("/role")
+            && !plain.contains("(admin-only)"),
         "account help: {plain}"
     );
     for (text, name) in [

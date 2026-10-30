@@ -244,7 +244,7 @@ fn test_invite_device_ids_and_usage() {
     let server = passkey_test_server();
     let (mut ada, ada_id) = account(&server);
     let usage = Json::from(obj! {
-        "code" => CODE_INVALID_PARAMS, "message" => "Usage: /invite-device add|remove [<id>]",
+        "code" => CODE_INVALID_PARAMS, "message" => "Usage: /invite-device list|add|remove [<id>]",
     });
     let rule = Json::from(obj! {
         "code" => CODE_INVALID_PARAMS,
@@ -257,6 +257,7 @@ fn test_invite_device_ids_and_usage() {
         "/invite-device add my phone",
         "/invite-device remove",
         "/invite-device remove my phone",
+        "/invite-device list phone",
     ] {
         assert_eq!(command_error(&mut ada, text), usage, "{text}");
     }
@@ -488,14 +489,19 @@ fn test_invite_device_remove_revokes_a_token() {
     let (_, frame) = device(&server, OTHER_ORIGIN, &phone_token);
     assert_eq!(frame.get("error"), Some(&invalid_token()), "removed token");
 
-    // The asking connection stays open when it signed in with the token it
-    // removes.
+    // A device that removes its own token gets the notice and the result,
+    // then is closed.
     assert_eq!(
         only_notice(&mut tablet, "/invite-device remove tablet"),
         "Revoked the device token for **tablet**.",
         "remove from the device itself"
     );
-    tablet.expect_quiet();
+    expect_closed(
+        &tablet,
+        "Device token revoked",
+        "the device that removed its own token",
+    );
+    ada.expect_quiet();
     assert!(
         server.app.lock().devices.keys().next().is_none(),
         "tokens left after removing both"
@@ -560,13 +566,48 @@ fn test_replaced_device_token_connection_runs_nothing() {
     );
 }
 
+/// The UTC day today, as /invite-device list writes it.
+fn today() -> String {
+    time::now().utc().format("2006-01-02")
+}
+
+#[test]
+fn test_invite_device_list() {
+    let server = passkey_test_server();
+    let (mut ada, ada_id) = account(&server);
+    assert_eq!(
+        only_notice(&mut ada, "/invite-device list"),
+        "You have no device tokens; get one with `/invite-device add`.",
+        "none held"
+    );
+    let phone = invite_device(&mut ada, &ada_id, "phone", false);
+    invite_device(&mut ada, &ada_id, "tablet", false);
+    invite_unnamed_device(&mut ada, &ada_id, "device_1");
+    device(&server, OTHER_ORIGIN, &phone);
+    device(&server, OTHER_ORIGIN, &phone);
+    ada.drain();
+    let day = today();
+    assert_eq!(
+        only_notice(&mut ada, "/invite-device list"),
+        format!("Your device tokens:\n- `phone`, added {day}, last used {day}\n- `tablet`, added {day}, never used\n- `device_1`, added {day}, never used"),
+        "oldest first, with the days"
+    );
+    // A replacement is a new token, never used yet, at the end.
+    invite_device(&mut ada, &ada_id, "phone", true);
+    assert_eq!(
+        only_notice(&mut ada, "/invite-device list"),
+        format!("Your device tokens:\n- `tablet`, added {day}, never used\n- `device_1`, added {day}, never used\n- `phone`, added {day}, never used"),
+        "after a replacement"
+    );
+}
+
 #[test]
 fn test_help_lists_invite_device_for_accounts() {
     let server = passkey_test_server();
     let (mut ada, _) = account(&server);
     let mut guest = dial_test_client(&server);
     ada.drain();
-    let listed = "- `/invite-device add|remove [<id>]`: get a token that signs in as you on another device, or revoke one";
+    let listed = "- `/invite-device list|add|remove [<id>]`: list, get or revoke tokens that sign in as you on another device";
     assert_eq!(
         only_notice(&mut ada, "/help"),
         format!(
@@ -625,6 +666,12 @@ fn test_invite_device_tokens_survive_restart() {
             "message" => "You have 5 device tokens (`phone`, `tablet`, `laptop`, `watch`, `tv`); run /invite-device add with one of those ids to replace its token, or /invite-device remove to revoke one",
         }),
         "ids restored oldest first, without the removed one"
+    );
+    let day = today();
+    assert_eq!(
+        only_notice(&mut c, "/invite-device list"),
+        format!("Your device tokens:\n- `phone`, added {day}, last used {day}\n- `tablet`, added {day}, last used {day}\n- `laptop`, added {day}, never used\n- `watch`, added {day}, never used\n- `tv`, added {day}, never used"),
+        "days restored"
     );
     let (_, frame) = device(&server, OTHER_ORIGIN, &desk);
     assert_eq!(

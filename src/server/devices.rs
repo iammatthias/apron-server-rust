@@ -1,7 +1,8 @@
-//! `/invite-device add|remove [<id>]`: an account mints a bearer token that
-//! signs it in on another device through the `token` scheme (§3.2), from any
-//! origin, until the same id mints a new one or `remove` revokes it. It
-//! follows apron-server-cloudflare's `/invite-device`.
+//! `/invite-device list|add|remove [<id>]`: an account mints a bearer token
+//! that signs it in on another device through the `token` scheme (§3.2),
+//! from any origin, until the same id mints a new one or `remove` revokes
+//! it, and lists the ids it holds. It follows apron-server-cloudflare's
+//! `/invite-device`.
 
 use std::sync::Arc;
 
@@ -21,12 +22,15 @@ pub const MAX_DEVICE_TOKENS: usize = 5;
 pub const DEVICE_TOKEN_PREFIX: &str = "apron_device_";
 
 /// A device token, kept by the SHA-256 of the token: the account it signs in
-/// as and the device id it was minted under (`name`, as stored).
+/// as, the device id it was minted under (`name`, as stored), when it was
+/// minted, and when it last signed in, written at most once a UTC day (zero
+/// for never).
 #[derive(Clone, Debug)]
 pub struct DeviceToken {
     pub user: String,
     pub name: String,
     pub created: Time,
+    pub used: Time,
 }
 
 /// The device tokens, each account's oldest first, so an id again finds its
@@ -44,11 +48,12 @@ impl Held for DeviceToken {
 }
 
 /// The usage `/invite-device` answers any other form of the command with.
-const USAGE: &str = "Usage: /invite-device add|remove [<id>]";
+const USAGE: &str = "Usage: /invite-device list|add|remove [<id>]";
 
-/// A parsed `/invite-device`: `add` with the id to mint under, if given, or
-/// `remove` with the id to revoke.
+/// A parsed `/invite-device`: `list`, `add` with the id to mint under, if
+/// given, or `remove` with the id to revoke.
 enum DeviceCommand<'a> {
+    List,
     Add(Option<&'a str>),
     Remove(&'a str),
 }
@@ -57,6 +62,7 @@ impl<'a> DeviceCommand<'a> {
     fn parse(args: &'a str) -> Result<Self, RpcError> {
         let words: Vec<&str> = args.split_whitespace().collect();
         let command = match words.as_slice() {
+            ["list"] => DeviceCommand::List,
             ["add"] => DeviceCommand::Add(None),
             ["add", id] => DeviceCommand::Add(Some(id)),
             ["remove", id] => DeviceCommand::Remove(id),
@@ -89,7 +95,8 @@ impl State {
         self.dirty.devices.insert(key);
     }
 
-    /// `/invite-device add [<id>]` and `/invite-device remove <id>`.
+    /// `/invite-device list`, `/invite-device add [<id>]` and
+    /// `/invite-device remove <id>`.
     pub(super) fn invite_device_command(&mut self, cx: &CommandCtx) -> Result<Object, RpcError> {
         let command = DeviceCommand::parse(cx.args)?;
         if cx.user_id == super::admin::ADMIN_USER_ID {
@@ -104,6 +111,7 @@ impl State {
             .map(|(key, token)| (key, token.name.clone()))
             .collect();
         match command {
+            DeviceCommand::List => Ok(self.list_devices(cx)),
             DeviceCommand::Add(id) => self.add_device(cx, &held, id),
             DeviceCommand::Remove(id) => self.remove_device(cx, &held, id),
         }
@@ -156,6 +164,7 @@ impl State {
                 user: user_id.clone(),
                 name: id.clone(),
                 created: time::now(),
+                used: Time::default(),
             },
         );
         self.touch_device(key);
@@ -193,7 +202,8 @@ impl State {
     }
 
     /// Revokes the sender's device token under id as a replacement would,
-    /// and answers with a ~private notice before the result (§1).
+    /// and answers with a ~private notice before the result (§1). The asking
+    /// connection, if it signed in with that token, closes after the result.
     fn remove_device(
         &mut self,
         cx: &CommandCtx,
@@ -219,6 +229,14 @@ impl State {
         };
         self.devices.remove(&old);
         self.touch_device(old);
+        if self
+            .clients
+            .get(&c.id)
+            .is_some_and(|conn| conn.device == old)
+        {
+            cx.close_after
+                .set(Some(RpcError::new(CODE_DENIED, "Device token revoked")));
+        }
         self.revoke_device_locked(c, cx.user_id, &old, [0; 32], "Device token revoked");
         c.enqueue(&super::commands::private_notice(
             &self.rooms[room_id],
@@ -264,8 +282,41 @@ impl State {
         }
     }
 
+    /// `/invite-device list`: the sender's device ids, oldest first, each
+    /// with the UTC day it was added and last signed in, in a ~private
+    /// notice before the result (§1).
+    fn list_devices(&mut self, cx: &CommandCtx) -> Object {
+        let lines: Vec<String> = self
+            .devices
+            .of(cx.user_id)
+            .map(|(_, token)| {
+                let used = if token.used.is_zero() {
+                    "never used".to_owned()
+                } else {
+                    format!("last used {}", utc_day(&token.used))
+                };
+                format!(
+                    "- `{}`, added {}, {used}",
+                    token.name,
+                    utc_day(&token.created)
+                )
+            })
+            .collect();
+        let text = if lines.is_empty() {
+            "You have no device tokens; get one with `/invite-device add`.".to_owned()
+        } else {
+            format!("Your device tokens:\n{}", lines.join("\n"))
+        };
+        cx.client.enqueue(&super::commands::private_notice(
+            &self.rooms[cx.room_id],
+            &text,
+        ));
+        Object::new()
+    }
+
     /// Signs the connection in with a device token, from any origin. The
-    /// result carries no session token: the device keeps its own.
+    /// result carries no session token: the device keeps its own. The token
+    /// records the day, at most once a UTC day, for `/invite-device list`.
     pub(super) fn authenticate_device_locked(
         &mut self,
         c: &Arc<Client>,
@@ -283,9 +334,15 @@ impl State {
             conn.device = key;
         }
         let sign_in = self.client_user(c).as_deref() != Some(&user_id);
-        Ok(self
-            .switch_user_locked(c, req, &user_id, Object::new(), sign_in, false)?
-            .into())
+        let result = self.switch_user_locked(c, req, &user_id, Object::new(), sign_in, false)?;
+        let now = time::now();
+        if let Some(token) = self.devices.get_mut(&key) {
+            if token.used.is_zero() || utc_day(&token.used) != utc_day(&now) {
+                token.used = now;
+                self.touch_device(key);
+            }
+        }
+        Ok(result.into())
     }
 }
 
@@ -311,6 +368,11 @@ fn link_escape(value: &str) -> String {
         }
     }
     escaped
+}
+
+/// The UTC day of t, `YYYY-MM-DD`.
+fn utc_day(t: &Time) -> String {
+    t.utc().format("2006-01-02")
 }
 
 /// The ids held, each in backticks, oldest first.
