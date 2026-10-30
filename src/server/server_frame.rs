@@ -24,7 +24,7 @@ impl State {
     pub fn server_params(&self, client: &Client) -> Object {
         let origin = client.origin.as_str();
         // signup (§3.2) lists the schemes that can create an account: a
-        // token does as an admin's sign-up invite (`/invite`); a guest is no
+        // token does as an admin's sign-up invite (`/invite-code`); a guest is no
         // account.
         let mut schemes: Vec<String> = Vec::new();
         if self.passkeys_offered(origin) {

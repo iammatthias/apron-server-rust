@@ -1,5 +1,5 @@
 //! Accounts an admin makes without a passkey, following
-//! apron-server-cloudflare's `/invite-token` and `/invite` (its SPEC.md,
+//! apron-server-cloudflare's `/invite-token` and `/invite-code` (its SPEC.md,
 //! section 5, Admins): the account signs in with a bearer token through the
 //! `token` scheme (§3.2), from any origin, and a sign-up invite makes one
 //! such account per use (Appendix B).
@@ -24,14 +24,14 @@ use crate::obj;
 
 pub const INVITE_TOKEN_PREFIX: &str = "apron_invite_";
 pub const JOIN_TOKEN_PREFIX: &str = "apron_join_";
-/// Sign-ups one `/invite` may allow, and how long it lasts.
+/// Sign-ups one `/invite-code` may allow, and how long it lasts.
 pub const MAX_JOIN_USES: i64 = 50;
 pub const JOIN_INVITE_TTL: time::Duration = time::Duration::from_hours(7 * 24);
 /// The name of a user who signs up with an invite and asks for none: not
 /// "Guest", which names guests.
 pub const JOIN_DEFAULT_NAME: &str = "Member";
 
-/// The one live sign-up invite (`/invite`): the SHA-256 of its token, the
+/// The one live sign-up invite (`/invite-code`): the SHA-256 of its token, the
 /// sign-ups it has left, and when it expires, in Unix milliseconds.
 #[derive(Clone, Debug)]
 pub struct JoinInvite {
@@ -179,9 +179,9 @@ impl State {
         self.sign_in_keyless_locked(c, req, &user_id, false)
     }
 
-    /// `/invite <uses>`: mints the sign-up invite (Appendix B), a token that
+    /// `/invite-code <uses>`: mints the sign-up invite (Appendix B), a token that
     /// signs up to `uses` new accounts within a week, and revokes the last
-    /// one; `/invite 0` only revokes. The token goes to this connection only,
+    /// one; `/invite-code 0` only revokes. The token goes to this connection only,
     /// in a ~private notice before the result (§1).
     pub(super) fn invite_command(&mut self, cx: &CommandCtx) -> Result<Object, RpcError> {
         let CommandCtx {
@@ -193,7 +193,7 @@ impl State {
         let digits = (1..=3).contains(&args.len()) && args.bytes().all(|b| b.is_ascii_digit());
         let Some(uses) = digits.then(|| args.parse::<i64>().ok()).flatten() else {
             return Err(invalid_params(format!(
-                "Usage: /invite <uses>, 0 to {MAX_JOIN_USES}"
+                "Usage: /invite-code <uses>, 0 to {MAX_JOIN_USES}"
             )));
         };
         // More uses than the server allows is a count limit (§1.1).

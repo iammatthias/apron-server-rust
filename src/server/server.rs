@@ -167,7 +167,7 @@ pub struct State {
     pub bots: BotTokens,
     /// `/invite-token` tokens by the SHA-256 of the token (invites.rs).
     pub invites: InviteTokens,
-    /// The live `/invite` sign-up invite, if any (invites.rs).
+    /// The live `/invite-code` sign-up invite, if any (invites.rs).
     pub join_invite: Option<JoinInvite>,
     /// The features an admin turned off with `/toggle` (toggles.rs).
     pub features_off: BTreeSet<Feature>,

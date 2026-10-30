@@ -69,7 +69,7 @@ it uses the matching rust-stdlib module.
   (passkeys and sessions), `passkeys.rs` (`/passkeys`), `email.rs` (email
   sign-in), `admin.rs` (the admin token), `tokens.rs` (the table behind
   sessions and device, invite and bot tokens), `devices.rs`
-  (`/invite-device`), `invites.rs` (`/invite-token` and `/invite`) and
+  (`/invite-device`), `invites.rs` (`/invite-token` and `/invite-code`) and
   `bots.rs` (`/invite-bot` and the idle bot sweep).
 - **Rooms and messages.** `rooms.rs` (rooms, memberships and delivery),
   `room_set.rs`, `room_list.rs`, `history.rs`, `messages.rs` (saves,
