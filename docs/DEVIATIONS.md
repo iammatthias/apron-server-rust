@@ -189,10 +189,9 @@ the state lock, so uses never exceed the count without a budget.
 
 **Reference.** apron-server-cloudflare closes a replaced or removed
 token's connections with close code 1008 and deletes all of the account's
-push registrations. A connection remembers the device id it signed in
-under, so a later replacement of that id closes it whichever token it
-used. Its link names the URL the connection reached. A connection already
-signed in that presents a device token is `denied`.
+push registrations. Its link names the URL the connection reached. A
+connection already signed in that presents a device token is `denied`, so
+a connection counts as signed in with the credential of its one sign-in.
 
 **This server.** Closes them as described in
 [Closing a connection](#closing-a-connection). The link follows
@@ -200,13 +199,32 @@ signed in that presents a device token is `denied`.
 may present a device token, which switches it as a session token would.
 A replacement or a removal deletes only the push registrations made under
 the old token. A registration stored before the server recorded the token
-is kept. A connection remembers the token it signed in with, not the id:
-the asking connection moves to the replacement, and after a removal it
-holds none, so a later `/invite-device add` of that id does not close it.
+is kept. A connection that signed in with a device token keeps counting as
+signed in with it after a later session token, as after adding a passkey.
 
 **Why.** A native client (the iOS app Ladle) signs in with these tokens.
 Keeping the account's other devices' registrations keeps their pushes
-working.
+working. A connection that signed in with a device token is still that
+device after it switches.
+
+### `/invite-purge` (§4.1, §3.2)
+
+**Reference.** apron-server-cloudflare closes the user's connections with
+close code 1008. Its link names the URL the connection reached. A passkey
+login whose proof was being verified when the purge ran is `denied` with
+`This passkey is no longer on the account`.
+
+**This server.** Closes them as described in
+[Closing a connection](#closing-a-connection). The link follows
+`--public-url`, as for `/invite-token`. A login that finishes after the
+purge, with a passkey it removed, fails as any unknown passkey does
+(`denied`, `Passkey verification failed`). The user keeps their email
+address, so email sign-in still works for them.
+
+**Why.** A ceremony here finishes under the state lock, so no purge lands
+while one is verifying. An email address is the account's, like its posts
+and roles, and proves its owner with a code, which a stolen token does not
+give.
 
 ### `/invite-bot` and bot users (§4.1, §3.2, §3.3)
 
@@ -298,8 +316,9 @@ alphabetically, with `/status` among them. Its `/role` line names
 
 **This server.**
 
-- `/help` lists the commands alphabetically too, with no `/status`, and
-  with its own texts for `/avatar` and `/invite-bot`.
+- `/help` lists the commands alphabetically too, the admins' marked
+  `(admin-only)`, with no `/status`, and with its own texts for `/avatar`
+  and `/invite-bot`.
 - The `/role` line names `admin`, `mod`, `bot` and `friend`, and leaves out
   `threader` and posting limits.
 - A user with an email address cannot be made a bot (`denied`, `A bot signs
