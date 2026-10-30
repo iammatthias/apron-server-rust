@@ -313,7 +313,7 @@ fn test_invite_bot_denied_to_guests_and_bots() {
         "bot"
     );
     assert_eq!(
-        command_error(&mut b, "/invite-device phone"),
+        command_error(&mut b, "/invite-device add phone"),
         bot_denied("/invite-device"),
         "bot"
     );
@@ -546,7 +546,7 @@ fn test_invite_bot_denied_for_a_role_holders_id() {
     let upload_dir = format!("{dir}/uploads");
     let mut server = start_with_store(kept.clone(), &upload_dir);
     let (mut ada, ada_id) = account(&server, "Ada");
-    let (_, laptop) = notice_after(&mut ada, "/invite-device laptop");
+    let (_, laptop) = notice_after(&mut ada, "/invite-device add laptop");
     let laptop = laptop.split("```\n").nth(1).unwrap().trim_end().to_owned();
     drop(ada);
     server.stop();

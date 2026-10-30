@@ -1,6 +1,6 @@
-//! /invite-device: an account mints a named bearer token that signs it in on
-//! another device from any origin, as apron-server-cloudflare's does (§3.2,
-//! §4.1).
+//! /invite-device: an account mints a bearer token under a device id that
+//! signs it in on another device from any origin, and revokes it, as
+//! apron-server-cloudflare's does (§3.2, §4.1).
 
 use std::sync::Arc;
 
@@ -52,10 +52,16 @@ fn only_notice(c: &mut TestClient, text: &str) -> String {
     body["text"].as_str().unwrap().to_owned()
 }
 
-/// Runs /invite-device name and returns the token its notice carries, after
-/// checking the whole notice text.
+/// Runs /invite-device add name and returns the token its notice carries,
+/// after checking the whole notice text.
 fn invite_device(c: &mut TestClient, user_id: &str, name: &str, replaces: bool) -> String {
     invite_device_linked(c, user_id, name, replaces, "")
+}
+
+/// Runs /invite-device add without an id, checking that the token takes
+/// name, and returns the token.
+fn invite_unnamed_device(c: &mut TestClient, user_id: &str, name: &str) -> String {
+    add_device(c, "/invite-device add", user_id, name, false, "")
 }
 
 /// invite_device on a server that writes link_server, already escaped, in
@@ -67,7 +73,25 @@ fn invite_device_linked(
     replaces: bool,
     link_server: &str,
 ) -> String {
-    let text = only_notice(c, &format!("/invite-device {name}"));
+    add_device(
+        c,
+        &format!("/invite-device add {name}"),
+        user_id,
+        name,
+        replaces,
+        link_server,
+    )
+}
+
+fn add_device(
+    c: &mut TestClient,
+    command: &str,
+    user_id: &str,
+    name: &str,
+    replaces: bool,
+    link_server: &str,
+) -> String {
+    let text = only_notice(c, command);
     let token = text
         .split("```\n")
         .nth(1)
@@ -87,7 +111,7 @@ fn invite_device_linked(
     assert_eq!(
         text,
         format!(
-            "This token signs in as you (`{user_id}`) on your device **{name}**{replaced}. It does not expire, and anyone who has it can sign in as you, so keep it secret. `/invite-device {name}` again replaces it.\n\n```\n{token}\n```\n\n{link}To sign in, authenticate with the token scheme: `{{\"method\": \"auth\", \"params\": {{\"scheme\": \"token\", \"token\": \"{token}\"}}}}`"
+            "This token signs in as you (`{user_id}`) on your device **{name}**{replaced}. It does not expire, and anyone who has it can sign in as you, so keep it secret. `/invite-device add {name}` again replaces it, and `/invite-device remove {name}` revokes it.\n\n```\n{token}\n```\n\n{link}To sign in, authenticate with the token scheme: `{{\"method\": \"auth\", \"params\": {{\"scheme\": \"token\", \"token\": \"{token}\"}}}}`"
         ),
         "invite-device notice"
     );
@@ -114,7 +138,7 @@ fn device(server: &TestServer, origin: &str, token: &str) -> (TestClient, Object
 fn invalid_token() -> Json {
     Json::from(obj! {
         "code" => CODE_DENIED,
-        "message" => "This device token is not valid; get a new one with /invite-device on a signed-in device",
+        "message" => "This device token is not valid; get a new one with /invite-device add on a signed-in device",
     })
 }
 
@@ -179,7 +203,7 @@ fn test_invite_device_links_the_public_url() {
 fn test_invite_device_has_no_link_without_a_public_url() {
     let server = passkey_test_server();
     let (mut ada, _) = account(&server);
-    let text = only_notice(&mut ada, "/invite-device phone");
+    let text = only_notice(&mut ada, "/invite-device add phone");
     assert!(!text.contains("link.apron.chat"), "notice: {text:?}");
 }
 
@@ -202,7 +226,7 @@ fn test_invite_device_denied_to_guests() {
     let server = passkey_test_server();
     let mut guest = dial_test_client(&server);
     assert_eq!(
-        command_error(&mut guest, "/invite-device phone"),
+        command_error(&mut guest, "/invite-device add phone"),
         Json::from(obj! {
             "code" => CODE_DENIED,
             "message" => "Sign in with a passkey to use /invite-device",
@@ -216,56 +240,86 @@ fn test_invite_device_denied_to_guests() {
 }
 
 #[test]
-fn test_invite_device_names() {
+fn test_invite_device_ids_and_usage() {
     let server = passkey_test_server();
     let (mut ada, ada_id) = account(&server);
     let usage = Json::from(obj! {
-        "code" => CODE_INVALID_PARAMS, "message" => "Usage: /invite-device <name>",
+        "code" => CODE_INVALID_PARAMS, "message" => "Usage: /invite-device add|remove [<id>]",
     });
     let rule = Json::from(obj! {
         "code" => CODE_INVALID_PARAMS,
-        "message" => "A device name is 1 to 32 letters, digits, _, . or -, starting with a letter or digit",
+        "message" => "A device id is 1 to 32 letters, digits, _, . or -, starting with a letter or digit",
     });
-    assert_eq!(command_error(&mut ada, "/invite-device"), usage, "no name");
-    assert_eq!(
-        command_error(&mut ada, "/invite-device my phone"),
-        usage,
-        "two words"
-    );
+    for text in [
+        "/invite-device",
+        "/invite-device phone",
+        "/invite-device Add phone",
+        "/invite-device add my phone",
+        "/invite-device remove",
+        "/invite-device remove my phone",
+    ] {
+        assert_eq!(command_error(&mut ada, text), usage, "{text}");
+    }
     let long = "a".repeat(33);
-    for name in ["-phone", "_phone", "pho/ne", "téléphone", long.as_str()] {
-        assert_eq!(
-            command_error(&mut ada, &format!("/invite-device {name}")),
-            rule,
-            "name {name:?}"
-        );
+    for name in [
+        "-phone",
+        "_phone",
+        "pho/ne",
+        "téléphone",
+        "__proto__",
+        long.as_str(),
+    ] {
+        for action in ["add", "remove"] {
+            assert_eq!(
+                command_error(&mut ada, &format!("/invite-device {action} {name}")),
+                rule,
+                "{action} {name:?}"
+            );
+        }
     }
     invite_device(&mut ada, &ada_id, &"a".repeat(32), false);
     invite_device(&mut ada, &ada_id, "Ada_s.i-Pad", false);
 }
 
 #[test]
-fn test_invite_device_holds_three_names() {
+fn test_invite_device_holds_five_ids() {
     let server = passkey_test_server();
     let (mut ada, ada_id) = account(&server);
-    let tokens: Vec<String> = ["phone", "tablet", "laptop"]
+    let mut tokens: Vec<String> = ["phone", "tablet", "laptop"]
         .iter()
         .map(|name| invite_device(&mut ada, &ada_id, name, false))
         .collect();
+    // Without an id, the first free device_<n>.
+    tokens.push(invite_unnamed_device(&mut ada, &ada_id, "device_1"));
+    tokens.push(invite_unnamed_device(&mut ada, &ada_id, "device_2"));
+    let full = Json::from(obj! {
+        "code" => CODE_DENIED,
+        "message" => "You have 5 device tokens (`phone`, `tablet`, `laptop`, `device_1`, `device_2`); run /invite-device add with one of those ids to replace its token, or /invite-device remove to revoke one",
+    });
     assert_eq!(
-        command_error(&mut ada, "/invite-device watch"),
-        Json::from(obj! {
-            "code" => CODE_DENIED,
-            "message" => "You have 3 device tokens (`phone`, `tablet`, `laptop`); run /invite-device with one of those names to replace its token",
-        }),
-        "fourth name"
+        command_error(&mut ada, "/invite-device add watch"),
+        full,
+        "sixth id"
+    );
+    assert_eq!(
+        command_error(&mut ada, "/invite-device add"),
+        full,
+        "sixth, unnamed"
     );
     for token in &tokens {
         let (_, frame) = device(&server, OTHER_ORIGIN, token);
         assert!(frame.contains_key("result"), "kept token: {frame:?}");
     }
-    // A held name is no fourth one.
+    // A held id is no sixth one.
     invite_device(&mut ada, &ada_id, "tablet", true);
+
+    // Removing frees the id, and device_1 is taken again next.
+    assert_eq!(
+        only_notice(&mut ada, "/invite-device remove device_1"),
+        "Revoked the device token for **device_1**.",
+        "remove"
+    );
+    invite_unnamed_device(&mut ada, &ada_id, "device_1");
 }
 
 /// The urls of a user's push registrations, sorted.
@@ -294,12 +348,14 @@ fn register_push(c: &mut TestClient, name: &str) {
 
 /// Checks that c got the replacement's close error, and closed.
 fn expect_replaced(c: &TestClient, what: &str) {
+    expect_closed(c, "Device token replaced; sign in with the new one", what);
+}
+
+/// Checks that c got the close error with message, and closed.
+fn expect_closed(c: &TestClient, message: &str, what: &str) {
     assert_eq!(
         c.read(),
-        obj! {"error" => obj! {
-            "code" => CODE_DENIED,
-            "message" => "Device token replaced; sign in with the new one",
-        }},
+        obj! {"error" => obj! {"code" => CODE_DENIED, "message" => message}},
         "{what}"
     );
     assert!(c.read_raw(time::SECOND).is_err(), "{what} stayed open");
@@ -388,6 +444,72 @@ fn test_invite_device_closes_a_device_that_got_a_session_token() {
     expect_replaced(&phone, "the device connection with a session token");
 }
 
+#[test]
+fn test_invite_device_remove_revokes_a_token() {
+    let server = passkey_test_server();
+    let (mut ada, ada_id) = account(&server);
+    let phone_token = invite_device(&mut ada, &ada_id, "phone", false);
+    let tablet_token = invite_device(&mut ada, &ada_id, "tablet", false);
+    let (mut phone, _) = device(&server, OTHER_ORIGIN, &phone_token);
+    let (mut tablet, _) = device(&server, "", &tablet_token);
+    ada.drain();
+    register_push(&mut ada, "ada");
+    register_push(&mut phone, "phone");
+    register_push(&mut tablet, "tablet");
+
+    assert_eq!(
+        command_error(&mut ada, "/invite-device remove laptop"),
+        Json::from(obj! {
+            "code" => CODE_INVALID_PARAMS,
+            "message" => "You have no device token with the id laptop; yours are `phone`, `tablet`",
+        }),
+        "an id not held"
+    );
+    assert_eq!(
+        only_notice(&mut ada, "/invite-device remove phone"),
+        "Revoked the device token for **phone**.",
+        "remove"
+    );
+    expect_closed(
+        &phone,
+        "Device token revoked",
+        "connection that signed in with the removed token",
+    );
+    ada.expect_quiet();
+    tablet.expect_quiet();
+    assert_eq!(
+        push_urls(&server, &ada_id),
+        [
+            "https://fcm.googleapis.com/fcm/send/ada",
+            "https://fcm.googleapis.com/fcm/send/tablet"
+        ],
+        "push registrations after a removal"
+    );
+    let (_, frame) = device(&server, OTHER_ORIGIN, &phone_token);
+    assert_eq!(frame.get("error"), Some(&invalid_token()), "removed token");
+
+    // The asking connection stays open when it signed in with the token it
+    // removes.
+    assert_eq!(
+        only_notice(&mut tablet, "/invite-device remove tablet"),
+        "Revoked the device token for **tablet**.",
+        "remove from the device itself"
+    );
+    tablet.expect_quiet();
+    assert!(
+        server.app.lock().devices.keys().next().is_none(),
+        "tokens left after removing both"
+    );
+    assert_eq!(
+        command_error(&mut ada, "/invite-device remove tablet"),
+        Json::from(obj! {
+            "code" => CODE_INVALID_PARAMS,
+            "message" => "You have no device tokens; get one with /invite-device add",
+        }),
+        "none held"
+    );
+}
+
 /// The old token's connection, signed out at the replacement, runs nothing
 /// more: a message it sends then is refused and reaches no one.
 #[test]
@@ -404,7 +526,7 @@ fn test_replaced_device_token_connection_runs_nothing() {
         &server,
         &mut ada,
         &ada_conn,
-        "/invite-device phone",
+        "/invite-device add phone",
         &conn,
         &ada_id,
     );
@@ -444,11 +566,11 @@ fn test_help_lists_invite_device_for_accounts() {
     let (mut ada, _) = account(&server);
     let mut guest = dial_test_client(&server);
     ada.drain();
-    let listed = "- `/invite-device <name>`: get a token that signs in as you on another device, named <name>; at most 3 names, and a name again replaces its token";
+    let listed = "- `/invite-device add|remove [<id>]`: get a token that signs in as you on another device, or revoke one";
     assert_eq!(
         only_notice(&mut ada, "/help"),
         format!(
-            "- `/help`: list the commands you can use here\n- `/avatar`: with one image attached: set your avatar\n{listed}\n- `/invite-bot`: get a token that signs in as your bot, named after you; again, it replaces the token and renames the bot\n- `/passkeys [remove <n>]`: list your account's passkeys, or remove one of them"
+            "- `/avatar`: with one image attached: set your avatar\n- `/help`: list the commands you can use here\n- `/invite-bot`: get a token that signs in as your bot, named after you; again, it replaces the token and renames the bot\n{listed}\n- `/passkeys [remove <n>]`: list your account's passkeys, or remove one of them"
         ),
         "account's help"
     );
@@ -469,7 +591,12 @@ fn test_invite_device_tokens_survive_restart() {
     let (mut ada, ada_id) = account(&server);
     let phone = invite_device(&mut ada, &ada_id, "phone", false);
     let tablet = invite_device(&mut ada, &ada_id, "tablet", false);
-    invite_device(&mut ada, &ada_id, "laptop", false);
+    let desk = invite_device(&mut ada, &ada_id, "desk", false);
+    for name in ["laptop", "watch"] {
+        invite_device(&mut ada, &ada_id, name, false);
+    }
+    only_notice(&mut ada, "/invite-device remove desk");
+    invite_device(&mut ada, &ada_id, "tv", false);
     for (name, token) in [("phone", &phone), ("tablet", &tablet)] {
         let (mut c, _) = device(&server, "", token);
         register_push(&mut c, name);
@@ -492,12 +619,18 @@ fn test_invite_device_tokens_survive_restart() {
         "device signed in after restart: {frame:?}"
     );
     assert_eq!(
-        command_error(&mut c, "/invite-device watch"),
+        command_error(&mut c, "/invite-device add car"),
         Json::from(obj! {
             "code" => CODE_DENIED,
-            "message" => "You have 3 device tokens (`phone`, `tablet`, `laptop`); run /invite-device with one of those names to replace its token",
+            "message" => "You have 5 device tokens (`phone`, `tablet`, `laptop`, `watch`, `tv`); run /invite-device add with one of those ids to replace its token, or /invite-device remove to revoke one",
         }),
-        "names restored oldest first"
+        "ids restored oldest first, without the removed one"
+    );
+    let (_, frame) = device(&server, OTHER_ORIGIN, &desk);
+    assert_eq!(
+        frame.get("error"),
+        Some(&invalid_token()),
+        "removed token after restart"
     );
     let (mut c, _) = device(&server, OTHER_ORIGIN, &tablet);
     invite_device(&mut c, &ada_id, "phone", true);

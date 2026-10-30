@@ -64,7 +64,7 @@ test('a passkey account made in the web client signs Ladle in through /invite-de
 	await send(page, webMessage);
 	await expect(messageByText(page, webMessage)).toBeVisible();
 
-	await send(page, '/invite-device phone');
+	await send(page, '/invite-device add phone');
 	await expect(page.getByText(/^This token signs in as you .* on your device phone/).last()).toBeVisible();
 	const token = await noticeCodeBlock(page, 'on your device');
 	expect(/^apron_device_[A-Za-z0-9_-]{43}$/.test(token), 'the code block is a device token').toBe(true);

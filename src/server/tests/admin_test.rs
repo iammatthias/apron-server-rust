@@ -55,7 +55,7 @@ fn test_admin_token_signs_in_as_admin() {
         "passkey for the admin user"
     );
     assert_eq!(
-        command_error(&mut again, "/invite-device phone"),
+        command_error(&mut again, "/invite-device add phone"),
         (
             CODE_DENIED,
             "The admin user signs in with APRON_ADMIN_TOKEN only; make your own account an admin with /admin".into()
@@ -140,6 +140,32 @@ fn test_admin_commands_for_admins_only() {
     ] {
         assert!(help.contains(usage), "admin help lacks {usage}: {help}");
     }
+    let listed: Vec<&str> = help
+        .lines()
+        .filter_map(|line| line.strip_prefix("- `/"))
+        .map(|rest| rest.split([' ', '`']).next().unwrap())
+        .collect();
+    assert_eq!(
+        listed,
+        [
+            "admin",
+            "avatar",
+            "emoji",
+            "help",
+            "invite-bot",
+            "invite-code",
+            "invite-device",
+            "invite-token",
+            "kick",
+            "passkeys",
+            "purge",
+            "rename",
+            "role",
+            "server",
+            "toggle"
+        ],
+        "admin help, alphabetical"
+    );
     let plain = private_reply(&mut alice, "/help");
     assert!(
         plain.contains("/invite-bot") && !plain.contains("/admin") && !plain.contains("/role"),

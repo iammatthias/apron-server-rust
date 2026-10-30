@@ -187,17 +187,22 @@ the state lock, so uses never exceed the count without a budget.
 
 ### `/invite-device` (§4.1, §3.2)
 
-**Reference.** apron-server-cloudflare closes a replaced token's
-connections with close code 1008 and deletes all of the account's push
-registrations. Its link names the URL the connection reached. A
-connection already signed in that presents a device token is `denied`.
+**Reference.** apron-server-cloudflare closes a replaced or removed
+token's connections with close code 1008 and deletes all of the account's
+push registrations. A connection remembers the device id it signed in
+under, so a later replacement of that id closes it whichever token it
+used. Its link names the URL the connection reached. A connection already
+signed in that presents a device token is `denied`.
 
 **This server.** Closes them as described in
 [Closing a connection](#closing-a-connection). The link follows
 `--public-url`, as for `/invite-token`. A connection already signed in
 may present a device token, which switches it as a session token would.
-A replacement deletes only the push registrations made under the old
-token. A registration stored before the server recorded the token is kept.
+A replacement or a removal deletes only the push registrations made under
+the old token. A registration stored before the server recorded the token
+is kept. A connection remembers the token it signed in with, not the id:
+the asking connection moves to the replacement, and after a removal it
+holds none, so a later `/invite-device add` of that id does not close it.
 
 **Why.** A native client (the iOS app Ladle) signs in with these tokens.
 Keeping the account's other devices' registrations keeps their pushes
@@ -287,23 +292,22 @@ grants `mod`. A malformed role name stops the server.
 
 ### `/admin`, `/role`, `/kick` and `/help` (§4.1, §3.3)
 
-**Reference.** apron-server-cloudflare's `/help` lists `/invite-bot`,
-`/invite-device`, `/avatar`, `/passkeys`, `/admin`, `/role`, `/kick`, then
-the other admin commands. Its `/role` line names `threader` and says any
-role raises posting limits.
+**Reference.** apron-server-cloudflare's `/help` lists the commands
+alphabetically, with `/status` among them. Its `/role` line names
+`threader` and says any role raises posting limits.
 
 **This server.**
 
-- `/help` lists `/avatar`, `/invite-device`, `/invite-bot`, `/passkeys`,
-  `/kick`, `/admin`, `/role`, then the other admin commands, with its own
-  texts for `/avatar` and `/invite-bot`.
+- `/help` lists the commands alphabetically too, with no `/status`, and
+  with its own texts for `/avatar` and `/invite-bot`.
 - The `/role` line names `admin`, `mod`, `bot` and `friend`, and leaves out
   `threader` and posting limits.
 - A user with an email address cannot be made a bot (`denied`, `A bot signs
   in with a token and holds no email address; this user has one`).
 
-**Why.** The earlier commands kept their order and texts. Email addresses
-exist only here.
+**Why.** The earlier commands kept their texts. `/status` reports
+Cloudflare usage, which this server has none of. Email addresses exist
+only here.
 
 ### `/rename` (§4.1, §3.3)
 
