@@ -171,7 +171,7 @@ the granted roles.
 configuration and not from the request's `Host`, so it never links to an
 address it may not be reachable at.
 
-### `/invite` and `server.signup` (§3.2, §4.1, Appendix B)
+### `/invite-code` and `server.signup` (§3.2, §4.1, Appendix B)
 
 **Reference.** apron-server-cloudflare lists `signup` as `webauthn` and
 `token`, refuses a sign-up `name` over the limit with `too_large`, and

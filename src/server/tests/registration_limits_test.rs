@@ -200,13 +200,13 @@ fn test_identity_cap_closes_registration() {
     assert_eq!(refusal(&frame), closed, "a bot");
 }
 
-/// A sign-up with the /invite token counts against the signer's address,
+/// A sign-up with the /invite-code token counts against the signer's address,
 /// and a refused one leaves the invite's use unspent.
 #[test]
 fn test_invite_sign_up_is_a_registration() {
     let server = server(registrations(1, 0, 0));
     let mut admin = admin_from(&server, "198.51.100.1");
-    let invite = token_in(&private_reply(&mut admin, "/invite 2"));
+    let invite = token_in(&private_reply(&mut admin, "/invite-code 2"));
     let mut first = dial_from(&server, "198.51.100.2");
     let up = |c: &mut TestClient, name: &str| {
         let id = c.next_id("auth");

@@ -15,7 +15,7 @@
 //
 // It posts nothing in general or any public room. The admin checks make
 // accounts named livecheck_<random>: one from /invite-token and one from a
-// /invite sign-up, one that is renamed and purged, and one given the role mod
+// /invite-code sign-up, one that is renamed and purged, and one given the role mod
 // to run /emoji. At the end the admin
 // purges every livecheck_ account in general, this run's and any an earlier
 // run left. The Track C checks post only in a
@@ -331,8 +331,8 @@ if (!tokenFile) {
     }
   });
 
-  await check("admin: /invite 1 signs up once, then is denied, /invite 0 revokes", async () => {
-    const { frames, error } = await run("/invite 1");
+  await check("admin: /invite-code 1 signs up once, then is denied, /invite-code 0 revokes", async () => {
+    const { frames, error } = await run("/invite-code 1");
     if (error) return `error ${JSON.stringify(error)}`;
     const token = noticeText(frames).match(/apron_join_[A-Za-z0-9_-]+/)?.[0];
     if (!token) return "no join token in the notice";
@@ -353,7 +353,7 @@ if (!tokenFile) {
     } finally {
       second.close();
     }
-    const revoke = await run("/invite 0");
+    const revoke = await run("/invite-code 0");
     return (!revoke.error && /revoked/.test(noticeText(revoke.frames))) || `revoke ${JSON.stringify(revoke.error ?? noticeText(revoke.frames))}`;
   });
 

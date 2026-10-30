@@ -616,10 +616,10 @@ fn joined_of(frames: &[Object], user_id: &str) -> bool {
     })
 }
 
-/// /invite mints a sign-up token that makes an account per use, each with
+/// /invite-code mints a sign-up token that makes an account per use, each with
 /// its own token (Appendix B), joining general after the auth result; a
 /// used-up invite is dropped when tried; a new invite replaces the last and
-/// /invite 0 revokes it; more than 50 uses is denied. (Cloudflare's test
+/// /invite-code 0 revokes it; more than 50 uses is denied. (Cloudflare's test
 /// also exhausts its budget mid-sign-up, which this server has none of.)
 #[test]
 fn test_invite_signs_up_accounts() {
@@ -628,7 +628,7 @@ fn test_invite_signs_up_accounts() {
         ..admin_config()
     });
     let mut admin = admin(&server);
-    let text = private_reply(&mut admin, "/invite 2");
+    let text = private_reply(&mut admin, "/invite-code 2");
     let invite = token_in(&text);
     assert!(
         invite.starts_with("apron_join_") && invite.len() == "apron_join_".len() + 43,
@@ -703,7 +703,7 @@ fn test_invite_signs_up_accounts() {
         "used-up invite kept"
     );
     // A signed-in account cannot sign up again.
-    let fresh = token_in(&private_reply(&mut admin, "/invite 1"));
+    let fresh = token_in(&private_reply(&mut admin, "/invite-code 1"));
     assert_eq!(
         token_auth(&mut ada, &fresh).get("error"),
         Some(&Json::from(
@@ -719,38 +719,48 @@ fn test_invite_signs_up_accounts() {
         "expired invite kept"
     );
 
-    // A new invite replaces the last; /invite 0 revokes it.
-    let replaced = token_in(&private_reply(&mut admin, "/invite 1"));
-    let latest = token_in(&private_reply(&mut admin, "/invite 1"));
+    // A new invite replaces the last; /invite-code 0 revokes it.
+    let replaced = token_in(&private_reply(&mut admin, "/invite-code 1"));
+    let latest = token_in(&private_reply(&mut admin, "/invite-code 1"));
     assert_eq!(
         token_auth(&mut third, &replaced).get("error"),
         Some(&used_up)
     );
     assert_eq!(
-        private_reply(&mut admin, "/invite 0"),
+        private_reply(&mut admin, "/invite-code 0"),
         "The sign-up invite is revoked."
     );
     assert_eq!(token_auth(&mut third, &latest).get("error"), Some(&used_up));
     assert_eq!(
-        command_error(&mut admin, "/invite 51"),
+        command_error(&mut admin, "/invite-code 51"),
         (CODE_DENIED, "An invite signs up at most 50 users".into()),
     );
     for bad in [
-        "/invite",
-        "/invite -1",
-        "/invite 1000",
-        "/invite x",
-        "/invite 1 2",
+        "/invite-code",
+        "/invite-code -1",
+        "/invite-code 1000",
+        "/invite-code x",
+        "/invite-code 1 2",
     ] {
         assert_eq!(
             command_error(&mut admin, bad),
-            (CODE_INVALID_PARAMS, "Usage: /invite <uses>, 0 to 50".into()),
+            (
+                CODE_INVALID_PARAMS,
+                "Usage: /invite-code <uses>, 0 to 50".into()
+            ),
             "{bad}"
         );
     }
     assert_eq!(
-        command_error(&mut ada, "/invite 1"),
-        (CODE_DENIED, "Only an admin can use /invite".into()),
+        command_error(&mut ada, "/invite-code 1"),
+        (CODE_DENIED, "Only an admin can use /invite-code".into()),
+    );
+    assert_eq!(
+        command_error(&mut admin, "/invite 1"),
+        (
+            CODE_INVALID_PARAMS,
+            "Unknown command /invite; try /help".into()
+        ),
     );
 }
 
@@ -764,7 +774,7 @@ fn test_invite_persists() {
     };
     let mut server = start_with(kept.clone(), &format!("{dir}/a"), configure);
     let mut boss = admin(&server);
-    let invite = token_in(&private_reply(&mut boss, "/invite 2"));
+    let invite = token_in(&private_reply(&mut boss, "/invite-code 2"));
     let (mut first, _) = dial_raw(&server);
     passkey_result(&token_auth(&mut first, &invite));
     drop((boss, first));

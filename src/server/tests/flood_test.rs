@@ -156,7 +156,7 @@ fn test_mistyped_commands_are_not_violations() {
         "/invite-device",
         "/server avatar x",
         "/emoji",
-        "/invite lots",
+        "/invite-code lots",
     ]
     .into_iter()
     .enumerate()

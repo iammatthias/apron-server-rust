@@ -197,9 +197,9 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         run: State::invite_token_command,
     },
     ServerCommand {
-        name: "invite",
-        usage: "/invite <uses>",
-        help: "get a token that signs up to <uses> new users (at most 50) for a week, replacing the last one; /invite 0 revokes it",
+        name: "invite-code",
+        usage: "/invite-code <uses>",
+        help: "get a token that signs up to <uses> new users (at most 50) for a week, replacing the last one; /invite-code 0 revokes it",
         audience: Audience::Admins,
         forgives_params: true,
         writes: true,
