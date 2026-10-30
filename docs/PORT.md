@@ -96,6 +96,7 @@ and the earlier row stays as it was decided.
 | 2026-10-29 | `UPSTREAM` and `tools/upstream/check.sh` give way to `REFERENCE`, which pins apron-chat/apron-server-cloudflare and shazow/apron at the commits last reviewed, and `tools/reference/check.sh`, which lists each repository's commits since its pin that touch `SPEC.md`, `src/`, `docs/`, `PROTOCOL.md` or `EXTENSIONS.md`. `tools/crossopen` is deleted. `tools/smoke/frame-diff.mjs` compares the `server` frame's shape with the live reference at wss://server.apron.chat/. | Cloudflare is the reference and Go a fallback, so drift is measured against Cloudflare and the protocol, as a review queue rather than a rule to port every commit. Store compatibility with a Go `aprond` is no longer a goal, so a check of it guards nothing. |
 | 2026-10-29 | apron-server-cloudflare 1bda2bf (a connection that never pings is closed after 15 minutes without a frame) is ported: `Config.unpinged_timeout` (900 seconds, no flag, like the ping settings) in `Client::ping_loop`, which writes Cloudflare's room-less `~private` notice itself and then closes with 1001. The stale close of a connection that pinged now uses 1001 too. 1ad1aa8 (admin alerts when the edge stop or an accounting overrun closes the server, self-clearing storage failures, `Retry-After` on 503s) has no counterpart: this server has no such stops, so it is recorded in docs/DEVIATIONS.md, with the liveness timings that already differed. | The ping thread already watches each connection's silence, so the new timeout is one more branch there, with no sweep. Writing the notice on that thread, not through the queue, keeps the close from dropping it. |
 | 2026-10-29 | apron-server-cloudflare 908bb7b (`/invite` renamed `/invite-code`) is ported: the command table entry in `src/server/commands.rs`, its usage and `/help` texts, and `tools/deploy/live-check.mjs`. The old name is not kept; like Cloudflare, `/invite` is now an unknown command. | apron-web reads `/invite <user>` as a room_join, so `/invite 3` never reached the server. |
+| 2026-10-30 | apron-server-cloudflare ab07e29 (`/invite-device add\|remove [<id>]`, up to 5 device tokens) is ported: `DeviceCommand` in `src/server/devices.rs` parses the command, `add` without an id takes the first free `device_<n>`, and `remove` revokes a token as a replacement does, with Cloudflare's texts. The stored `device` entry keeps its `name` field, so tokens minted before still sign in. `/help` lists the commands alphabetically, as Cloudflare's now does. The `REFERENCE` pin moves to ab07e29. | Cloudflare is the reference. The stored shape is unchanged, so no migration is needed. |
 
 ## Migrating a guest_<n> account
 
@@ -143,7 +144,7 @@ web client's origins, and `--apple.app-id` for each app, such as a
 development build with its own bundle ID.
 
 The native client gets its bearer token from another signed-in client,
-with `/invite-device <name>`, apron-server-cloudflare's command
+with `/invite-device add [<id>]`, apron-server-cloudflare's command
 (docs/DEVIATIONS.md). Send it in the web client
 while signed in with a passkey or email, and paste the token from the
 `~private` reply, which shows it in a code block with a Copy button. With
@@ -151,9 +152,11 @@ while signed in with a passkey or email, and paste the token from the
 sign-in link for the server's `/ws` endpoint and the token, which a client
 can open or show as a QR code. The app authenticates with
 `{"scheme": "token", "token": ...}` (§3.2), from any origin or none. The
-token does not expire. An account holds at most three, one per name; running `/invite-device` with a held name again mints a new
-token for it, revokes the old one, and closes the connections that signed
-in with the old one.
+token does not expire. An account holds at most five, one per id (without
+one, the first free `device_<n>`); running `/invite-device add` with a held
+id again mints a new token for it, revokes the old one, and closes the
+connections that signed in with the old one. `/invite-device remove <id>`
+revokes a token the same way.
 
 ## Smoke check
 

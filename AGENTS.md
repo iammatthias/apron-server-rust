@@ -338,7 +338,7 @@ through unchanged.
 Set `LADLE_DIR` to a checkout of Ladle's `live-proof` branch. A Playwright page
 (the Go clone's `tests/interop` dependencies, Chrome's virtual authenticator)
 makes a passkey account named `ladle-proof` in the web client, posts, and runs
-`/invite-device phone`. It passes the notice's token and the server's origin
+`/invite-device add phone`. It passes the notice's token and the server's origin
 to Ladle's `LiveServerProofTests` in the environment. That test signs in with
 the token as the same `user_id` and posts in `general`. The page then waits
 for Ladle's message. Device tokens sign in from any origin, so a Ladle

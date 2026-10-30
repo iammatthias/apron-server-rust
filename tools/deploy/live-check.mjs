@@ -315,11 +315,13 @@ if (!tokenFile) {
   });
 
   const accountID = `livecheck_${suffix}`;
+  let accountToken = null;
   await check("admin: /invite-token makes an account that signs in from no Origin", async () => {
     const { frames, error } = await run(`/invite-token ${accountID}`);
     if (error) return `error ${JSON.stringify(error)}`;
     const token = linkToken(noticeText(frames));
     if (!token) return "no link.apron.chat link in the notice";
+    accountToken = token;
     const c = await connect();
     try {
       await c.server();
@@ -328,6 +330,37 @@ if (!tokenFile) {
       return signIn.result.you.user_id === accountID || `user_id ${signIn.result.you.user_id}`;
     } finally {
       c.close();
+    }
+  });
+
+  await check("account: /invite-device add mints device_1, /invite-device remove revokes it and closes its connection", async () => {
+    if (!accountToken) return "no /invite-token account";
+    const owner = await connect();
+    const phone = await connect();
+    try {
+      await owner.server();
+      const signIn = await owner.call("auth", { scheme: "token", token: accountToken });
+      if (signIn.error) return `sign-in error ${JSON.stringify(signIn.error)}`;
+      const ownerRun = (text) => owner.call("command", { room_id: commandRoom, body: { text } });
+      const added = await ownerRun("/invite-device add");
+      if (added.error) return `add error ${JSON.stringify(added.error)}`;
+      const text = noticeText(added.frames);
+      if (!text.includes("your device **device_1**")) return `add notice ${text}`;
+      const token = text.match(/apron_device_[A-Za-z0-9_-]{43}/)?.[0];
+      if (!token) return "no device token in the notice";
+      await phone.server();
+      const onPhone = await phone.call("auth", { scheme: "token", token });
+      if (onPhone.error) return `device sign-in error ${JSON.stringify(onPhone.error)}`;
+      const removed = await ownerRun("/invite-device remove device_1");
+      if (removed.error) return `remove error ${JSON.stringify(removed.error)}`;
+      if (!noticeText(removed.frames).includes("Revoked the device token for **device_1**.")) return `remove notice ${noticeText(removed.frames)}`;
+      await phone.until(() => phone.closed, 8000, "the removed device's close").catch(() => {});
+      if (!phone.closed) return "the removed device's connection stayed open";
+      const usage = await ownerRun("/invite-device");
+      return usage.error?.message === "Usage: /invite-device add|remove [<id>]" || `usage ${JSON.stringify(usage.error)}`;
+    } finally {
+      owner.close();
+      phone.close();
     }
   });
 

@@ -130,7 +130,7 @@ pub(super) fn entangle(
     c.drain();
     let devices = ["phone", "tablet"]
         .iter()
-        .map(|name| token_in(&private_reply(c, &format!("/invite-device {name}"))))
+        .map(|name| token_in(&private_reply(c, &format!("/invite-device add {name}"))))
         .collect();
     let bot_token = token_in(&private_reply(c, "/invite-bot"));
 
@@ -432,14 +432,14 @@ fn test_purge_revokes_tokens() {
     passkey_result(&token_auth(&mut c, &invite));
     c.user_id = "invited".into();
     c.drain();
-    let device = token_in(&private_reply(&mut c, "/invite-device phone"));
+    let device = token_in(&private_reply(&mut c, "/invite-device add phone"));
     let bot = token_in(&private_reply(&mut c, "/invite-bot"));
     admin.drain();
 
     private_reply(&mut admin, "/purge invited");
     for (token, message) in [
         (&invite, "This invite token is not valid; ask an admin for a new one"),
-        (&device, "This device token is not valid; get a new one with /invite-device on a signed-in device"),
+        (&device, "This device token is not valid; get a new one with /invite-device add on a signed-in device"),
         (&bot, "Bot token is not valid; its owner can get a new one with /invite-bot"),
     ] {
         let (mut again, _) = dial_raw(&server);
