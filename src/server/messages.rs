@@ -125,6 +125,18 @@ fn dedupe_mentions(body: &mut Object) {
     }
 }
 
+/// Fills in what a body omits as Cloudflare's normalizedBody does: an
+/// empty `text`, `format` "plain" (the protocol's default) and no `embeds`.
+fn normalize_body(body: &mut Object) {
+    for (name, default) in [
+        ("text", Json::from("")),
+        ("format", Json::from("plain")),
+        ("embeds", Json::Array(Vec::new())),
+    ] {
+        body.entry(name.to_owned()).or_insert(default);
+    }
+}
+
 pub(crate) fn validate_body(body: &Object, max_text_bytes: usize) -> Result<(), RpcError> {
     if let Some(raw) = body.get("text") {
         let Some(text) = raw.as_str() else {
@@ -137,7 +149,7 @@ pub(crate) fn validate_body(body: &Object, max_text_bytes: usize) -> Result<(), 
     if let Some(raw) = body.get("format") {
         match raw.as_str() {
             Some("plain") | Some("markdown") => {}
-            _ => return Err(invalid_params("body.format must be plain or markdown")),
+            _ => return Err(invalid_params("body.format is invalid")),
         }
     }
     if let Some(raw) = body.get("mentions") {
@@ -311,6 +323,7 @@ impl State {
             let mut parsed = parse_object(&req.params, "body", true)?.unwrap_or_default();
             validate_body(&parsed, self.config.frame.max_text_bytes)?;
             dedupe_mentions(&mut parsed);
+            normalize_body(&mut parsed);
             body = Some(parsed);
         }
         let (ext_write, _) = parse_ext(&req.params, "ext")?;
@@ -411,14 +424,18 @@ impl State {
                 "An admin, mod or threader may move someone else's message but not change it",
             ));
         }
-        if !replacing {
-            let body_ref = body.as_ref().expect("a creation has a body");
-            let text = body_ref.get("text").and_then(Json::as_str).unwrap_or("");
-            if text.is_empty() && body_ref.get("embeds").map_or(0, |e| e.as_list().len()) == 0 {
-                let result = Object::new();
-                c.send_result(req, result.clone().into());
-                return Ok((result.into(), true));
+        // A new empty message is neither logged nor delivered (§3.5); an
+        // edit to nothing is refused, as on Cloudflare: a deletion clears.
+        if body
+            .as_ref()
+            .is_some_and(|b| b["text"].as_str() == Some("") && b["embeds"].as_list().is_empty())
+        {
+            if replacing {
+                return Err(invalid_params("message cannot be empty"));
             }
+            let result = Object::new();
+            c.send_result(req, result.clone().into());
+            return Ok((result.into(), true));
         }
         self.charge_post_locked(c, &user_id, Some(Category::Write))?;
 
@@ -433,11 +450,7 @@ impl State {
             let (embeds, writes) =
                 self.resolve_embeds_locked(c, &message_id, previous.as_ref(), body)?;
             written = writes;
-            if !embeds.is_empty() {
-                body.insert("embeds".into(), embeds.into());
-            } else {
-                body.remove("embeds");
-            }
+            body.insert("embeds".into(), embeds.into());
         }
         self.release_embeds_locked(previous.as_ref(), body.as_ref());
 
@@ -734,9 +747,14 @@ fn same_content(
         return false;
     };
     let was_deleted = previous.get("deleted").is_some_and(Json::is_true);
-    let previous_body = previous.get("body").and_then(Json::as_object);
+    // A snapshot stored before bodies were normalized compares as one.
+    let previous_body = previous.get("body").and_then(Json::as_object).map(|b| {
+        let mut b = b.clone();
+        normalize_body(&mut b);
+        b
+    });
     deleted == was_deleted
-        && match (body, previous_body) {
+        && match (body, previous_body.as_ref()) {
             (Some(body), Some(previous_body)) => json_equal(body, previous_body),
             (None, None) => true,
             _ => false,

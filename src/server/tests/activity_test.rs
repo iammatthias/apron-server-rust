@@ -113,21 +113,17 @@ fn test_typing_is_capped_and_throttled() {
         relayed.iter().all(|p| p["typing"] == Json::from(30i64)),
         "{relayed:?}"
     );
-    let notices: Vec<String> = own
+    let notices: Vec<Json> = own
         .iter()
         .filter(|f| f.get("method") == Some(&Json::from("message")))
-        .map(|f| {
-            notification_params(f, "message")["body"]
-                .as_object()
-                .unwrap()["text"]
-                .as_str()
-                .unwrap()
-                .to_owned()
-        })
+        .map(|f| notification_params(f, "message")["body"].clone())
         .collect();
     assert_eq!(
         notices,
-        vec!["Typing updates are limited to 10 per minute, so others may not see you typing for a moment."]
+        vec![Json::from(obj! {
+            "text" => "Typing updates are limited to 10 per minute, so others may not see you typing for a moment.",
+            "format" => "plain",
+        })]
     );
 }
 

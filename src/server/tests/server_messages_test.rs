@@ -66,7 +66,10 @@ fn test_message_snapshots_replace_editable_state() {
     // edit that leaves ext out keeps it.
     assert!(
         edit["ext"] == Json::from(ext.clone())
-            && edit["body"].as_object().unwrap().len() == 1
+            && edit["body"]
+                == Json::from(
+                    obj! {"text" => "edited", "format" => "plain", "embeds" => Vec::<Json>::new()}
+                )
             && edit["from"].as_object().unwrap()["name"] == Json::from("Alice"),
         "replacement merged editable fields, lost ext, or changed author: {edit:?}"
     );
@@ -668,16 +671,16 @@ fn test_default_room_and_empty_messages() {
         1,
         "empty messages were logged: {page:?}"
     );
-    // An empty edit is an ordinary save.
-    let (_, edited) = save(
+    // An edit to nothing is refused, as Cloudflare's store refuses it.
+    let frame = reply(
         &mut c,
+        "message",
         "edit",
         obj! {"message_id" => result["message_id"].clone(), "body" => Object::new()},
     );
     assert_eq!(
-        edited["body"],
-        Json::from(Object::new()),
-        "empty edit: {edited:?}"
+        frame["error"],
+        Json::from(obj! {"code" => f(CODE_INVALID_PARAMS), "message" => "message cannot be empty"})
     );
 }
 
@@ -782,4 +785,85 @@ fn test_default_room_titles() {
     assert_eq!(general["title"], Json::from("General"));
     let (_, private) = save_room(&mut ada, "private", obj! {"private" => true});
     assert!(!private.contains_key("title"), "{private:?}");
+}
+
+/// A markdown body is kept and relayed as written, in the live broadcast and
+/// in history, and a body fills in what it omits as Cloudflare's
+/// normalizedBody does: `text` "", `format` "plain" and `embeds` [].
+/// `body.text` is bounded at 4 KiB.
+#[test]
+fn test_message_bodies_are_kept_as_written_and_normalized() {
+    let server = new_test_server(default_config());
+    let mut sender = dial_test_client(&server);
+    let mut observer = dial_test_client(&server);
+    sender.drain();
+    observer.drain();
+    let markdown = "# Notes\n\n**bold** <b>&amp;</b> [link](https://example.com/a_(b)) ![](https://example.com/i.png)\n\n```rust\nlet x = \"`\\u{2028}\";\n```\n\u{2028}tail  \n";
+    let (id, created) = save(
+        &mut sender,
+        "markdown",
+        obj! {"body" => obj! {"text" => markdown, "format" => "markdown"}},
+    );
+    let want = Json::from(
+        obj! {"text" => markdown, "format" => "markdown", "embeds" => Vec::<Json>::new()},
+    );
+    assert_eq!(created["body"], want, "sender's snapshot");
+    assert_eq!(
+        observer.notification("message")["body"],
+        want,
+        "relayed snapshot"
+    );
+    let page = history_page(&mut observer, "general", Object::new());
+    let logged = page["messages"]
+        .as_list()
+        .iter()
+        .find(|m| m.as_object().unwrap()["message_id"] == Json::from(id.as_str()))
+        .unwrap()
+        .as_object()
+        .unwrap()["body"]
+        .clone();
+    assert_eq!(logged, want, "history snapshot");
+
+    let (_, plain) = save(
+        &mut sender,
+        "omitted",
+        obj! {"body" => obj! {"text" => "hi"}},
+    );
+    assert_eq!(
+        plain["body"],
+        Json::from(obj! {"text" => "hi", "format" => "plain", "embeds" => Vec::<Json>::new()})
+    );
+
+    let frame = reply(
+        &mut sender,
+        "message",
+        "bad-format",
+        obj! {"room_id" => "general", "body" => obj! {"text" => "hi", "format" => "html"}},
+    );
+    assert_eq!(
+        frame["error"],
+        Json::from(obj! {"code" => f(CODE_INVALID_PARAMS), "message" => "body.format is invalid"})
+    );
+    let (_, longest) = save(
+        &mut sender,
+        "longest",
+        obj! {"body" => obj! {"text" => "x".repeat(4096), "format" => "markdown"}},
+    );
+    assert_eq!(
+        longest["body"].as_object().unwrap()["text"]
+            .as_str()
+            .unwrap()
+            .len(),
+        4096
+    );
+    let frame = reply(
+        &mut sender,
+        "message",
+        "too-long",
+        obj! {"room_id" => "general", "body" => obj! {"text" => "x".repeat(4097), "format" => "markdown"}},
+    );
+    assert_eq!(
+        frame["error"],
+        Json::from(obj! {"code" => f(CODE_TOO_LARGE), "message" => "body.text is too large"})
+    );
 }

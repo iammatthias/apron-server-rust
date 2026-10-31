@@ -292,10 +292,16 @@ pub(super) fn no_user(who: &str, user_id: &str) -> RpcError {
 /// Renders a notice for the one connection it is queued on: unlogged,
 /// without message_id or log_id (Appendix A.1).
 pub(super) fn private_notice(r: &RoomState, text: &str) -> Object {
+    private_notice_as(r, text, "markdown")
+}
+
+/// A private_notice in `format`: Cloudflare's throttle notices
+/// (noticeThrottled) are "plain", every other notice "markdown".
+pub(super) fn private_notice_as(r: &RoomState, text: &str, format: &str) -> Object {
     obj! {"method" => "message", "params" => obj! {
         "room_id" => r.id.as_str(),
         "from" => obj! {"user_id" => PRIVATE_NOTICE_ID, "name" => PRIVATE_NOTICE_NAME},
-        "body" => obj! {"text" => text, "format" => "markdown"},
+        "body" => obj! {"text" => text, "format" => format},
     }}
 }
 

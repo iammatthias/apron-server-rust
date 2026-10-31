@@ -61,9 +61,10 @@ impl State {
         let now = rust_stdlib::time::now().unix_milli();
         if now - u.typing_notice_at >= 60_000 {
             u.typing_notice_at = now;
-            c.enqueue(&super::commands::private_notice(
+            c.enqueue(&super::commands::private_notice_as(
                 &self.rooms[room_id],
                 &format!("Typing updates are limited to {ACTIVITY_RELAYS_PER_MINUTE} per minute, so others may not see you typing for a moment."),
+                "plain",
             ));
         }
         false
