@@ -284,6 +284,12 @@ server-history-per-day = 40000
 # Seconds a status change a closed connection caused waits, so a reconnect within them shows others nothing; 0 to 60
 offline-grace-seconds = 60
 
+# A registered user's waiting status change, or timed mute's end, goes out at the next multiple of these seconds since the epoch, unless a frame comes after it is due; 0 to 60, 0 for none
+presence-alarm-seconds = 15
+
+# The same for a guest, a multiple of --limit.presence-alarm-seconds; 0 to 60
+guest-presence-alarm-seconds = 60
+
 # Registrations from one client address a UTC day: new accounts, by passkey, email or invite, new bots and passkeys added to an account; 0 is unlimited
 registrations-per-ip-day = 5
 
@@ -591,6 +597,12 @@ server-history-per-day = 40000
 
 # Seconds a status change a closed connection caused waits, so a reconnect within them shows others nothing; 0 to 60
 offline-grace-seconds = 60
+
+# A registered user's waiting status change, or timed mute's end, goes out at the next multiple of these seconds since the epoch, unless a frame comes after it is due; 0 to 60, 0 for none
+presence-alarm-seconds = 15
+
+# The same for a guest, a multiple of --limit.presence-alarm-seconds; 0 to 60
+guest-presence-alarm-seconds = 60
 
 # Registrations from one client address a UTC day: new accounts, by passkey, email or invite, new bots and passkeys added to an account; 0 is unlimited
 registrations-per-ip-day = 5
@@ -901,6 +913,12 @@ server-history-per-day = 40000
 # Seconds a status change a closed connection caused waits, so a reconnect within them shows others nothing; 0 to 60
 offline-grace-seconds = 60
 
+# A registered user's waiting status change, or timed mute's end, goes out at the next multiple of these seconds since the epoch, unless a frame comes after it is due; 0 to 60, 0 for none
+presence-alarm-seconds = 15
+
+# The same for a guest, a multiple of --limit.presence-alarm-seconds; 0 to 60
+guest-presence-alarm-seconds = 60
+
 # Registrations from one client address a UTC day: new accounts, by passkey, email or invite, new bots and passkeys added to an account; 0 is unlimited
 registrations-per-ip-day = 5
 
@@ -1208,6 +1226,12 @@ server-history-per-day = 40000
 
 # Seconds a status change a closed connection caused waits, so a reconnect within them shows others nothing; 0 to 60
 offline-grace-seconds = 60
+
+# A registered user's waiting status change, or timed mute's end, goes out at the next multiple of these seconds since the epoch, unless a frame comes after it is due; 0 to 60, 0 for none
+presence-alarm-seconds = 15
+
+# The same for a guest, a multiple of --limit.presence-alarm-seconds; 0 to 60
+guest-presence-alarm-seconds = 60
 
 # Registrations from one client address a UTC day: new accounts, by passkey, email or invite, new bots and passkeys added to an account; 0 is unlimited
 registrations-per-ip-day = 5

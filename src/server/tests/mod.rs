@@ -53,6 +53,7 @@ mod server_messages_test;
 mod server_reactions_test;
 mod server_requests_test;
 mod server_test;
+mod status_alarm_test;
 mod status_auth_test;
 mod status_limits_test;
 mod status_mute_test;

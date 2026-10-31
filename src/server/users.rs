@@ -122,9 +122,11 @@ pub struct UserState {
     pub status: String,
     /// When a change of the user's status last went to others, and until
     /// when one a closed connection caused waits, in Unix milliseconds; 0
-    /// for none. `status_timer` sends a change that waits.
+    /// for none. `status_timer` sends a change that waits, due at
+    /// `status_due` (0 for none) and fired on the next presence boundary.
     pub announced_at: i64,
     pub status_hold: i64,
+    pub status_due: i64,
     pub status_timer: Option<Timer>,
     /// The user's mute and `me` status changes in the last minute.
     pub status_changes: Window,
@@ -182,6 +184,7 @@ impl UserState {
             status: STATUS_OFFLINE.into(),
             announced_at: 0,
             status_hold: 0,
+            status_due: 0,
             status_timer: None,
             status_changes: Window::default(),
             typing_relays: None,
@@ -465,6 +468,7 @@ impl State {
 
     /// Forgets a closed connection, retiring its guest identity.
     pub fn detach_locked(&mut self, conn: super::client::Conn) {
+        self.sweep_presence_locked();
         self.release_proposal_locked(&conn);
         let Some(user_id) = conn.user else { return };
         let Some(u) = self.users.get_mut(&user_id) else {
@@ -548,6 +552,7 @@ impl State {
             if let Some(timer) = u.status_timer.take() {
                 timer.stop();
             }
+            u.status_due = 0;
             for (_, timer) in std::mem::take(&mut u.room_mute_timers) {
                 timer.stop();
             }

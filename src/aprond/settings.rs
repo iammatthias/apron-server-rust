@@ -119,6 +119,24 @@ fn seconds_to_60(flag: &str, value: i64) -> Result<Duration, String> {
     Ok(Duration::from_secs(value))
 }
 
+/// Reads `--limit.guest-presence-alarm-seconds`, which must be a multiple
+/// of `--limit.presence-alarm-seconds`, as apron-server-cloudflare checks,
+/// so guests' boundaries are users' too.
+fn guest_presence_alarm(l: &super::options::LimitOptions) -> Result<Duration, String> {
+    let guest = seconds_to_60(
+        "limit.guest-presence-alarm-seconds",
+        l.guest_presence_alarm_seconds,
+    )?;
+    let user = l.presence_alarm_seconds;
+    if user > 0 && l.guest_presence_alarm_seconds % user != 0 {
+        return Err(format!(
+            "invalid --limit.guest-presence-alarm-seconds {}: use a multiple of --limit.presence-alarm-seconds {user}",
+            l.guest_presence_alarm_seconds
+        ));
+    }
+    Ok(guest)
+}
+
 fn positive(flag: &str, value: i64) -> Result<usize, String> {
     usize::try_from(value)
         .ok()
@@ -326,6 +344,8 @@ pub fn server_settings(options: &Options) -> Result<Settings, String> {
         )?,
         status_coalesce: seconds_to_60("limit.status-coalesce-seconds", l.status_coalesce_seconds)?,
         offline_grace: seconds_to_60("limit.offline-grace-seconds", l.offline_grace_seconds)?,
+        presence_alarm: seconds_to_60("limit.presence-alarm-seconds", l.presence_alarm_seconds)?,
+        guest_presence_alarm: guest_presence_alarm(l)?,
         user_history: history_rate("", l.history_per_minute, l.history_burst)?,
         ip_history: history_rate("ip-", l.ip_history_per_minute, l.ip_history_burst)?,
         user_history_day: rate("limit.history-per-day", l.history_per_day)?,

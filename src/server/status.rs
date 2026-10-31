@@ -281,6 +281,7 @@ impl State {
         if u.shown == u.status {
             // Back to what others were told: nothing waits.
             u.status_hold = 0;
+            u.status_due = 0;
             if let Some(timer) = u.status_timer.take() {
                 timer.stop();
             }
@@ -297,11 +298,14 @@ impl State {
         };
         let due = last.max(u.status_hold);
         if due > now {
+            u.status_due = due;
             if u.status_timer.is_none() {
                 let generation = u.generation;
                 let server = self.server.clone();
                 let id = user_id.to_owned();
-                let wait = Duration::from_millis(due - now);
+                let wait = Duration::from_millis(
+                    self.config.limits.presence_boundary(due, !u.persists()) - now,
+                );
                 u.status_timer = Some(time::after_func(wait, move || {
                     let Some(server) = server.upgrade() else {
                         return;
@@ -317,9 +321,14 @@ impl State {
                     st.announce_status_locked(&id, Cause::Connection);
                 }));
             }
+            self.presence_due_at = self.presence_due_at.min(due);
             return;
         }
         u.status_hold = 0;
+        u.status_due = 0;
+        if let Some(timer) = u.status_timer.take() {
+            timer.stop();
+        }
         if self.publish_locked(user_id) {
             let sharers = self.sharers_locked(user_id);
             self.send_status_locked(user_id, &sharers);
@@ -420,7 +429,9 @@ impl State {
         let until = u.mute.until.clone();
         let generation = u.generation;
         let id = user_id.to_owned();
-        u.mute_timer = Some(time::after_func(time::until(&until), move || {
+        let wait = self.config.limits.presence_wait(&until, !u.persists());
+        self.presence_due_at = self.presence_due_at.min(until.unix_milli());
+        u.mute_timer = Some(time::after_func(wait, move || {
             let Some(server) = server.upgrade() else {
                 return;
             };
@@ -434,12 +445,24 @@ impl State {
             if u.generation != generation || u.mute.forever || !u.mute.until.equal(&until) {
                 return;
             }
-            u.mute = MuteState::default();
             u.mute_timer = None;
-            let frame = mute_frame("", &MuteState::default(), &time::now());
-            st.touch_user(&id);
-            st.send_to_user(&id, &frame);
+            st.end_mute_locked(&id);
         }));
+    }
+
+    /// Forgets u's timed mute, which has run out, and tells the user's
+    /// connections it is now false (§4.5).
+    fn end_mute_locked(&mut self, user_id: &str) {
+        let Some(u) = self.users.get_mut(user_id) else {
+            return;
+        };
+        u.mute = MuteState::default();
+        if let Some(timer) = u.mute_timer.take() {
+            timer.stop();
+        }
+        let frame = mute_frame("", &MuteState::default(), &time::now());
+        self.touch_user(user_id);
+        self.send_to_user(user_id, &frame);
     }
 
     /// Ends u's timed mute of room `room_id` when its time passes. Its end
@@ -464,9 +487,11 @@ impl State {
         let generation = u.generation;
         let id = user_id.to_owned();
         let room = room_id.to_owned();
+        let wait = self.config.limits.presence_wait(&until, !u.persists());
+        self.presence_due_at = self.presence_due_at.min(until.unix_milli());
         u.room_mute_timers.insert(
             room_id.to_owned(),
-            time::after_func(time::until(&until), move || {
+            time::after_func(wait, move || {
                 let Some(server) = server.upgrade() else {
                     return;
                 };
@@ -504,6 +529,64 @@ impl State {
         self.touch_user(user_id);
         let frame = mute_frame(room_id, &MuteState::default(), &time::now());
         self.send_to_user(user_id, &frame);
+    }
+
+    /// At the start of an event (a frame other than the liveness ping, a
+    /// connection opened or closed), does the status work that is due but
+    /// whose timer waits for its presence boundary: what
+    /// apron-server-cloudflare's sweepPresence does before its alarm fires.
+    pub fn sweep_presence_locked(&mut self) {
+        let now = time::now().unix_milli();
+        if self.closed || now < self.presence_due_at {
+            return;
+        }
+        let mut statuses = Vec::new();
+        let mut mutes = Vec::new();
+        let mut room_mutes = Vec::new();
+        let mut next = i64::MAX;
+        for (id, u) in &self.users {
+            if u.status_due > 0 && u.status_timer.is_some() {
+                if u.status_due <= now {
+                    statuses.push(id.clone());
+                } else {
+                    next = next.min(u.status_due);
+                }
+            }
+            if u.mute_timer.is_some() && !u.mute.forever {
+                let until = u.mute.until.unix_milli();
+                if until <= now {
+                    mutes.push(id.clone());
+                } else {
+                    next = next.min(until);
+                }
+            }
+            for room_id in u.room_mute_timers.keys() {
+                let Some(mute) = u.room_mutes.get(room_id) else {
+                    continue;
+                };
+                let until = mute.until.unix_milli();
+                if until <= now {
+                    room_mutes.push((id.clone(), room_id.clone()));
+                } else {
+                    next = next.min(until);
+                }
+            }
+        }
+        self.presence_due_at = next;
+        for id in mutes {
+            self.end_mute_locked(&id);
+        }
+        for (id, room_id) in &room_mutes {
+            self.end_room_mute_locked(id, room_id);
+        }
+        let unmuted: std::collections::BTreeSet<String> =
+            room_mutes.into_iter().map(|(id, _)| id).collect();
+        for id in &unmuted {
+            self.unread_changed_locked(id, "");
+        }
+        for id in statuses {
+            self.announce_status_locked(&id, Cause::Connection);
+        }
     }
 }
 

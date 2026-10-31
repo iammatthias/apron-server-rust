@@ -58,3 +58,9 @@ exit 1
 --- stderr
 level=ERROR msg="server stopped" error="invalid --server.avatar: use an https: URL or a small data:image/{png,jpeg,gif,webp};base64, URL"
 
+$ aprond --upload.dir $TMP/uploads --store memory --limit.guest-presence-alarm-seconds 50
+exit 1
+--- stdout
+--- stderr
+level=ERROR msg="server stopped" error="invalid --limit.guest-presence-alarm-seconds 50: use a multiple of --limit.presence-alarm-seconds 15"
+

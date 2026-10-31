@@ -766,6 +766,18 @@ async function trackC(admin) {
     const echoed = acct.frames.slice(own).filter((f) => f.method === "activity" && f.params?.typing !== undefined);
     return (typing.params.typing === 30 && reads.length === 0 && echoed.length === 0) || `typing ${typing.params.typing}, ${reads.length} read cursors, ${echoed.length} typing echoes`;
   });
+  await check("status: a timed mute's end is sent on the next 15 s boundary", async () => {
+    // Waiting status work goes out on presence boundaries (--limit.presence-alarm-seconds),
+    // unless another frame on the server comes after it is due.
+    const round = 15000;
+    const muting = Date.now();
+    const r = await acct.call("status", { mute: 1 });
+    if (r.error) return `reply ${JSON.stringify(r.error)}`;
+    const from = acct.frames.length;
+    const end = await acct.until(() => acct.frames.slice(from).find((f) => f.method === "status" && f.params?.mute === false), round + 5000, "the mute's end");
+    const at = Date.now();
+    return (end && at - muting >= 1000 && at % round < 3000) || `ended ${at - muting} ms after the mute, ${at % round} ms past a boundary`;
+  });
   await check("markdown: a markdown body is relayed and kept as written", async () => {
     const text = `# livecheck ${suffix}\n\n**bold** <b>&amp;</b> [link](https://example.com/a_(b))\n\n\`\`\`\nhttps://example.com/in-code \u2028\n\`\`\`\n`;
     const r = await acct.call("message", { room_id: roomID, body: { text, format: "markdown" } });

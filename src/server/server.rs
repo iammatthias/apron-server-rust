@@ -179,6 +179,11 @@ pub struct State {
     /// When the idle bot sweep is next due, in Unix milliseconds; 0 until
     /// the first sweep sets it (bots.rs).
     pub bot_sweep_at: i64,
+    /// When the earliest waiting status change or timed mute end is due,
+    /// unrounded, in Unix milliseconds; `i64::MAX` for none. Any event
+    /// after it sweeps them (`sweep_presence_locked`) before the rounded
+    /// timer fires.
+    pub presence_due_at: i64,
     pub email: EmailState,
     /// The webpush key (§4.9); vapid_stored reports that it is the store's,
     /// rather than Config's, so a flush keeps it there.
@@ -340,6 +345,7 @@ pub fn open(config: Config) -> Result<Arc<Server>, store::StoreError> {
                 server_meta: StoredServer::default(),
                 emoji: EmojiCatalog::default(),
                 bot_sweep_at: 0,
+                presence_due_at: i64::MAX,
                 email: EmailState::default(),
                 vapid,
                 vapid_stored: false,
@@ -611,6 +617,7 @@ impl Server {
     }
 
     fn handle_web_socket(self: &Arc<Self>, w: &mut dyn ResponseWriter, r: &mut HttpRequest) {
+        self.lock().sweep_presence_locked();
         if r.method == http::METHOD_GET
             && r.url.query().get("apron_connection_status") == "1"
             && r.header.get("Upgrade").is_none()

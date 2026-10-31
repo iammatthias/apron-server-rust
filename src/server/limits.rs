@@ -73,6 +73,12 @@ pub struct Limits {
     /// connection caused waits, so a reconnect within it shows nothing.
     pub status_coalesce: time::Duration,
     pub offline_grace: time::Duration,
+    /// A waiting status change, or a timed mute's end, goes out at the
+    /// next multiple of this since the Unix epoch, a guest's of the
+    /// coarser `guest_presence_alarm`, as apron-server-cloudflare's alarm
+    /// rounds them; zero for none.
+    pub presence_alarm: time::Duration,
+    pub guest_presence_alarm: time::Duration,
     /// History pages one user, and one IP, may request: a minute, with a
     /// larger burst for a quiet one, and a UTC day; and everyone, a day.
     pub user_history: Rate,
@@ -207,6 +213,8 @@ impl Default for Limits {
             status_changes_per_user_minute: 6,
             status_coalesce: time::Duration::from_secs(60),
             offline_grace: time::Duration::from_secs(60),
+            presence_alarm: time::Duration::from_secs(15),
+            guest_presence_alarm: time::Duration::from_secs(60),
             user_history: Rate {
                 per_minute: 20,
                 burst: 60,
@@ -226,6 +234,28 @@ impl Default for Limits {
 }
 
 impl Limits {
+    /// When a status change or mute end due at `due_ms` goes out: the next
+    /// presence boundary at or after it (`presence_alarm`, a guest's
+    /// `guest_presence_alarm`), in Unix milliseconds.
+    pub fn presence_boundary(&self, due_ms: i64, guest: bool) -> i64 {
+        let round = if guest {
+            self.guest_presence_alarm
+        } else {
+            self.presence_alarm
+        };
+        let round = round.milliseconds();
+        if round <= 0 {
+            return due_ms;
+        }
+        (due_ms + round - 1).div_euclid(round) * round
+    }
+
+    /// How long from now until the presence boundary of `due`.
+    pub fn presence_wait(&self, due: &time::Time, guest: bool) -> time::Duration {
+        let at = self.presence_boundary(due.unix_milli(), guest);
+        time::Duration::from_millis((at - time::now().unix_milli()).max(0))
+    }
+
     /// No limits, for tests about something else: they all connect from
     /// one address.
     pub fn unlimited() -> Limits {
@@ -251,6 +281,8 @@ impl Limits {
             status_changes_per_user_minute: 0,
             status_coalesce: time::Duration::from_secs(0),
             offline_grace: time::Duration::from_secs(0),
+            presence_alarm: time::Duration::from_secs(0),
+            guest_presence_alarm: time::Duration::from_secs(0),
             user_history: Rate::per_minute(0),
             ip_history: Rate::per_minute(0),
             user_history_day: 0,

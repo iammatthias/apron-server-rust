@@ -41,6 +41,8 @@ if [[ "${1:-}" == run && "${2:-}" == ./cmd/aprond ]]; then
 		--limit.status-changes-per-minute=0
 		--limit.status-coalesce-seconds=0
 		--limit.offline-grace-seconds=0
+		--limit.presence-alarm-seconds=0
+		--limit.guest-presence-alarm-seconds=0
 		--limit.history-per-minute=0
 		--limit.history-per-day=0
 		--limit.ip-history-per-minute=0

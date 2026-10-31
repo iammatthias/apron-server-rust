@@ -156,7 +156,12 @@ impl Server {
         // The server's and the address's frames are charged before any
         // other work, malformed frames included. A busy server refuses a
         // request and drops a notification; the connection stays open.
-        if let Err(refusal) = self.lock().charge_frame_locked(c) {
+        let charged = {
+            let mut st = self.lock();
+            st.sweep_presence_locked();
+            st.charge_frame_locked(c)
+        };
+        if let Err(refusal) = charged {
             if refusal.row == 0 {
                 if parse_err.is_none() && req.has_id && !notification_only(&req.method) {
                     c.enqueue(&error_response(Some(&req.id), refusal.error(None)));

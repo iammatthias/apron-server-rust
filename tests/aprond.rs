@@ -201,7 +201,7 @@ fn test_startup_errors_match_golden() {
     let not_a_database = format!("sqlite:{}", dir.write("bad.db", &"x".repeat(128)));
     let uploads = dir.join("uploads");
     let base = ["--upload.dir", &uploads];
-    let cases: [Vec<&str>; 10] = [
+    let cases: [Vec<&str>; 11] = [
         vec!["--store", "memory", "--addr", &busy],
         vec!["--store", "bogus:1"],
         vec!["--store", "sqlite:"],
@@ -227,6 +227,12 @@ fn test_startup_errors_match_golden() {
             "memory",
             "--server.avatar",
             "http://chat.example/icon.png",
+        ],
+        vec![
+            "--store",
+            "memory",
+            "--limit.guest-presence-alarm-seconds",
+            "50",
         ],
     ];
     let cases: Vec<Vec<&str>> = cases

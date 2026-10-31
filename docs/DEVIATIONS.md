@@ -739,6 +739,20 @@ unwritten. Its only 503 is while shutting down, without `Retry-After`.
 self-hosted server has no bill to stop, and its restart takes seconds, so
 a 60-second retry would only delay clients.
 
+### Metrics (SPEC §3; Cloudflare's `METRICS` dataset)
+
+**Reference.** apron-server-cloudflare counts stale closes, alarms,
+pushes delivered, accounting stops, admin alerts and edge stops in a
+Workers Analytics Engine dataset, read with `npm run usage:report`.
+
+**This server.** Counts none of them. `/debug/vars` (below) publishes no
+server counters.
+
+**Why.** The dataset is Cloudflare infrastructure, and most of its events
+(alarms, accounting, edge stops, admin alerts) have no counterpart here
+(Budget stops, above). Counters would belong in expvar on the debug
+listener, which publishes none today, so there is nothing local to extend.
+
 ### Request deduplication (§1.2; SPEC §8)
 
 **Reference.** apron-server-cloudflare keeps every accepted mutating
@@ -764,8 +778,24 @@ minutes.
 of 0 to 60 seconds (`--limit.status-coalesce-seconds`,
 `--limit.offline-grace-seconds`). `seen` is exact.
 
+A waiting change goes out, as on Cloudflare since its alarm took over
+(2cb64d3), at the next multiple of 15 seconds since the epoch, a guest's
+of 60, or at the first frame, connection or close after it is due, if that
+comes first; the exact `{"method":"ping"}` does not count. The roundings
+are flags too (`--limit.presence-alarm-seconds`,
+`--limit.guest-presence-alarm-seconds`, 0 for none). The same rounding
+applies to the `mute: false` a timed mute's end sends, with these
+differences:
+
+- Every timed mute's end is sent on its boundary. Cloudflare sends one
+  that runs out more than a minute after the last event at the first event
+  after it instead.
+- A guest's timed mute, which Cloudflare refuses (Guests, above), ends on
+  the guest boundary.
+
 **Why.** Cloudflare's granularity saves its SQL writes. The protocol has
-`seen` exact.
+`seen` exact. A timer per mute here costs nothing while it waits, so no
+mute end needs to wait for an event.
 
 ### Push registration (§4.9)
 

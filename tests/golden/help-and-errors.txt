@@ -370,6 +370,15 @@ Limits:
                                             connection caused waits, so a
                                             reconnect within them shows others
                                             nothing; 0 to 60 (default: 60)
+      --limit.presence-alarm-seconds=       A registered user's waiting status
+                                            change, or timed mute's end, goes
+                                            out at the next multiple of these
+                                            seconds since the epoch, unless a
+                                            frame comes after it is due; 0 to
+                                            60, 0 for none (default: 15)
+      --limit.guest-presence-alarm-seconds= The same for a guest, a multiple of
+                                            --limit.presence-alarm-seconds; 0
+                                            to 60 (default: 60)
       --limit.registrations-per-ip-day=     Registrations from one client
                                             address a UTC day: new accounts, by
                                             passkey, email or invite, new bots
@@ -779,6 +788,15 @@ Limits:
                                             connection caused waits, so a
                                             reconnect within them shows others
                                             nothing; 0 to 60 (default: 60)
+      --limit.presence-alarm-seconds=       A registered user's waiting status
+                                            change, or timed mute's end, goes
+                                            out at the next multiple of these
+                                            seconds since the epoch, unless a
+                                            frame comes after it is due; 0 to
+                                            60, 0 for none (default: 15)
+      --limit.guest-presence-alarm-seconds= The same for a guest, a multiple of
+                                            --limit.presence-alarm-seconds; 0
+                                            to 60 (default: 60)
       --limit.registrations-per-ip-day=     Registrations from one client
                                             address a UTC day: new accounts, by
                                             passkey, email or invite, new bots
@@ -1188,6 +1206,15 @@ Limits:
                                             connection caused waits, so a
                                             reconnect within them shows others
                                             nothing; 0 to 60 (default: 60)
+      --limit.presence-alarm-seconds=       A registered user's waiting status
+                                            change, or timed mute's end, goes
+                                            out at the next multiple of these
+                                            seconds since the epoch, unless a
+                                            frame comes after it is due; 0 to
+                                            60, 0 for none (default: 15)
+      --limit.guest-presence-alarm-seconds= The same for a guest, a multiple of
+                                            --limit.presence-alarm-seconds; 0
+                                            to 60 (default: 60)
       --limit.registrations-per-ip-day=     Registrations from one client
                                             address a UTC day: new accounts, by
                                             passkey, email or invite, new bots
