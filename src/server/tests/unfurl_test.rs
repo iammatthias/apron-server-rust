@@ -149,6 +149,7 @@ fn test_message_urls() {
         ("see https://a.example/x.", "", &["https://a.example/x"]),
         ("(http://a.example/wiki/Foo_(bar))", "", &["http://a.example/wiki/Foo_(bar)"]),
         ("[docs](https://a.example/docs)!", "markdown", &["https://a.example/docs"]),
+        ("![alt](https://img.example/a.png \"t\")", "markdown", &["https://img.example/a.png"]),
         ("<https://a.example/>", "markdown", &["https://a.example/"]),
         ("HTTPS://A.example/ up", "", &["HTTPS://A.example/"]),
         ("xhttps://a.example/ ftp://a.example/ https:// mailto:a@b", "", &[]),

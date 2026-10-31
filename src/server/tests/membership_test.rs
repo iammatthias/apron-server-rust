@@ -412,3 +412,84 @@ fn test_emptied_rooms_are_removed() {
     leave(&mut bob, "general");
     assert!(exists(&server, "general"));
 }
+
+/// What apron-web's timeline shows as "Bob joined" and "Room renamed to …"
+/// (§4.2.2, §4.2.3): an add delivers the membership record to the adder
+/// and to the added user with the room, a rename delivers the room record
+/// to every member, and history replays both at their log_ids.
+#[test]
+fn test_adds_and_renames_reach_members_and_history() {
+    let server = admin_test_server();
+    let mut admin = admin(&server);
+    let mut bob = account(&server);
+    let bob_id = bob.user_id.clone();
+    admin.drain();
+    let (room, _) = save_room(
+        &mut admin,
+        "private",
+        obj! {"private" => true, "title" => "Ops"},
+    );
+    bob.drain();
+    let (frames, result) = admin.request(
+        "room_join",
+        "add-bob",
+        obj! {"room_id" => room.as_str(), "user_id" => bob_id.as_str()},
+    );
+    assert_eq!(result, Object::new());
+    assert_eq!(methods(&frames), vec!["room_update"], "{frames:?}");
+    let membership = membership_of(&frames[0]);
+    let entry =
+        obj! {"user" => obj! {"user_id" => bob_id.as_str(), "name" => "Guest 1"}, "joined" => true};
+    assert_eq!(
+        (membership["room_id"].clone(), membership["members"].clone()),
+        (
+            Json::from(room.as_str()),
+            Json::from(vec![Json::from(entry.clone())])
+        ),
+        "adder's membership record"
+    );
+    let added = bob.notification("room_update");
+    assert_eq!(
+        added.keys().collect::<Vec<_>>(),
+        vec!["joined", "memberships", "users"],
+        "added user's room_update, as Cloudflare's admin test has it"
+    );
+    assert_eq!(
+        added["joined"].as_list()[0].as_object().unwrap()["room_id"],
+        Json::from(room.as_str())
+    );
+    assert_eq!(
+        added["memberships"],
+        Json::from(vec![Json::from(membership.clone())])
+    );
+
+    let (_, renamed) = save_room(
+        &mut admin,
+        "rename",
+        obj! {"room_id" => room.as_str(), "title" => "Incidents"},
+    );
+    let seen = bob.notification("room_update");
+    assert_eq!(
+        seen["updated"].as_list()[0].as_object().unwrap()["title"],
+        Json::from("Incidents")
+    );
+
+    let page = history_page(&mut bob, &room, Object::new());
+    assert_eq!(
+        log_ids(&page, "memberships").last(),
+        Some(&membership["log_id"].as_str().unwrap().to_owned())
+    );
+    let titles: Vec<(Json, Json)> = page["rooms"]
+        .as_list()
+        .iter()
+        .map(|r| {
+            let r = r.as_object().unwrap();
+            (r["log_id"].clone(), r["title"].clone())
+        })
+        .collect();
+    assert_eq!(
+        titles.last(),
+        Some(&(renamed["log_id"].clone(), Json::from("Incidents")))
+    );
+    assert_eq!(titles.first().map(|t| t.1.clone()), Some(Json::from("Ops")));
+}
