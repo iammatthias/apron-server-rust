@@ -701,6 +701,14 @@ fn test_server_frame_media_origins() {
         media_origin("https://Media.Example:8443/app/", "chat.example"),
         Some("https://media.example:8443".into())
     );
+    assert_eq!(
+        media_origin("https://media.example:443", "chat.example"),
+        Some("https://media.example".into())
+    );
+    assert_eq!(
+        media_origin("http://media.example:80/", "chat.example"),
+        Some("http://media.example".into())
+    );
 
     let origins = |frame: &Object| {
         frame["params"].as_object().unwrap()["ext"]

@@ -963,9 +963,11 @@ pub(crate) fn media_origin(public_url: &str, host: &str) -> Option<String> {
     if public.host.is_empty() || public.host.eq_ignore_ascii_case(host) {
         return None;
     }
-    Some(format!(
-        "{}://{}",
-        public.scheme.to_ascii_lowercase(),
-        public.host.to_ascii_lowercase()
-    ))
+    let scheme = public.scheme.to_ascii_lowercase();
+    let host = public.host.to_ascii_lowercase();
+    // An origin leaves out its scheme's default port, as a browser's
+    // URL.origin does, so a client finds it in the list.
+    let default_port = if scheme == "https" { ":443" } else { ":80" };
+    let host = host.strip_suffix(default_port).unwrap_or(&host);
+    Some(format!("{scheme}://{host}"))
 }
