@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use rust_stdlib::encoding::json::jsontext::Value;
@@ -56,8 +56,6 @@ impl MessageState {
     }
 }
 
-/// Bounds body.mentions.
-pub const MAX_MENTIONS: usize = 256;
 /// Bounds each user_id body.mentions names, in bytes.
 pub const MAX_MENTION_BYTES: usize = 256;
 /// Bounds a message's ext, merged (§4.12), which every snapshot of the
@@ -114,14 +112,8 @@ pub fn mentions(body: Option<&Object>) -> Vec<String> {
 /// Collapses repeated user_ids in body.mentions, keeping the first of each.
 fn dedupe_mentions(body: &mut Object) {
     if let Some(Json::Array(mentions)) = body.get_mut("mentions") {
-        let mut seen = Vec::new();
-        mentions.retain(|m| {
-            let fresh = !seen.contains(m);
-            if fresh {
-                seen.push(m.clone());
-            }
-            fresh
-        });
+        let mut seen = BTreeSet::new();
+        mentions.retain(|m| seen.insert(m.as_str().map(str::to_owned)));
     }
 }
 
@@ -158,13 +150,8 @@ pub(crate) fn validate_body(body: &Object, max_text_bytes: usize) -> Result<(), 
                 "body.mentions must be an array of user_id strings",
             ));
         };
-        if mentions.len() > MAX_MENTIONS {
-            // A count limit the server sets is denied (§1.1).
-            return Err(RpcError::new(
-                CODE_DENIED,
-                format!("A message mentions at most {MAX_MENTIONS} users"),
-            ));
-        }
+        // As on Cloudflare, only the frame size bounds how many: a role
+        // mention (`@&role`) lists every holder in the room one by one.
         for value in mentions {
             let Some(mention) = value.as_str().filter(|m| valid_id(m)) else {
                 return Err(invalid_params(

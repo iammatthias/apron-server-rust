@@ -685,7 +685,7 @@ fn test_default_room_and_empty_messages() {
 }
 
 /// body.mentions keeps the user_ids as sent, once each, each at most 256
-/// bytes (apron-server-cloudflare's "stores body.mentions as sent").
+/// bytes and as many as the frame holds (apron-server-cloudflare's "stores body.mentions as sent").
 #[test]
 fn test_mentions_are_user_ids() {
     let server = new_test_server(default_config());
@@ -723,6 +723,19 @@ fn test_mentions_are_user_ids() {
         obj! {"body" => obj! {"text" => "x", "mentions" => strings(&[&"b".repeat(256)])}},
     );
     assert!(fits.contains_key("body"));
+    // A role mention lists every holder (`@&role`), so only the frame
+    // bounds how many, as on Cloudflare.
+    let holders: Vec<String> = (0..300).map(|i| format!("u{i}")).collect();
+    let holder_refs: Vec<&str> = holders.iter().map(String::as_str).collect();
+    let (_, role) = save(
+        &mut c,
+        "role",
+        obj! {"body" => obj! {"text" => "@&mod ping", "mentions" => strings(&holder_refs)}},
+    );
+    assert_eq!(
+        role["body"].as_object().unwrap()["mentions"],
+        strings(&holder_refs)
+    );
 }
 
 /// A sender's `og` keeps only its title, description and site_name, each

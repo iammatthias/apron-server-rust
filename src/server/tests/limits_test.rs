@@ -9,7 +9,6 @@ use crate::obj;
 use crate::server::config::RETRY_AFTER_SECONDS;
 use crate::server::embeds::{MAX_EMBEDS_PER_MESSAGE, UPLOAD_SUFFIX};
 use crate::server::limits::Posts;
-use crate::server::messages::MAX_MENTIONS;
 use crate::server::protocol::*;
 use crate::server::push::MAX_PUSH_URL_BYTES;
 use crate::server::users::MAX_PROFILE_EXT_BYTES;
@@ -131,21 +130,6 @@ fn test_messages_are_limited_to_max_embeds() {
         "message",
         "many",
         obj! {"room_id" => "general", "body" => obj! {"embeds" => embeds}},
-        CODE_DENIED,
-    );
-    let mentions: Vec<Json> = (0..=MAX_MENTIONS)
-        .map(|i| Json::from(format!("user{i}")))
-        .collect();
-    a.expect_error(
-        "message",
-        "mentions",
-        obj! {"room_id" => "general", "body" => obj! {"text" => "hi", "mentions" => mentions.clone()}},
-        CODE_DENIED,
-    );
-    a.expect_error(
-        "command",
-        "command-mentions",
-        obj! {"room_id" => "general", "body" => obj! {"text" => "/help", "mentions" => mentions}},
         CODE_DENIED,
     );
     // A malformed value stays invalid_params.
