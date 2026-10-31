@@ -556,7 +556,11 @@ attachment's declared type before the body and leaves the write open.
 - `--upload.max-mb` (default 5), `--upload.max-avatar-kb` (default 256)
   and `--upload.type` (repeatable, a MIME type, `type/*` or `*/*`) change
   them. A type the sniffer does not know is taken from its declared type.
-- No `origins`: uploads are served from this server's own origin.
+- `origins` names the origin of `--public-url` to a connection that came
+  in on another host, since every write, file, stream, avatar and custom
+  emoji URL starts with `--public-url` when it is set. A connection on
+  that host, or a server without `--public-url`, gets no `origins`: its
+  URLs are on the origin the client connected to.
 - An attachment's declared type is checked once the body is read, and a
   refusal fails the write. Avatar, custom emoji and server avatar writes
   are refused before the body, as on Cloudflare.
@@ -889,7 +893,9 @@ true`), a saved message whose text gains http or https URLs is posted as
 before and then unfurled in the background:
 
 - The server scans the first 8 KiB of the text for the first 32 distinct
-  URLs, skipping Markdown code. It leaves out URLs the previous snapshot
+  URLs, skipping Markdown code. A Markdown link's or image's target is
+  found as a bare URL is, without the closing parenthesis; an image
+  target gets no preview, as only HTML pages are read. It leaves out URLs the previous snapshot
   already had and URLs an embed already links, and takes the first 3.
 - Each user gets 10 URLs a minute and the server 60. At most 16 messages
   unfurl at once.

@@ -686,3 +686,65 @@ fn test_panicking_operation_cleans_up() {
     assert_eq!(connections(), (1, 1), "after the panic");
     b.expect_quiet();
 }
+
+/// ext.media names the public URL's origin, where uploads are served, only
+/// to a connection that arrived on another host (Cloudflare's `origins`
+/// where its media origin is not its own), and every URL an upload gets is
+/// on that origin.
+#[test]
+fn test_server_frame_media_origins() {
+    use crate::server::server::media_origin;
+    assert_eq!(media_origin("", "chat.example"), None);
+    assert_eq!(media_origin("https://chat.example", "chat.example"), None);
+    assert_eq!(media_origin("https://chat.example", "CHAT.example"), None);
+    assert_eq!(
+        media_origin("https://Media.Example:8443/app/", "chat.example"),
+        Some("https://media.example:8443".into())
+    );
+
+    let origins = |frame: &Object| {
+        frame["params"].as_object().unwrap()["ext"]
+            .as_object()
+            .unwrap()["media"]
+            .as_object()
+            .unwrap()
+            .get("origins")
+            .cloned()
+    };
+    let server = new_test_server(default_config());
+    let (_, frame) = dial_raw(&server);
+    assert_eq!(origins(&frame), None, "no public URL");
+
+    let mut config = default_config();
+    config.public_url = "https://chat.example/app".into();
+    let server = new_test_server(config);
+    let (_, frame) = dial_raw(&server);
+    assert_eq!(
+        origins(&frame),
+        Some(Json::from(vec![Json::from("https://chat.example")]))
+    );
+    let mut c = dial_test_client(&server);
+    let posted = post_embeds(
+        &mut c,
+        "upload",
+        obj! {"room_id" => "general", "body" => obj! {"embeds" => vec![Json::from(obj! {"kind" => "upload"})]}},
+    );
+    let write_url = posted["embeds"].as_list()[0].as_object().unwrap()["write_url"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let local = write_url.replacen("https://chat.example/app", &server.http.url, 1);
+    assert_eq!(
+        http_do("PUT", &local, Some(&test_png()), "image/png").0,
+        201
+    );
+    let url = embeds_of(&c.notification("message"))[0]["url"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert!(
+        write_url.starts_with("https://chat.example/app/write/")
+            && url.starts_with("https://chat.example/app/files/"),
+        "{write_url} {url}"
+    );
+}

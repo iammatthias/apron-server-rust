@@ -88,15 +88,19 @@ impl State {
             settings.insert("private_rooms".into(), self.config.max_private_rooms.into());
         }
         // ext:media (EXTENSIONS.md): uploads are served from this server's
-        // own origin, an attachment may be one of Config.upload_types and
-        // an avatar one of the image types /avatar keeps, each up to its
-        // configured size.
+        // own origin, or from the public URL's where the connection came
+        // in on another host; an attachment may be one of
+        // Config.upload_types and an avatar one of the image types /avatar
+        // keeps, each up to its configured size.
         let sized = |max_bytes: i64| Json::from(obj! {"max_bytes" => max_bytes});
         let avatar: Object = AVATAR_TYPES
             .iter()
             .map(|t| (t.to_string(), sized(self.config.max_avatar_bytes)))
             .collect();
         let mut media = Object::new();
+        if let Some(origin) = &client.media_origin {
+            media.insert("origins".into(), vec![Json::from(origin.as_str())].into());
+        }
         if uploads {
             let upload: Object = self
                 .config

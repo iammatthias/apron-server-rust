@@ -124,6 +124,9 @@ pub struct Client {
     pub done: Done,
     /// Prefixes the write, file, and stream URLs this connection mints.
     pub base_url: String,
+    /// The origin of base_url when it is not the host the connection
+    /// arrived on, which ext:media then names (EXTENSIONS.md §6).
+    pub media_origin: Option<String>,
     pub origin: String,
     /// Names the client address for the limits of all its connections.
     pub ip_key: IpKey,

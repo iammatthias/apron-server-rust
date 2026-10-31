@@ -9,6 +9,7 @@ use rust_stdlib::concurrent::WaitGroup;
 use rust_stdlib::context::Context;
 use rust_stdlib::log::slog;
 use rust_stdlib::net::http::{self, Handler, Request as HttpRequest, ResponseWriter, ServeMux};
+use rust_stdlib::net::url;
 use rust_stdlib::time::{self, Duration, Time};
 
 use super::bots::BotTokens;
@@ -655,6 +656,7 @@ impl Server {
             out,
             done: Done::default(),
             base_url: self.base_url(r),
+            media_origin: media_origin(&self.config.public_url, &r.host),
             origin: r.header.get("Origin").unwrap_or("").to_owned(),
             ip_key,
             write_timeout: self.config.write_timeout,
@@ -951,4 +953,19 @@ impl State {
     pub fn server(&self) -> Option<Arc<Server>> {
         self.server.upgrade()
     }
+}
+
+/// The origin of the configured public URL, where a connection arrived on
+/// another host: the URLs it is given then point elsewhere than the origin
+/// a client trusts as the server's own (§4.8.1).
+pub(crate) fn media_origin(public_url: &str, host: &str) -> Option<String> {
+    let public = url::parse(public_url).ok()?;
+    if public.host.is_empty() || public.host.eq_ignore_ascii_case(host) {
+        return None;
+    }
+    Some(format!(
+        "{}://{}",
+        public.scheme.to_ascii_lowercase(),
+        public.host.to_ascii_lowercase()
+    ))
 }

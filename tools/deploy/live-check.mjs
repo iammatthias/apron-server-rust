@@ -49,6 +49,11 @@ async function check(name, fn) {
     report(name, false, e.message);
   }
 }
+// The origins a client's media gate trusts (EXTENSIONS.md §6): the
+// server's own, the one its WebSocket URL names, and ext.media.origins.
+const trustedMedia = (serverParams, url) =>
+  [new URL(base).origin, ...(serverParams?.ext?.media?.origins ?? [])].includes(new URL(url).origin) ||
+  `${url} is not on ${new URL(base).origin} or ext.media.origins ${JSON.stringify(serverParams?.ext?.media?.origins)}`;
 const same = (got, want) => got === want || `got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`;
 
 // The server closes a connection past 60 frames a minute and every
@@ -181,6 +186,8 @@ await check("server frame: settings, welcome, ext:media, signup, auth", async ()
     if (upload !== "audio/mp4,audio/ogg,audio/webm,image/gif,image/jpeg,image/png,image/webp") problems.push(`ext.media.upload ${upload}`);
     if (p.welcome !== welcome) problems.push("welcome text differs");
     if (!p.ext || !JSON.stringify(p.ext).includes("media")) problems.push("no ext:media");
+    // Connected on the public URL's own host, uploads are on its origin.
+    if (p.ext?.media?.origins !== undefined) problems.push(`ext.media.origins ${JSON.stringify(p.ext.media.origins)}`);
     if (!p.signup?.includes("token")) problems.push(`signup ${JSON.stringify(p.signup)}`);
     if (!p.auth?.includes("token") || !p.auth?.includes("guest")) problems.push(`auth ${JSON.stringify(p.auth)}`);
     if (p.auth?.includes("webauthn")) problems.push("webauthn offered with no Origin");
@@ -759,6 +766,56 @@ async function trackC(admin) {
     const echoed = acct.frames.slice(own).filter((f) => f.method === "activity" && f.params?.typing !== undefined);
     return (typing.params.typing === 30 && reads.length === 0 && echoed.length === 0) || `typing ${typing.params.typing}, ${reads.length} read cursors, ${echoed.length} typing echoes`;
   });
+  await check("markdown: a markdown body is relayed and kept as written", async () => {
+    const text = `# livecheck ${suffix}\n\n**bold** <b>&amp;</b> [link](https://example.com/a_(b))\n\n\`\`\`\nhttps://example.com/in-code \u2028\n\`\`\`\n`;
+    const r = await acct.call("message", { room_id: roomID, body: { text, format: "markdown" } });
+    if (r.error) return `error ${JSON.stringify(r.error)}`;
+    const want = JSON.stringify({ embeds: [], format: "markdown", text });
+    const live = r.frames.find((f) => f.method === "message" && f.params?.message_id === r.result.message_id);
+    const sortedBody = (b) => JSON.stringify(Object.fromEntries(Object.entries(b ?? {}).sort()));
+    if (sortedBody(live?.params?.body) !== want) return `live ${JSON.stringify(live?.params?.body)}`;
+    const h = await admin.call("history", { room_id: roomID, limit: 50 });
+    const logged = h.result?.messages?.find((m) => m.message_id === r.result.message_id);
+    return sortedBody(logged?.body) === want || `history ${JSON.stringify(logged?.body)}`;
+  });
+  await check("markdown: an omitted format is relayed as plain", async () => {
+    const r = await acct.call("message", { room_id: roomID, body: { text: "livecheck plain" } });
+    const live = r.frames.find((f) => f.method === "message" && f.params?.message_id === r.result?.message_id);
+    return same(live?.params?.body?.format, "plain");
+  });
+  await check("media gate: an image upload's write and file URLs are on a trusted origin", async () => {
+    const p = (await acct.server()).params;
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
+    const r = await acct.call("message", { room_id: roomID, body: { text: "livecheck image", embeds: [{ kind: "upload" }] } });
+    const url = r.result?.embeds?.[0]?.write_url;
+    if (!url) return `no write_url ${JSON.stringify(r.error ?? r.result)}`;
+    const writeTrusted = trustedMedia(p, url);
+    if (writeTrusted !== true) return writeTrusted;
+    const from = acct.frames.length;
+    const put = await fetch(url, { method: "PUT", headers: { "Content-Type": "image/png" }, body: png });
+    if (put.status !== 201) return `PUT ${put.status}`;
+    const done = await acct.until(() => acct.frames.slice(from).find((f) => f.method === "message" && f.params?.message_id === r.result.message_id && f.params.body?.embeds?.[0]?.url), 8000, "the written upload");
+    const file = done.params.body.embeds[0].url;
+    const fileTrusted = trustedMedia(p, file);
+    if (fileTrusted !== true) return fileTrusted;
+    return same((await fetch(file)).status, 200);
+  });
+  await check("media gate: an /avatar upload's URL is on a trusted origin", async () => {
+    const p = (await acct.server()).params;
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
+    const r = await acct.call("command", { room_id: roomID, body: { text: "/avatar", embeds: [{ kind: "upload" }] } });
+    const url = r.result?.embeds?.[0]?.write_url;
+    if (!url) return `no write_url ${JSON.stringify(r.error ?? r.result)}`;
+    const from = acct.frames.length;
+    const put = await fetch(url, { method: "PUT", headers: { "Content-Type": "image/png" }, body: png });
+    if (put.status !== 201) return `PUT ${put.status}`;
+    const avatarOf = (f) => JSON.stringify(f).match(/"avatar":"(https?:[^"]+)"/)?.[1];
+    const frame = await acct.until(() => acct.frames.slice(from).find(avatarOf), 8000, "the new avatar");
+    const avatar = avatarOf(frame);
+    const trusted = trustedMedia(p, avatar);
+    if (trusted !== true) return trusted;
+    return same((await fetch(avatar)).status, 200);
+  });
   await check("C10: an upload that is not an image or audio is 415", async () => {
     const r = await acct.call("message", { room_id: roomID, body: { text: "livecheck upload", embeds: [{ kind: "upload", title: "livecheck.txt" }] } });
     const url = r.result?.embeds?.[0]?.write_url;
@@ -828,12 +885,16 @@ async function customEmoji(admin, acct, roomID, messageID) {
     if (!p.capabilities?.includes("ext:emoji")) return "no ext:emoji capability";
     const catalogURL = p.ext.emoji.catalog_url;
     if (!catalogURL.startsWith(`${base}/emoji/`)) return `catalog_url ${catalogURL}`;
+    const catalogTrusted = trustedMedia(p, catalogURL);
+    if (catalogTrusted !== true) return catalogTrusted;
     const r = await fetch(catalogURL);
     if (r.status !== 200) return `catalog ${r.status}`;
     if (!/immutable/.test(r.headers.get("cache-control") ?? "")) return `catalog cache ${r.headers.get("cache-control")}`;
     const catalog = JSON.parse(await r.text());
     const entry = catalog[key];
     if (!entry?.url) return `catalog ${JSON.stringify(catalog)}`;
+    const entryTrusted = trustedMedia(p, entry.url);
+    if (entryTrusted !== true) return entryTrusted;
     const image = await fetch(entry.url);
     if (image.status !== 200) return `image ${image.status}`;
     return /immutable/.test(image.headers.get("cache-control") ?? "") || `image cache ${image.headers.get("cache-control")}`;
