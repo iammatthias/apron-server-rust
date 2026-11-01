@@ -57,6 +57,8 @@ const trustedMedia = (serverParams, url) =>
   [new URL(base).origin, ...(serverParams?.ext?.media?.origins ?? [])].includes(new URL(url).origin) ||
   `${url} is not on ${new URL(base).origin} or ext.media.origins ${JSON.stringify(serverParams?.ext?.media?.origins)}`;
 const same = (got, want) => got === want || `got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`;
+// JSON with every object's keys sorted, so key order does not matter.
+const canonical = (value) => JSON.stringify(value, (_, v) => (v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort()) : v));
 
 // The server closes a connection past 60 frames a minute and every
 // connection of an address past 120, so the script keeps under both.
@@ -686,15 +688,21 @@ async function pushChecks(run, linkToken) {
 function streamTo(url) {
   let controller;
   const body = new ReadableStream({ start: (c) => (controller = c) });
-  const answer = fetch(url, { method: "PUT", body, duplex: "half" }).then(async (r) => ({ status: r.status, text: await r.text() }));
+  const answer = fetch(url, { method: "PUT", body, duplex: "half" })
+    .then(async (r) => ({ status: r.status, text: await r.text() }))
+    .catch((e) => ({ status: 0, text: String(e.cause ?? e) }));
   return { send: (text) => controller.enqueue(typeof text === "string" ? new TextEncoder().encode(text) : text), end: () => controller.close(), answer };
 }
-// A reader of a live text's url, collecting what it reads as text.
-async function readLive(url) {
-  const response = await fetch(url);
-  const got = { status: response.status, headers: response.headers, text: "", done: false };
+// A reader of a live text's url, collecting what it reads as text. It is
+// not awaited before the write starts: through the Cloudflare edge, a
+// reader's response headers arrive with its first bytes.
+function readLive(url) {
+  const got = { status: 0, headers: new Headers(), text: "", done: false };
   const decoder = new TextDecoder();
   got.ended = (async () => {
+    const response = await fetch(url);
+    got.status = response.status;
+    got.headers = response.headers;
     const reader = response.body.getReader();
     for (;;) {
       const { done, value } = await reader.read();
@@ -702,7 +710,10 @@ async function readLive(url) {
       got.text += decoder.decode(value, { stream: true });
     }
     got.done = true;
-  })();
+  })().catch((e) => {
+    got.text += ` [read failed: ${e.cause ?? e}]`;
+    got.done = true;
+  });
   got.waitFor = async (want, ms = 8000) => {
     const end = Date.now() + ms;
     while (!got.text.includes(want)) {
@@ -714,6 +725,9 @@ async function readLive(url) {
 }
 
 // Live text (embed:terminal, embed:append), as the account in the private room.
+// Through the Cloudflare edge a PUT's body reaches the server only when it
+// ends, so these checks write the whole text before they read: they check
+// what readers and the snapshot get, not that the text streams.
 async function liveText(acct, roomID, acctID) {
   const snapshotOf = (c, from, id, pred) => c.until(() => c.frames.slice(from).find((f) => f.method === "message" && f.params?.message_id === id && pred(f.params)), 15000, `a snapshot of ${id}`);
   await check("live text: a terminal streams to a reader, then keeps its output; its write_url is then 409", async () => {
@@ -724,18 +738,16 @@ async function liveText(acct, roomID, acctID) {
     const embed = posted?.params?.body?.embeds?.[0] ?? {};
     const write = r.result.embeds?.[0]?.write_url;
     if (!embed.url?.startsWith(`${base}/live/`) || embed.title !== "livecheck" || !write) return `embed ${JSON.stringify(embed)}, result ${JSON.stringify(r.result)}`;
-    const reader = await readLive(embed.url);
-    const headers = [reader.status, reader.headers.get("content-type"), reader.headers.get("x-content-type-options"), reader.headers.get("cache-control")].join(" ");
-    if (headers !== "200 text/plain; charset=utf-8 nosniff no-store, no-transform") return `reader ${headers}`;
+    const reader = readLive(embed.url);
     const put = streamTo(write);
     put.send("\x1b[32mok\x1b[0m 1\r\n");
-    await reader.waitFor("ok\x1b[0m 1\r\n");
     put.send("done\r\n");
-    await reader.waitFor("done");
     put.end();
     const answer = await put.answer;
     if (answer.status !== 200 || answer.text !== "Done: the text is posted.\n") return `writer ${answer.status} ${JSON.stringify(answer.text)}`;
     await reader.ended;
+    const headers = [reader.status, reader.headers.get("content-type"), reader.headers.get("x-content-type-options"), reader.headers.get("cache-control")].join(" ");
+    if (headers !== "200 text/plain; charset=utf-8 nosniff no-store, no-transform") return `reader ${headers}`;
     const finished = await snapshotOf(acct, from, r.result.message_id, (p) => p.body?.embeds?.[0]?.output !== undefined);
     const kept = finished.params.body.embeds[0];
     if (kept.output !== "\x1b[32mok\x1b[0m 1\r\ndone\r\n" || kept.url !== undefined) return `finished ${JSON.stringify(kept)}`;
@@ -752,14 +764,14 @@ async function liveText(acct, roomID, acctID) {
     if (!/your-llm-command \| curl -sT - '/.test(noticeText(r.frames)) || !write) return `notice ${noticeText(r.frames)}`;
     const put = streamTo(write);
     put.send("draft\f Hello wrold\b\b\b\b");
-    const posted = await acct.until(() => acct.frames.slice(from).find((f) => f.method === "message" && f.params?.from?.user_id === acctID && f.params?.body?.embeds?.[0]?.kind === "append"), 15000, "the append's message");
-    if (posted.params.body.text !== "**livecheck:**\n\n" || posted.params.body.format !== "markdown") return `posted ${JSON.stringify(posted.params.body)}`;
     put.send("orld, caf\u00e9\be!");
     put.end();
     const answer = await put.answer;
+    const posted = await acct.until(() => acct.frames.slice(from).find((f) => f.method === "message" && f.params?.from?.user_id === acctID && f.params?.body?.embeds?.[0]?.kind === "append"), 15000, "the append's message");
+    if (posted.params.body.text !== "**livecheck:**\n\n" || posted.params.body.format !== "markdown") return `posted ${JSON.stringify(posted.params.body)}`;
     if (answer.status !== 200) return `writer ${answer.status} ${JSON.stringify(answer.text)}`;
     const merged = await snapshotOf(acct, from, posted.params.message_id, (p) => p.prev_log_id !== undefined);
-    return same(JSON.stringify(merged.params.body), JSON.stringify({ text: "**livecheck:**\n\n Hello world, cafe!", format: "markdown" }));
+    return same(canonical(merged.params.body), canonical({ text: "**livecheck:**\n\n Hello world, cafe!", format: "markdown" }));
   });
 }
 
@@ -828,7 +840,7 @@ async function trackC(admin, adminToken) {
     });
     if (r.error) return `error ${JSON.stringify(r.error)}`;
     const sent = r.frames.find((f) => f.method === "message" && f.params?.message_id === r.result.message_id);
-    return same(JSON.stringify(sent?.params?.body?.embeds?.[0]?.og), JSON.stringify({ title: "Livecheck", image }));
+    return same(canonical(sent?.params?.body?.embeds?.[0]?.og), canonical({ title: "Livecheck", image }));
   });
   await check("C6: nine emoji are denied, eight are kept", async () => {
     const nine = ["1","2","3","4","5","6","7","8","9"].map((n) => `${n}\uFE0F\u20E3`);
@@ -874,12 +886,11 @@ async function trackC(admin, adminToken) {
       const listed = await other.call("room_list", { filter: "joined" });
       if (listed.error) return `room_list ${JSON.stringify(listed.error)}`;
       const receipt = await other.until(() => other.frames.slice(from).find((f) => f.method === "activity" && f.params?.room_id === roomID && f.params?.from?.user_id === acctID), 8000, "the listed receipt");
-      return same(JSON.stringify(receipt.params), JSON.stringify({ room_id: roomID, from: { user_id: acctID }, read_message_id: accountMessage }));
+      return same(canonical(receipt.params), canonical({ room_id: roomID, from: { user_id: acctID }, read_message_id: accountMessage }));
     } finally {
       other.close();
     }
   });
-  await liveText(acct, roomID, acctID);
   await check("status: a timed mute's end is sent on the next 15 s boundary", async () => {
     // Waiting status work goes out on presence boundaries (--limit.presence-alarm-seconds),
     // unless another frame on the server comes after it is due.
@@ -892,6 +903,7 @@ async function trackC(admin, adminToken) {
     const at = Date.now();
     return (end && at - muting >= 1000 && at % round < 3000) || `ended ${at - muting} ms after the mute, ${at % round} ms past a boundary`;
   });
+  await liveText(acct, roomID, acctID);
   await check("markdown: a markdown body is relayed and kept as written", async () => {
     const text = `# livecheck ${suffix}\n\n**bold** <b>&amp;</b> [link](https://example.com/a_(b))\n\n\`\`\`\nhttps://example.com/in-code \u2028\n\`\`\`\n`;
     const r = await acct.call("message", { room_id: roomID, body: { text, format: "markdown" } });

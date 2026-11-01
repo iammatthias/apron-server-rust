@@ -331,6 +331,12 @@ aprond's paths come from `Server::handler` in `src/server/server.rs`: `/ws`,
 route there needs the same
 path in the router's `@aprond` matcher.
 
+Live text streams end to end on the host, through the router's published
+port. Through the Cloudflare edge, a writer's `PUT` body reaches aprond only
+when it ends, and a reader's response headers arrive with its first bytes,
+so a text written through the public URL appears at once when its writer
+finishes. The live check writes whole texts for that reason.
+
 `--client-ip-header` is `Cf-Connecting-IP`, not `X-Forwarded-For`. Each proxy
 replaces or appends to `X-Forwarded-For`, so its last entry is the same for
 every visitor. The host's Caddy and the router pass `Cf-Connecting-IP`
