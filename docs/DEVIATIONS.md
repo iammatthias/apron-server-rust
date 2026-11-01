@@ -415,7 +415,7 @@ applies a write that finishes after its sender lost the role.
 - The 410 says `This server keeps at most <n> custom emoji; remove one
   first`.
 - `/emoji remove :name:` also drops every add of that key still on its way,
-  whose write URL then answers 404.
+  whose write URL then answers 409, as a used one does.
 - A write that finishes after its sender lost every one of the roles fails
   with 403 (`/emoji needs one of the roles admin, mod, friend`).
 - With uploads off, `/emoji add` is refused with `Uploads are turned off
@@ -564,6 +564,9 @@ attachment's declared type before the body and leaves the write open.
 - An attachment's declared type is checked once the body is read, and a
   refusal fails the write. Avatar, custom emoji and server avatar writes
   are refused before the body, as on Cloudflare.
+- A write URL is a random token, not a signed grant, so a made-up one
+  answers as a used or expired one does: 409 `This write_url was already
+  used or has expired`, where Cloudflare answers 403.
 
 **Why.** A self-hosted server may want other sizes or files.
 

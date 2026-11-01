@@ -431,7 +431,7 @@ fn test_emoji_add_dropped_when_its_key_is_removed() {
     let (_, replacing) = command_with(&mut ada, "/emoji add :x:", upload_embed());
     private_reply(&mut ada, "/emoji remove :x:");
     let status = http_do("PUT", &write_url(&replacing), Some(&png(1, 1)), "image/png").0;
-    assert_eq!(status, 404, "the write after the removal");
+    assert_eq!(status, 409, "the write after the removal");
     let st = server.app.lock();
     assert!(st.emoji.entries.is_empty(), "the removed key came back");
 }

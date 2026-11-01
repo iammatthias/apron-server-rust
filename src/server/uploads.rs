@@ -42,6 +42,10 @@ fn not_image_message(purpose: &EmbedPurpose) -> &'static str {
     }
 }
 
+/// The answer to a write URL that is unknown, used or expired: 409, as on
+/// Cloudflare (§4.8.3).
+pub(super) const WRITE_URL_USED: &str = "This write_url was already used or has expired";
+
 /// Answers a write without reading its body, and closes the connection. The
 /// server would otherwise read what is left of the body before answering, to
 /// reuse the connection, and wait for as long as the writer holds the body
@@ -163,20 +167,12 @@ impl Server {
             let mut st = self.lock();
             let Some(id) = st.writes.get(&token).cloned() else {
                 drop(st);
-                refuse_write(
-                    w,
-                    "This write URL is unknown, used, or expired",
-                    http::STATUS_NOT_FOUND,
-                );
+                refuse_write(w, WRITE_URL_USED, http::STATUS_CONFLICT);
                 return;
             };
             let Some(e) = st.embeds.get_mut(&id).filter(|e| !e.started) else {
                 drop(st);
-                refuse_write(
-                    w,
-                    "This write URL is unknown, used, or expired",
-                    http::STATUS_NOT_FOUND,
-                );
+                refuse_write(w, WRITE_URL_USED, http::STATUS_CONFLICT);
                 return;
             };
             // An avatar's, a custom emoji's or the server's avatar's declared

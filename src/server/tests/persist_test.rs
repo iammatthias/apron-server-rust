@@ -570,7 +570,7 @@ fn test_pending_image_writes_are_dropped_on_restore() {
         let url = url.replace(&old_url, &restored.http.url);
         assert_eq!(
             http_do("PUT", &url, Some(&test_png()), "image/png").0,
-            404,
+            409,
             "{url}"
         );
     }

@@ -90,7 +90,7 @@ fn test_uploads_are_hosted_with_open_graph() {
     assert_eq!(http_do("GET", &wrong, None, "").0, 404, "wrong secret");
     assert_eq!(
         http_do("PUT", &write_url, Some(b"again"), "").0,
-        404,
+        409,
         "reused write URL"
     );
 
@@ -216,7 +216,7 @@ fn test_failed_and_expired_writes_drop_the_embed() {
         .unwrap();
     assert_eq!(
         http_do("PUT", late, Some(b"late"), "").0,
-        404,
+        409,
         "expired write URL"
     );
 }
@@ -488,7 +488,7 @@ fn test_refused_write_does_not_wait_for_its_body() {
     if let Some(body) = &response.body {
         let _ = body.close();
     }
-    assert_eq!(response.status_code, 404, "status");
+    assert_eq!(response.status_code, 409, "status");
 }
 
 /// The i-th room record in a room_list array.
