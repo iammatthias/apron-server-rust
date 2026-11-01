@@ -83,7 +83,15 @@ impl State {
         // ext:settings (EXTENSIONS.md): read cursors are kept with activity.
         // private_rooms is left out when unlimited, as an absent key says.
         // What each user may do is in `you` (ext:permissions).
-        let mut settings = obj! {"read_cursors" => activity};
+        // read_receipts: a small private room's members see each other's
+        // cursors, with activity; --read-receipts sends them in every room,
+        // which "private" does not describe, so it says false.
+        let receipts = if activity && !self.config.read_receipts {
+            Json::from("private")
+        } else {
+            Json::from(false)
+        };
+        let mut settings = obj! {"read_cursors" => activity, "read_receipts" => receipts};
         if self.config.max_private_rooms > 0 {
             settings.insert("private_rooms".into(), self.config.max_private_rooms.into());
         }

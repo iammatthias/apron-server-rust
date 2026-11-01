@@ -40,9 +40,12 @@ Application Options:
                                             to, such as on a public deployment;
                                             0 is unlimited (default: 20)
       --read-receipts                       Relay each user's read cursors to
-                                            everyone in the room, and list them
-                                            after room_list; without it they go
-                                            only to the user's own connections
+                                            everyone in every room, and list
+                                            them after room_list; without it
+                                            they go to the user's own
+                                            connections and, in a private room
+                                            of at most 10 members, to its other
+                                            members (read receipts)
       --debug-addr=                         Listen address for unauthenticated
                                             pprof and expvar under /debug/,
                                             such as 127.0.0.1:6060; empty
@@ -474,9 +477,12 @@ Application Options:
                                             to, such as on a public deployment;
                                             0 is unlimited (default: 20)
       --read-receipts                       Relay each user's read cursors to
-                                            everyone in the room, and list them
-                                            after room_list; without it they go
-                                            only to the user's own connections
+                                            everyone in every room, and list
+                                            them after room_list; without it
+                                            they go to the user's own
+                                            connections and, in a private room
+                                            of at most 10 members, to its other
+                                            members (read receipts)
       --debug-addr=                         Listen address for unauthenticated
                                             pprof and expvar under /debug/,
                                             such as 127.0.0.1:6060; empty
@@ -908,9 +914,12 @@ Application Options:
                                             to, such as on a public deployment;
                                             0 is unlimited (default: 20)
       --read-receipts                       Relay each user's read cursors to
-                                            everyone in the room, and list them
-                                            after room_list; without it they go
-                                            only to the user's own connections
+                                            everyone in every room, and list
+                                            them after room_list; without it
+                                            they go to the user's own
+                                            connections and, in a private room
+                                            of at most 10 members, to its other
+                                            members (read receipts)
       --debug-addr=                         Listen address for unauthenticated
                                             pprof and expvar under /debug/,
                                             such as 127.0.0.1:6060; empty

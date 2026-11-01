@@ -979,14 +979,18 @@ browser loads.
 
 ### Read receipts, `--read-receipts`
 
-**Reference.** apron-server-cloudflare sends an account's read cursor only
-to its own other connections. apron-server-go sends read cursors to every
-member of the room.
+**Reference.** apron-server-cloudflare sends an account's read cursor to
+its own other connections and, in a private room of at most 10 registered
+members, to the room's other members unless the reader chose `invisible`
+(`ext.settings.read_receipts` `"private"`). apron-server-go sends read
+cursors to every member of every room.
 
-**This server.** Follows apron-server-cloudflare by default.
-`--read-receipts` restores apron-server-go's read receipts: cursors go to
-the room's members, the reader's own connections included, and every
-member's kept cursor follows `room_list`.
+**This server.** Follows apron-server-cloudflare by default, a thread of a
+small private room included. `--read-receipts` restores apron-server-go's
+read receipts: cursors go to the room's members, the reader's own
+connections included, and every member's kept cursor follows `room_list`.
+`ext.settings.read_receipts` is then `false`, since `"private"` would say
+that other rooms have none.
 
 **Why.** Read receipts are a privacy choice for the server's owner.
 

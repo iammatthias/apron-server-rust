@@ -1,12 +1,15 @@
 //! activity (§4.6): typing, read cursors and attention, relayed to a room's
 //! other connections within their limits.
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use super::client::Client;
+use super::client::{Client, ClientId};
 use super::protocol::*;
 use super::rooms::ReadCursor;
 use super::server::{Server, State, DEFAULT_ROOM_ID};
+use super::status::STATUS_INVISIBLE;
+use super::users::UserState;
 use super::wake::Seen;
 use crate::obj;
 
@@ -27,23 +30,56 @@ fn activity_limiter() -> crate::rate::Limiter {
     )
 }
 
+/// The most registered members a private room may have for its members to
+/// see each other's read cursors (Cloudflare's MAX_READ_RECEIPT_MEMBERS).
+pub const MAX_READ_RECEIPT_MEMBERS: usize = 10;
+
 impl State {
-    /// Sends a read cursor to the user's other connections, within
-    /// ACTIVITY_RELAYS_PER_MINUTE; one past it is kept but not relayed, and
-    /// devices learn of it at their next listing.
-    fn relay_read_locked(&mut self, c: &Client, user_id: &str, frame: &Object) {
+    /// The users whose read cursors in a room its other members see (read
+    /// receipts, `ext.settings.read_receipts` `"private"`): the registered
+    /// members of a private room, or of a thread of one, of at most
+    /// MAX_READ_RECEIPT_MEMBERS. Empty for any other room.
+    pub fn receipt_members_locked(&self, room_id: &str) -> BTreeSet<String> {
+        let (public, users) = self.audience(room_id);
+        let members: BTreeSet<String> = users
+            .into_iter()
+            .filter(|id| self.users.get(id).is_some_and(UserState::persists))
+            .collect();
+        if public || members.len() > MAX_READ_RECEIPT_MEMBERS {
+            return BTreeSet::new();
+        }
+        members
+    }
+
+    /// Sends a read cursor to the user's other connections and, in a room
+    /// with read receipts, to its other members' connections unless the
+    /// reader chose invisible, within ACTIVITY_RELAYS_PER_MINUTE; one past
+    /// it is kept but not relayed, and the others learn of it at their next
+    /// listing.
+    fn relay_read_locked(&mut self, c: &Client, user_id: &str, room_id: &str, frame: &Object) {
+        let mut peers: Vec<ClientId> = self.users[user_id]
+            .clients
+            .iter()
+            .copied()
+            .filter(|id| *id != c.id)
+            .collect();
+        if self.users[user_id].chosen != STATUS_INVISIBLE {
+            for member in self.receipt_members_locked(room_id) {
+                if member != user_id {
+                    peers.extend(self.users[&member].clients.iter().copied());
+                }
+            }
+        }
         let u = self.users.get_mut(user_id).expect("user exists");
-        if u.clients.len() < 2 || !u.read_relays.get_or_insert_with(activity_limiter).allow() {
+        if peers.is_empty() || !u.read_relays.get_or_insert_with(activity_limiter).allow() {
             return;
         }
         let Some(frame) = super::client::render(frame) else {
             return;
         };
-        for id in &self.users[user_id].clients {
-            if *id != c.id {
-                if let Some(conn) = self.clients.get(id) {
-                    conn.client.enqueue_frame(frame.clone());
-                }
+        for id in peers {
+            if let Some(conn) = self.clients.get(&id) {
+                conn.client.enqueue_frame(frame.clone());
             }
         }
     }
@@ -99,7 +135,8 @@ impl State {
     /// Applies a connection's activity (§4.6). typing is relayed to the
     /// room's other connections, at most MAX_TYPING_SECONDS and within
     /// ACTIVITY_RELAYS_PER_MINUTE. A read cursor only advances; an account's is kept, sent after the room is listed, and
-    /// relayed to its other connections, or with Config.read_receipts to the
+    /// relayed to its other connections and, in a small private room, its
+    /// other members' (read receipts), or with Config.read_receipts to every
     /// room's members; a guest's is dropped.
     pub fn activity_locked(
         &mut self,
@@ -176,7 +213,7 @@ impl State {
                     "room_id" => room_id.as_str(), "from" => from.clone(), "read_message_id" => read_id.as_str(),
                 }};
                 if !self.config.read_receipts {
-                    self.relay_read_locked(c, &user_id, &frame);
+                    self.relay_read_locked(c, &user_id, &room_id, &frame);
                 } else {
                     // Read receipts go to the room's members, and a cursor
                     // for a room the user has not joined to their own

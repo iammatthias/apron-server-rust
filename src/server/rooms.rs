@@ -261,16 +261,42 @@ impl State {
     }
 
     /// Renders the read cursors kept for a room that the server sends after
-    /// listing it (§4.6): every member's cursor for a room u has joined,
-    /// which delivers read receipts, and otherwise only u's own.
+    /// listing it (§4.6): u's own, then, for a joined room with read receipts
+    /// (receipt_members_locked), its other members' who did not choose
+    /// invisible, `from` holding only their user_id, as Cloudflare's
+    /// sendReadReceipts does. With Config.read_receipts, every member's
+    /// cursor for a room u has joined.
     pub fn cursor_frames_locked(&self, u: &UserState, r: &RoomState) -> Vec<Frame> {
         let mut frames = Vec::new();
-        for (user_id, cursor) in &r.reads {
-            if *user_id != u.id && !(self.config.read_receipts && u.joined.contains(&r.id)) {
-                continue;
+        let joined = u.joined.contains(&r.id);
+        let receipts = if joined && !self.config.read_receipts {
+            self.receipt_members_locked(&r.id)
+        } else {
+            BTreeSet::new()
+        };
+        let own = r.reads.get(&u.id).map(|cursor| (u.id.as_str(), cursor));
+        let others = r.reads.iter().filter(|(user_id, _)| **user_id != u.id);
+        for (user_id, cursor) in own
+            .into_iter()
+            .chain(others.map(|(id, c)| (id.as_str(), c)))
+        {
+            let mut from = cursor.from.clone();
+            if user_id != u.id {
+                if receipts.contains(user_id) {
+                    if self
+                        .users
+                        .get(user_id)
+                        .is_none_or(|other| other.chosen == super::status::STATUS_INVISIBLE)
+                    {
+                        continue;
+                    }
+                    from = obj! {"user_id" => user_id};
+                } else if !(self.config.read_receipts && joined) {
+                    continue;
+                }
             }
             let frame = obj! {"method" => "activity", "params" => obj! {
-                "room_id" => r.id.as_str(), "from" => cursor.from.clone(), "read_message_id" => cursor.message_id.as_str(),
+                "room_id" => r.id.as_str(), "from" => from, "read_message_id" => cursor.message_id.as_str(),
             }};
             if let Some(frame) = super::client::render(&frame) {
                 frames.push(frame);

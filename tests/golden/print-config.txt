@@ -28,7 +28,7 @@ max-listed-members = 1000
 # Top-level private rooms one user may be in at once, created or added to, such as on a public deployment; 0 is unlimited
 max-private-rooms = 20
 
-# Relay each user's read cursors to everyone in the room, and list them after room_list; without it they go only to the user's own connections
+# Relay each user's read cursors to everyone in every room, and list them after room_list; without it they go to the user's own connections and, in a private room of at most 10 members, to its other members (read receipts)
 read-receipts = false
 
 # Listen address for unauthenticated pprof and expvar under /debug/, such as 127.0.0.1:6060; empty disables
@@ -345,7 +345,7 @@ max-listed-members = 1000
 # Top-level private rooms one user may be in at once, created or added to, such as on a public deployment; 0 is unlimited
 max-private-rooms = 20
 
-# Relay each user's read cursors to everyone in the room, and list them after room_list; without it they go only to the user's own connections
+# Relay each user's read cursors to everyone in every room, and list them after room_list; without it they go to the user's own connections and, in a private room of at most 10 members, to its other members (read receipts)
 read-receipts = false
 
 # Listen address for unauthenticated pprof and expvar under /debug/, such as 127.0.0.1:6060; empty disables
@@ -663,7 +663,7 @@ max-listed-members = 1000
 # Top-level private rooms one user may be in at once, created or added to, such as on a public deployment; 0 is unlimited
 max-private-rooms = 20
 
-# Relay each user's read cursors to everyone in the room, and list them after room_list; without it they go only to the user's own connections
+# Relay each user's read cursors to everyone in every room, and list them after room_list; without it they go to the user's own connections and, in a private room of at most 10 members, to its other members (read receipts)
 read-receipts = false
 
 # Listen address for unauthenticated pprof and expvar under /debug/, such as 127.0.0.1:6060; empty disables
@@ -980,7 +980,7 @@ max-listed-members = 1000
 # Top-level private rooms one user may be in at once, created or added to, such as on a public deployment; 0 is unlimited
 max-private-rooms = 20
 
-# Relay each user's read cursors to everyone in the room, and list them after room_list; without it they go only to the user's own connections
+# Relay each user's read cursors to everyone in every room, and list them after room_list; without it they go to the user's own connections and, in a private room of at most 10 members, to its other members (read receipts)
 read-receipts = false
 
 # Listen address for unauthenticated pprof and expvar under /debug/, such as 127.0.0.1:6060; empty disables

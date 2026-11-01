@@ -18,9 +18,9 @@ fn read(c: &TestClient, message_id: &str) {
     c.write(&obj! {"method" => "activity", "params" => obj! {"room_id" => "general", "read_message_id" => message_id}});
 }
 
-/// A read cursor goes to the user's other connections only, within its own
-/// allowance, and room_list follows with the user's own cursor alone; no
-/// read receipts.
+/// A read cursor in a public room goes to the user's other connections
+/// only, within its own allowance, and room_list follows with the user's
+/// own cursor alone; no read receipts there.
 #[test]
 fn test_read_cursors_stay_with_the_user() {
     assert_eq!(
@@ -209,4 +209,193 @@ fn test_read_cursor_naming_an_unknown_message_is_relayed() {
         server.app.lock().rooms["general"].reads["admin"].message_id,
         "42"
     );
+}
+
+fn read_in(c: &TestClient, room_id: &str, message_id: &str) {
+    c.write(&obj! {"method" => "activity", "params" => obj! {"room_id" => room_id, "read_message_id" => message_id}});
+}
+
+fn joined_listing(c: &mut TestClient) -> Vec<Object> {
+    c.drain();
+    c.write(
+        &obj! {"method" => "room_list", "id" => "list", "params" => obj! {"filter" => "joined"}},
+    );
+    activities(&c.drain())
+}
+
+/// A private room's members see each other's read cursors, live and after a
+/// listing, and nobody else does (apron-server-cloudflare's "shows a private
+/// room's members each other's read cursors").
+#[test]
+fn test_private_room_read_receipts() {
+    let server = super::helpers::admin_test_server();
+    let mut ada = super::helpers::admin(&server);
+    let mut bob = super::helpers::account(&server);
+    let mut carol = super::helpers::account(&server);
+    let (_, frame) = dial_raw(&server);
+    assert_eq!(
+        frame["params"].as_object().unwrap()["ext"]
+            .as_object()
+            .unwrap()["settings"]
+            .as_object()
+            .unwrap()["read_receipts"],
+        Json::from("private")
+    );
+    ada.drain();
+    let (room_id, _) = save_room(&mut ada, "create", obj! {"private" => true});
+    ada.request(
+        "room_join",
+        "add",
+        obj! {"room_id" => room_id.as_str(), "user_id" => bob.user_id.as_str()},
+    );
+    let (one, _) = save(
+        &mut ada,
+        "one",
+        obj! {"room_id" => room_id.as_str(), "body" => obj! {"text" => "one"}},
+    );
+    ada.drain();
+    bob.drain();
+    carol.drain();
+    read_in(&bob, &room_id, &one);
+    let echoed = activities(&bob.drain());
+    let bob_name = server.app.lock().users[&bob.user_id].from();
+    assert_eq!(
+        activities(&ada.drain()),
+        vec![
+            obj! {"room_id" => room_id.as_str(), "from" => bob_name, "read_message_id" => one.as_str()}
+        ],
+        "relayed to the other member"
+    );
+    assert!(echoed.is_empty(), "echoed to the reader");
+    assert!(
+        activities(&carol.drain()).is_empty(),
+        "relayed outside the room"
+    );
+    // Ada's other device lists the room: Bob's cursor, by user_id alone.
+    let mut second = super::helpers::admin(&server);
+    assert_eq!(
+        joined_listing(&mut second),
+        vec![
+            obj! {"room_id" => room_id.as_str(), "from" => obj! {"user_id" => bob.user_id.as_str()}, "read_message_id" => one.as_str()}
+        ]
+    );
+    assert!(
+        joined_listing(&mut carol).is_empty(),
+        "listed outside the room"
+    );
+    // A public room's cursor still goes to the user's own connections only.
+    let (general, _) = save(&mut ada, "general", obj! {"body" => obj! {"text" => "hi"}});
+    ada.drain();
+    second.drain();
+    read_in(&bob, "general", &general);
+    assert!(activities(&bob.drain()).is_empty(), "echoed to the reader");
+    assert!(
+        activities(&ada.drain()).is_empty(),
+        "a public room's receipt"
+    );
+}
+
+/// A room past MAX_READ_RECEIPT_MEMBERS registered members keeps each
+/// cursor to its own user.
+#[test]
+fn test_large_private_rooms_have_no_read_receipts() {
+    use crate::server::activity::MAX_READ_RECEIPT_MEMBERS;
+    assert_eq!(MAX_READ_RECEIPT_MEMBERS, 10, "Cloudflare's limit");
+    let server = super::helpers::admin_test_server();
+    let mut ada = super::helpers::admin(&server);
+    let mut bob = super::helpers::account(&server);
+    ada.drain();
+    let (room_id, _) = save_room(&mut ada, "create", obj! {"private" => true});
+    let mut members = vec![bob.user_id.clone()];
+    for i in 0..MAX_READ_RECEIPT_MEMBERS - 1 {
+        let user_id = format!("member{i}");
+        super::status_test::add_account(&server, &user_id, &[]);
+        members.push(user_id);
+    }
+    for (i, user_id) in members.iter().enumerate() {
+        ada.request(
+            "room_join",
+            &format!("add{i}"),
+            obj! {"room_id" => room_id.as_str(), "user_id" => user_id.as_str()},
+        );
+    }
+    let (one, _) = save(
+        &mut ada,
+        "one",
+        obj! {"room_id" => room_id.as_str(), "body" => obj! {"text" => "one"}},
+    );
+    ada.drain();
+    read_in(&bob, &room_id, &one);
+    bob.drain();
+    assert!(
+        activities(&ada.drain()).is_empty(),
+        "a receipt in a room of {} members",
+        MAX_READ_RECEIPT_MEMBERS + 1
+    );
+    let mut second = super::helpers::admin(&server);
+    assert!(joined_listing(&mut second).is_empty());
+}
+
+/// A member who chose invisible shows no read receipt, live or after a
+/// listing, until they are visible again; their own devices still get it.
+#[test]
+fn test_invisible_members_show_no_read_receipts() {
+    let server = super::helpers::admin_test_server();
+    let mut ada = super::helpers::account(&server);
+    let mut bob = super::helpers::admin(&server);
+    let mut mine = super::helpers::admin(&server);
+    ada.drain();
+    let (room_id, _) = save_room(&mut ada, "create", obj! {"private" => true});
+    ada.request(
+        "room_join",
+        "add",
+        obj! {"room_id" => room_id.as_str(), "user_id" => "admin"},
+    );
+    let (one, _) = save(
+        &mut ada,
+        "one",
+        obj! {"room_id" => room_id.as_str(), "body" => obj! {"text" => "one"}},
+    );
+    bob.drain();
+    bob.request("me", "hide", obj! {"status" => "invisible"});
+    ada.drain();
+    mine.drain();
+    read_in(&bob, &room_id, &one);
+    bob.drain();
+    let own = activities(&mine.drain());
+    assert_eq!(own.len(), 1, "{own:?}");
+    assert_eq!(own[0]["read_message_id"], Json::from(one.as_str()));
+    assert!(activities(&ada.drain()).is_empty(), "an invisible receipt");
+    assert!(
+        joined_listing(&mut ada).is_empty(),
+        "an invisible member listed"
+    );
+    bob.request("me", "show", obj! {"status" => "online"});
+    assert_eq!(
+        joined_listing(&mut ada),
+        vec![
+            obj! {"room_id" => room_id.as_str(), "from" => obj! {"user_id" => "admin"}, "read_message_id" => one.as_str()}
+        ]
+    );
+}
+
+/// `ext.settings.read_receipts` is "private" by default, and false with
+/// --read-receipts, which sends cursors in every room, as "private" does
+/// not describe.
+#[test]
+fn test_read_receipts_setting() {
+    let setting = |config: crate::server::config::Config| {
+        let server = new_test_server(config);
+        let (_, frame) = dial_raw(&server);
+        frame["params"].as_object().unwrap()["ext"]
+            .as_object()
+            .unwrap()["settings"]
+            .as_object()
+            .unwrap()["read_receipts"]
+            .clone()
+    };
+    assert_eq!(setting(default_config()), Json::from("private"));
+    let mut everyone = default_config();
+    everyone.read_receipts = true;
+    assert_eq!(setting(everyone), Json::from(false));
 }

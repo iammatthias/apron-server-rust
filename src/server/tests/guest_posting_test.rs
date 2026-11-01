@@ -162,7 +162,7 @@ fn test_read_only_guest_reads() {
 fn test_server_frame_advertises_guest_posting() {
     let settings = |_guest_posting: bool| {
         Some(Json::from(
-            obj! {"read_cursors" => true, "private_rooms" => 20i64},
+            obj! {"read_cursors" => true, "read_receipts" => "private", "private_rooms" => 20i64},
         ))
     };
     type Case = (&'static str, Config, Option<Json>);

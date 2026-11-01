@@ -121,7 +121,9 @@ fn test_server_frame() {
     // ext:settings keeps read_cursors and private_rooms (EXTENSIONS.md).
     assert_eq!(
         params["ext"].as_object().unwrap()["settings"],
-        Json::from(obj! {"read_cursors" => true, "private_rooms" => f(20)}),
+        Json::from(
+            obj! {"read_cursors" => true, "read_receipts" => "private", "private_rooms" => f(20)}
+        ),
         "server.ext.settings"
     );
     // Without a bound, private_rooms is absent, as no stated limit is.
@@ -132,7 +134,7 @@ fn test_server_frame() {
     let params = frame["params"].as_object().unwrap();
     assert_eq!(
         params["ext"].as_object().unwrap()["settings"],
-        Json::from(obj! {"read_cursors" => true}),
+        Json::from(obj! {"read_cursors" => true, "read_receipts" => "private"}),
         "unbounded private rooms"
     );
 
