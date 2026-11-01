@@ -42,14 +42,25 @@ const opened = new Promise((resolve, reject) => {
   ws.onerror = () => reject(new Error(`could not connect to ${server}`));
   ws.onclose = (event) => reject(new Error(`closed ${event.code} ${event.reason}`));
 });
-function call(method, params) {
+// A read limit (ext:limits) answers with retry_after: wait it out and ask again, a few times.
+async function call(method, params, tries = 3) {
+  try {
+    return await send(method, params);
+  } catch (error) {
+    const wait = error.frame?.data?.retry_after;
+    if (!tries || error.frame?.code !== -32002 || typeof wait !== "number") throw error;
+    await new Promise((resolve) => setTimeout(resolve, (wait + 1) * 1000));
+    return call(method, params, tries - 1);
+  }
+}
+function send(method, params) {
   const id = `demo-${++nextID}`;
   ws.send(JSON.stringify({ method, id, params }));
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`no reply to ${method}`)), 15000);
     replies.set(id, (frame) => {
       clearTimeout(timer);
-      if (frame.error) reject(new Error(`${method}: ${JSON.stringify(frame.error)}`));
+      if (frame.error) reject(Object.assign(new Error(`${method}: ${JSON.stringify(frame.error)}`), { frame: frame.error }));
       else resolve(frame.result);
     });
   });
