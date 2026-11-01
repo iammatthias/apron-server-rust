@@ -101,6 +101,75 @@ and the earlier row stays as it was decided.
 | 2026-10-31 | apron-server-cloudflare 2cb64d3 (#61: status changes announced from the Durable Object alarm; Analytics Engine counters) is ported for what a client sees. A waiting status change and a timed mute's end keep their per-user timers, which now fire at the next presence boundary (`Limits::presence_boundary`: 15 s for a registered user, 60 s for a guest, as Cloudflare's Paid plan rounds its alarm), and `State.presence_due_at` with `sweep_presence_locked` announce what is due at the first frame (not the exact ping), WebSocket request or close after it, as Cloudflare's `sweepPresence` does. The roundings are `--limit.presence-alarm-seconds` and `--limit.guest-presence-alarm-seconds`, the second a multiple of the first; the interop shim sets both to 0. The Analytics Engine counters are not ported (docs/DEVIATIONS.md, Metrics). The `REFERENCE` pin moves to 2cb64d3. | Timers here cost nothing while they wait, so the alarm itself has no counterpart; matching it means matching when frames go out. Rounding the existing timers keeps one mechanism, and the sweep keeps an early event announcing a due change as Cloudflare's does. |
 | 2026-10-31 | Protocol v10, first half (apron-server-cloudflare fc0e4aa, shazow/apron 30f3e07): the `server` frame announces `apron: 10` and `apron-rust/10` (nothing is negotiated, so no other change follows the number), and `GET`/`HEAD /.well-known/webauthn` on the `--webauthn.rp-id` host answers `{"origins": [<--webauthn.origin>]}` as `application/json` with `Cache-Control: public, max-age=300` (`handle_related_origins` in `src/server/webauthn.rs`, `src/server/tests/related_origins_test.rs` from Cloudflare's `related-origins.integration.test.ts`). Cloudflare dropped its startup check that every RP origin sits under `RP_ID`; this server never had one (`validate_config` in `src/webauthn/mod.rs` checks the RP ID's syntax and that an origin is given), so an origin outside the RP ID was already taken, and now the browser can learn it is related. Appendix A.3's `@&role` mentions need no server change: Cloudflare stores `body.mentions` as sent and never reads mentions out of text (its `store.ts`, "Who a message mentions is the list its sender gives"), as `mentions()` in `src/server/messages.rs` and `wake_locked` in `src/server/wake.rs` do; `test_role_mentions_are_kept_as_sent_and_wake_the_listed_users` pins it. | Cloudflare is the reference; live text, the second half of v10, is the next row. |
 
+## v10 work in progress
+
+Branch `v10-wip`, based on main 3037378. The port follows apron-server-cloudflare
+fc0e4aa1cfc41b4a7fa07396f5b48427f69243c1 and shazow/apron
+30f3e07ce18e3bddefa5cb1d349a5c74b13bca6d, which were preliminary when this
+was written (the protocol author was still editing v10), so `REFERENCE`
+stays at the v9 pins and nothing here is deployed.
+
+Done, in `5e67069` (every gate green: `cargo fmt --check`, `cargo clippy
+--all-targets -D warnings`, `cargo test --workspace`):
+
+- The `server` frame announces `apron: 10` as `apron-rust/10`.
+- `GET`/`HEAD /.well-known/webauthn` on the `--webauthn.rp-id` host
+  (`handle_related_origins`, `src/server/webauthn.rs`;
+  `src/server/tests/related_origins_test.rs`), with the router route and the
+  AGENTS.md route list.
+- Help texts for `--limit.presence-alarm-seconds` and `--webauthn.origin`,
+  goldens regenerated.
+- A test that `@&role` mentions are kept and woken from `body.mentions` as
+  sent (`test_role_mentions_are_kept_as_sent_and_wake_the_listed_users`).
+
+Drafted, not wired: `src/server/live_text.rs` holds the live text domain
+(`LiveKind`, `LiveEnd` with the `PUT` response texts, `LiveLimits` with the
+Workers Paid defaults, `keep_last`, `keep_first`, the WHATWG decode through
+`String::from_utf8_lossy`, `terminal_output` with the 128 KiB JSON cap,
+`LiveBuffer`, the shared `LiveText` with its reader batching and backlog
+drop, the command notice, and the `Server`/`State` methods for the write,
+the read, the command and the finish). It is not in `src/server/mod.rs`, so
+it is not compiled, and it names things that do not exist yet:
+`embeds::LiveEmbed` and `LivePost` on `EmbedState` in place of `stream`,
+`State.live_ids` (secret to embed id, for `/live/<secret>`),
+`Feature::LiveText` and `/toggle livetext`, `Config.live: LiveLimits` with
+the `--limit.live-*` flags, `charge_live_start_locked` with `Scope::LiveStart`
+(and `Rate.per_minute` as `f64`, since 3 starts per 10 minutes is 0.3 a
+minute), `CommandCtx.rest` and `reply_to`, `new_write_locked` with a window
+and a `live/` token prefix (so a missing live token answers 409 as
+Cloudflare's object does), and a `pub` `og_line`.
+
+Left, in the order planned:
+
+- Reshape `EmbedState` and `resolve_embeds_locked` for the two kinds (one
+  live text per message as `denied`, two appends as `invalid_params`, kept
+  embeds rebuilt from `embed_id`, `kind`, owned fields and a terminal's
+  title), delete `streams.rs` and `/streams/`, remove `embed:stream` and the
+  `stream_*` config fields (none had a flag), route `/live/` and add it to
+  the router, advertise `embed:terminal` and `embed:append` while the toggle
+  is on.
+- `republish_locked` publishes a tombstone for a message left with no text
+  and no embeds, as Cloudflare does (also for a failed upload).
+- `remap.rs`: rename a live text's owner and a pending post's `from`; a
+  purge ends its owner's texts; `live_ids` holds no user_id.
+- Persistence: drop `StoredEmbed.stream`; restore already fails every
+  unfinished embed, which is Cloudflare's "nothing kept" after a restart;
+  check that a v9 store's `stream` member and finished `stream` embeds still
+  decode.
+- Shutdown ends every live text with `Unavailable` (503, nothing
+  published).
+- Tests: Cloudflare's `live-text.test.ts` and
+  `live-text.integration.test.ts` cases, `keep_last` against the protocol's
+  reference function on random bytes, a restart with the SQLite store; the
+  stream tests in `reference_test.rs`, `reference_users_test.rs`,
+  `server_test.rs` and `toggle_test.rs` rewritten for live text.
+- Docs: DEVIATIONS.md (live text configured whenever the server runs,
+  `/live/<secret>` on this server's origin, 409 for an expired write URL,
+  a reader that falls behind is ended rather than errored, the post charge
+  spent before a refused live start, no budget guard), the stream mentions
+  removed; a PORT.md row; `tools/deploy/live-check.mjs` checks; the
+  `REFERENCE` pin move, once upstream settles.
+
 ## Migrating a guest_<n> account
 
 Accounts registered before 2026-10-28, such as the live `guest_1` with its
