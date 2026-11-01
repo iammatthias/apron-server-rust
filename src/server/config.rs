@@ -7,11 +7,12 @@ use rust_stdlib::time::Duration;
 
 use super::custom_emoji::{DEFAULT_MAX_EMOJI, DEFAULT_MAX_EMOJI_BYTES};
 use super::email::EmailSender;
+use super::host_list::HostList;
 use super::limits::Limits;
 use super::media_types::UPLOAD_TYPES;
 use super::metadata::ServerMetadata;
 use super::protocol::*;
-use super::push::PushHosts;
+use super::push::default_push_hosts;
 use super::unfurl::{self};
 use super::webauthn::WebAuthn;
 use crate::store::Store;
@@ -97,7 +98,10 @@ pub struct Config {
     pub allow_insecure_push: bool,
     /// The push services endpoints may name (`--push.hosts`), checked when
     /// registering and again before each push.
-    pub push_hosts: PushHosts,
+    pub push_hosts: HostList,
+    /// The hosts whose media a sender's `og` may keep
+    /// (`--unfurl.media-hosts`, apron-server-cloudflare's `OG_MEDIA_HOSTS`).
+    pub og_media_hosts: HostList,
     /// How long a message's wake waits before it pushes (`--push.delay`);
     /// zero pushes at once.
     pub push_delay: Duration,
@@ -206,7 +210,8 @@ pub fn default_config() -> Config {
         store: None,
         disable_push: false,
         allow_insecure_push: false,
-        push_hosts: PushHosts::default(),
+        push_hosts: default_push_hosts(),
+        og_media_hosts: super::embeds::default_og_media_hosts(),
         push_delay: super::wake::PUSH_DELAY,
         vapid_private_key: String::new(),
         vapid_subject: String::new(),

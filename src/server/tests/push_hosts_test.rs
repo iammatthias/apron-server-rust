@@ -1,6 +1,7 @@
 //! The host checks on push endpoints, ported from push_test.go. The relay
 //! fixture lives in push_test.rs.
 
+use crate::server::host_list::HostList;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::Arc;
 
@@ -48,7 +49,7 @@ fn test_push_refuses_internal_addresses() {
         called.load(Ordering::SeqCst)
     );
     assert!(
-        check_push_url("http://relay.example/p", false, &PushHosts::Any).is_err(),
+        check_push_url("http://relay.example/p", false, &HostList::Any).is_err(),
         "http push URL accepted without allow_insecure_push"
     );
     // Cloudflare's pushEndpointError: no address literal, single label or
@@ -80,7 +81,7 @@ fn test_push_refuses_internal_addresses() {
         ("not a url", "url must be an https URL"),
     ] {
         assert_eq!(
-            check_push_url(endpoint, false, &PushHosts::Any),
+            check_push_url(endpoint, false, &HostList::Any),
             Err(want),
             "{endpoint}"
         );
@@ -102,14 +103,14 @@ fn test_push_refuses_internal_addresses() {
         ),
     ] {
         assert_eq!(
-            check_push_url(endpoint, false, &PushHosts::Any),
+            check_push_url(endpoint, false, &HostList::Any),
             Ok(want.to_owned()),
             "{endpoint}"
         );
     }
     // allow_insecure, for tests, admits http, ports and internal hosts.
     assert_eq!(
-        check_push_url("http://127.0.0.1:8080/p", true, &PushHosts::Any),
+        check_push_url("http://127.0.0.1:8080/p", true, &HostList::Any),
         Ok("http://127.0.0.1:8080/p".to_owned())
     );
 }
@@ -118,8 +119,8 @@ fn test_push_refuses_internal_addresses() {
 /// `*.` suffixes, or a standalone `*`; none gives the browsers' services.
 #[test]
 fn test_push_hosts_parse_and_match() {
-    let default = PushHosts::parse(&[]).unwrap();
-    assert_eq!(default, PushHosts::default(), "no --push.hosts");
+    let default = parse_push_hosts(&[]).unwrap();
+    assert_eq!(default, default_push_hosts(), "no --push.hosts");
     for (host, allowed) in [
         ("fcm.googleapis.com", true),
         ("updates.push.services.mozilla.com", true),
@@ -132,11 +133,11 @@ fn test_push_hosts_parse_and_match() {
     ] {
         assert_eq!(default.allows(host), allowed, "default allows {host}");
     }
-    assert_eq!(PushHosts::parse(&strs(&["*"])).unwrap(), PushHosts::Any);
-    let listed = PushHosts::parse(&strs(&["Relay.Example, *.push.example.net"])).unwrap();
+    assert_eq!(parse_push_hosts(&strs(&["*"])).unwrap(), HostList::Any);
+    let listed = parse_push_hosts(&strs(&["Relay.Example, *.push.example.net"])).unwrap();
     assert_eq!(
         listed,
-        PushHosts::Listed(strs(&["relay.example", "*.push.example.net"])),
+        HostList::Listed(strs(&["relay.example", "*.push.example.net"])),
         "comma-separated and lowercased"
     );
     assert!(listed.allows("relay.example") && listed.allows("a.push.example.net"));
@@ -158,7 +159,7 @@ fn test_push_hosts_parse_and_match() {
             strs(&[bad])
         };
         assert!(
-            PushHosts::parse(&entries).is_err(),
+            parse_push_hosts(&entries).is_err(),
             "--push.hosts {entries:?} accepted"
         );
     }
@@ -202,7 +203,7 @@ fn test_push_register_checks_hosts() {
     );
 
     let mut config = default_config();
-    config.push_hosts = PushHosts::parse(&strs(&["relay.example"])).unwrap();
+    config.push_hosts = parse_push_hosts(&strs(&["relay.example"])).unwrap();
     let server = new_test_server(config);
     let mut b = push_client(&server);
     b.result(
@@ -220,7 +221,7 @@ fn test_push_checks_hosts_again_before_each_push() {
     let relay = new_test_relay();
     let mut config = default_config();
     config.allow_insecure_push = true;
-    config.push_hosts = PushHosts::parse(&strs(&["127.0.0.1"])).unwrap();
+    config.push_hosts = parse_push_hosts(&strs(&["127.0.0.1"])).unwrap();
     config.push_delay = Duration::from_secs(0);
     let server = new_test_server(config);
     server.app.lock().badge_delay = Duration::from_secs(0);

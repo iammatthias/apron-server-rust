@@ -779,6 +779,102 @@ fn test_client_og_is_kept_as_text() {
     assert!(!embeds_of(&dropped)[0].contains_key("og"));
 }
 
+/// A sender's `og` keeps media only from `--unfurl.media-hosts`, over
+/// https without credentials or a port (apron-server-cloudflare's "keeps og
+/// media only from ogMediaHosts").
+#[test]
+fn test_client_og_media_only_from_listed_hosts() {
+    let mut config = default_config();
+    config.og_media_hosts =
+        crate::server::host_list::HostList::of(&["i.ytimg.com", "*.cdn.example"]);
+    let server = new_test_server(config);
+    let mut c = dial_test_client(&server);
+    let mut n = 0;
+    let mut sent = |image: Json| {
+        n += 1;
+        let og = obj! {
+            "title" => "Example",
+            "image" => image,
+            "video" => obj! {"url" => "javascript:alert(1)"},
+            "audio" => "https://cdn.example/a.mp3",
+        };
+        let (_, snapshot) = save(
+            &mut c,
+            &format!("og{n}"),
+            obj! {"body" => obj! {"text" => "look", "embeds" => vec![Json::from(obj! {"kind" => "link", "url" => "https://example.com", "og" => og})]}},
+        );
+        embeds_of(&snapshot)[0]["og"].clone()
+    };
+    assert_eq!(
+        sent(obj! {"url" => "https://i.ytimg.com/vi/abc/hq.jpg", "type" => "image/png", "width" => 320i64, "height" => -1i64, "alt" => "An\nexample", "extra" => true}.into()),
+        Json::from(obj! {"title" => "Example", "image" => obj! {"url" => "https://i.ytimg.com/vi/abc/hq.jpg", "type" => "image/png", "width" => 320i64, "alt" => "An example"}}),
+    );
+    let image = |og: Json| og.as_object().unwrap().get("image").cloned();
+    assert_eq!(
+        image(sent(obj! {"url" => "https://x.cdn.example/a.png"}.into())),
+        Some(obj! {"url" => "https://x.cdn.example/a.png"}.into())
+    );
+    // A backslash ends the host, so the client loads the URL the server checked.
+    assert_eq!(
+        image(sent(
+            obj! {"url" => "https://I.YTIMG.com\\@evil.example/a.png"}.into()
+        )),
+        Some(obj! {"url" => "https://i.ytimg.com/@evil.example/a.png"}.into())
+    );
+    assert_eq!(
+        image(sent(obj! {"url" => "https://i.ytimg.com?q=é"}.into())),
+        Some(obj! {"url" => "https://i.ytimg.com/?q=%C3%A9"}.into())
+    );
+    for url in [
+        "https://evil.example/a.png",
+        "https://cdn.example/a.png",
+        "https://i.ytimg.com.evil.example/a.png",
+        "https://i.ytimg.com./a.png",
+        "https://i.ytimg.com%2e/a.png",
+        "https://evil.example\\@i.ytimg.com/a.png",
+        "http://i.ytimg.com/a.png",
+        "https://user@i.ytimg.com/a.png",
+        "https://i.ytimg.com:8443/a.png",
+    ] {
+        assert_eq!(
+            sent(obj! {"url" => url}.into()),
+            Json::from(obj! {"title" => "Example"}),
+            "{url}"
+        );
+    }
+}
+
+/// With no media hosts, as `--unfurl.media-hosts ''` gives, a sender's og
+/// keeps no media; the default list keeps a YouTube thumbnail.
+#[test]
+fn test_client_og_media_hosts_flag() {
+    use crate::server::embeds::parse_og_media_hosts;
+    use crate::server::host_list::HostList;
+    let none = parse_og_media_hosts(&["".into()]).unwrap();
+    assert_eq!(none, HostList::Listed(vec![]));
+    let default = parse_og_media_hosts(&[]).unwrap();
+    assert!(default.allows("i.ytimg.com") && !default.allows("www.youtube.com"));
+    assert_eq!(
+        parse_og_media_hosts(&["cdn".into()]),
+        Err("invalid --unfurl.media-hosts \"cdn\": list host names, *.host suffixes, or a standalone *".into())
+    );
+    let mut config = default_config();
+    config.og_media_hosts = none;
+    let server = new_test_server(config);
+    let mut c = dial_test_client(&server);
+    let og =
+        obj! {"title" => "Example", "image" => obj! {"url" => "https://i.ytimg.com/vi/abc/hq.jpg"}};
+    let (_, snapshot) = save(
+        &mut c,
+        "og",
+        obj! {"body" => obj! {"text" => "look", "embeds" => vec![Json::from(obj! {"kind" => "link", "url" => "https://example.com", "og" => og})]}},
+    );
+    assert_eq!(
+        embeds_of(&snapshot)[0]["og"],
+        Json::from(obj! {"title" => "Example"})
+    );
+}
+
 /// A public top-level room saved without a title is titled `Room`, and
 /// `general` `General`; a private room goes without (apron-server-cloudflare's
 /// ROOM_TITLE and DEFAULT_ROOM_TITLE).

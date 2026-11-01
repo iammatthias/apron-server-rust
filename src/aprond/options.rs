@@ -100,6 +100,7 @@ pub struct AppleOptions {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct UnfurlOptions {
     pub enable: bool,
+    pub media_hosts: Vec<String>,
 }
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct GuestOptions {
@@ -313,6 +314,7 @@ pub static GROUPS: &[Group] = &[
         namespace: "unfurl",
         options: &[
             spec!("enable", Bool, unfurl.enable, [], [], "Fetch the pages that messages link to and attach their OpenGraph previews, with images hosted here; the server then requests any public http(s) URL a user posts (off by default)"),
+            spec!("media-hosts", List, unfurl.media_hosts, [], [], "Host whose og image, video or audio a client's link embed may keep, at an https URL without credentials or a port: a host name, a *.host suffix, or a standalone * for any; repeat for more, or give an empty one for none (default: the image CDNs of YouTube, Vimeo, GitHub, X, Bluesky, Reddit, Wikimedia, Imgur, Twitch and Substack)"),
         ],
     },
     Group {

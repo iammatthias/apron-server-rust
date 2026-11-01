@@ -46,7 +46,9 @@ pub struct Settings {
     pub disable_push: bool,
     pub allow_insecure_push: bool,
     /// `--push.hosts`.
-    pub push_hosts: crate::server::push::PushHosts,
+    pub push_hosts: crate::server::host_list::HostList,
+    /// `--unfurl.media-hosts`.
+    pub og_media_hosts: crate::server::host_list::HostList,
     /// `--push.delay`.
     pub push_delay: Duration,
     pub vapid_private_key: String,
@@ -200,7 +202,9 @@ pub fn server_settings(options: &Options) -> Result<Settings, String> {
         return Err("--push.allow-insecure lets any client make the server POST to http and internal addresses; it is for tests and refused with --public-url or --tls.domain".to_string());
     }
     config.allow_insecure_push = options.push.allow_insecure;
-    config.push_hosts = crate::server::push::PushHosts::parse(&options.push.hosts)?;
+    config.push_hosts = crate::server::push::parse_push_hosts(&options.push.hosts)?;
+    config.og_media_hosts =
+        crate::server::embeds::parse_og_media_hosts(&options.unfurl.media_hosts)?;
     config.push_delay = parse_push_delay(&options.push.delay)?;
     config.vapid_private_key = options.push.vapid_private_key.clone();
     config.vapid_subject = options.push.vapid_subject.clone();

@@ -225,6 +225,16 @@ Link previews:
                                             the server then requests any public
                                             http(s) URL a user posts (off by
                                             default)
+      --unfurl.media-hosts=                 Host whose og image, video or audio
+                                            a client's link embed may keep, at
+                                            an https URL without credentials or
+                                            a port: a host name, a *.host
+                                            suffix, or a standalone * for any;
+                                            repeat for more, or give an empty
+                                            one for none (default: the image
+                                            CDNs of YouTube, Vimeo, GitHub, X,
+                                            Bluesky, Reddit, Wikimedia, Imgur,
+                                            Twitch and Substack)
 
 Guests:
       --guest.posting                       Let guests post, react, join,
@@ -649,6 +659,16 @@ Link previews:
                                             the server then requests any public
                                             http(s) URL a user posts (off by
                                             default)
+      --unfurl.media-hosts=                 Host whose og image, video or audio
+                                            a client's link embed may keep, at
+                                            an https URL without credentials or
+                                            a port: a host name, a *.host
+                                            suffix, or a standalone * for any;
+                                            repeat for more, or give an empty
+                                            one for none (default: the image
+                                            CDNs of YouTube, Vimeo, GitHub, X,
+                                            Bluesky, Reddit, Wikimedia, Imgur,
+                                            Twitch and Substack)
 
 Guests:
       --guest.posting                       Let guests post, react, join,
@@ -1073,6 +1093,16 @@ Link previews:
                                             the server then requests any public
                                             http(s) URL a user posts (off by
                                             default)
+      --unfurl.media-hosts=                 Host whose og image, video or audio
+                                            a client's link embed may keep, at
+                                            an https URL without credentials or
+                                            a port: a host name, a *.host
+                                            suffix, or a standalone * for any;
+                                            repeat for more, or give an empty
+                                            one for none (default: the image
+                                            CDNs of YouTube, Vimeo, GitHub, X,
+                                            Bluesky, Reddit, Wikimedia, Imgur,
+                                            Twitch and Substack)
 
 Guests:
       --guest.posting                       Let guests post, react, join,

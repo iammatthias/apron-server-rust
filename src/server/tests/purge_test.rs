@@ -14,8 +14,9 @@ use super::push_test::{add_push, go_idle, relay_push};
 use super::webauthn_test::*;
 use crate::obj;
 use crate::server::config::Config;
+use crate::server::host_list::HostList;
 use crate::server::protocol::*;
-use crate::server::push::{PushHosts, WakeScope};
+use crate::server::push::WakeScope;
 use crate::server::rooms::ReadCursor;
 use crate::server::status::MuteState;
 use crate::store::{self, Store};
@@ -25,7 +26,7 @@ use crate::store::{self, Store};
 pub(super) fn account_config() -> Config {
     Config {
         allow_insecure_push: true,
-        push_hosts: PushHosts::Any,
+        push_hosts: HostList::Any,
         push_delay: Duration::from_secs(60),
         ..admin_config()
     }

@@ -4,6 +4,7 @@
 use super::config::{load_config, print_config};
 use super::options::{ErrorKind, Options, Parser};
 use super::settings::{server_settings, EmailSender};
+use crate::server::push::default_push_hosts;
 use std::collections::BTreeMap;
 
 fn parse(args: &[&str]) -> Parser {
@@ -200,9 +201,9 @@ fn test_vapid_settings() {
 
 #[test]
 fn test_push_hosts_settings() {
-    use crate::server::push::PushHosts;
+    use crate::server::host_list::HostList;
     let hosts = |args: &[&str]| server_settings(&parse(args).options).map(|s| s.push_hosts);
-    assert_eq!(hosts(&[]), Ok(PushHosts::default()), "no --push.hosts");
+    assert_eq!(hosts(&[]), Ok(default_push_hosts()), "no --push.hosts");
     assert_eq!(
         hosts(&[
             "--push.hosts",
@@ -210,12 +211,12 @@ fn test_push_hosts_settings() {
             "--push.hosts",
             "*.push.example.net"
         ]),
-        Ok(PushHosts::Listed(vec![
+        Ok(HostList::Listed(vec![
             "relay.example".into(),
             "*.push.example.net".into()
         ]))
     );
-    assert_eq!(hosts(&["--push.hosts", "*"]), Ok(PushHosts::Any));
+    assert_eq!(hosts(&["--push.hosts", "*"]), Ok(HostList::Any));
     assert_eq!(
         hosts(&["--push.hosts", "relay"]),
         Err(

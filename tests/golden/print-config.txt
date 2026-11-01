@@ -156,6 +156,9 @@ email = ""
 # Fetch the pages that messages link to and attach their OpenGraph previews, with images hosted here; the server then requests any public http(s) URL a user posts (off by default)
 enable = false
 
+# Host whose og image, video or audio a client's link embed may keep, at an https URL without credentials or a port: a host name, a *.host suffix, or a standalone * for any; repeat for more, or give an empty one for none (default: the image CDNs of YouTube, Vimeo, GitHub, X, Bluesky, Reddit, Wikimedia, Imgur, Twitch and Substack)
+# media-hosts = []
+
 [guest]
 
 # Let guests post, react, join, leave, and make rooms; without it they only read, and server.ext.settings says so
@@ -469,6 +472,9 @@ email = ""
 
 # Fetch the pages that messages link to and attach their OpenGraph previews, with images hosted here; the server then requests any public http(s) URL a user posts (off by default)
 enable = false
+
+# Host whose og image, video or audio a client's link embed may keep, at an https URL without credentials or a port: a host name, a *.host suffix, or a standalone * for any; repeat for more, or give an empty one for none (default: the image CDNs of YouTube, Vimeo, GitHub, X, Bluesky, Reddit, Wikimedia, Imgur, Twitch and Substack)
+# media-hosts = []
 
 [guest]
 
@@ -785,6 +791,9 @@ email = ""
 # Fetch the pages that messages link to and attach their OpenGraph previews, with images hosted here; the server then requests any public http(s) URL a user posts (off by default)
 enable = false
 
+# Host whose og image, video or audio a client's link embed may keep, at an https URL without credentials or a port: a host name, a *.host suffix, or a standalone * for any; repeat for more, or give an empty one for none (default: the image CDNs of YouTube, Vimeo, GitHub, X, Bluesky, Reddit, Wikimedia, Imgur, Twitch and Substack)
+# media-hosts = []
+
 [guest]
 
 # Let guests post, react, join, leave, and make rooms; without it they only read, and server.ext.settings says so
@@ -1098,6 +1107,9 @@ email = ""
 
 # Fetch the pages that messages link to and attach their OpenGraph previews, with images hosted here; the server then requests any public http(s) URL a user posts (off by default)
 enable = false
+
+# Host whose og image, video or audio a client's link embed may keep, at an https URL without credentials or a port: a host name, a *.host suffix, or a standalone * for any; repeat for more, or give an empty one for none (default: the image CDNs of YouTube, Vimeo, GitHub, X, Bluesky, Reddit, Wikimedia, Imgur, Twitch and Substack)
+# media-hosts = []
 
 [guest]
 

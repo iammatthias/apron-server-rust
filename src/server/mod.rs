@@ -15,6 +15,7 @@ pub mod email;
 pub mod embeds;
 pub mod emoji;
 pub mod history;
+pub mod host_list;
 pub mod invites;
 pub mod limits;
 pub mod media_types;

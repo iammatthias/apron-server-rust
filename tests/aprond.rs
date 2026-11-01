@@ -546,12 +546,12 @@ fn test_unfurl_flag() {
     let (code, out, _) = output(APROND, &["--print-config"]);
     assert_eq!(code, 0);
     let out = String::from_utf8(out).unwrap();
-    assert!(out.contains("\n[unfurl]\n\n# Fetch the pages that messages link to and attach their OpenGraph previews, with images hosted here; the server then requests any public http(s) URL a user posts (off by default)\nenable = false\n\n[guest]\n"), "{out}");
+    assert!(out.contains("\n[unfurl]\n\n# Fetch the pages that messages link to and attach their OpenGraph previews, with images hosted here; the server then requests any public http(s) URL a user posts (off by default)\nenable = false\n\n# Host whose og image"), "{out}");
     let (code, out, _) = output(APROND, &["--print-config", "--unfurl.enable"]);
     assert_eq!(code, 0);
     assert!(String::from_utf8(out)
         .unwrap()
-        .contains("\nenable = true\n\n[guest]\n"));
+        .contains("\nenable = true\n\n# Host whose og image"));
 }
 
 /// The first frame a WebSocket client at `addr` reads: the `server` frame.

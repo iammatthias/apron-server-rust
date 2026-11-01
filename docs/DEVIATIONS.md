@@ -957,6 +957,26 @@ link can show a preview only if the server hosts it. Unfurling makes the
 server request any public URL a user names, which reveals its address and
 spends its bandwidth, so the operator opts in.
 
+### A sender's `og` media, `--unfurl.media-hosts`
+
+**Reference.** apron-server-cloudflare keeps a client-built `og.image`,
+`og.video` and `og.audio` only at an `https:` URL without credentials or a
+port on a host `OG_MEDIA_HOSTS` allows, by default a few big platforms'
+image CDNs, and stores the URL as its WHATWG parser serializes it.
+
+**This server.** The same list and defaults, set with
+`--unfurl.media-hosts` (repeatable, or one empty value for none). The URL
+is checked by hand rather than by a WHATWG parser: its host must be ASCII
+letters, digits, dots and dashes, ended by `/`, `\`, `?` or `#`. So a
+percent-encoded, non-ASCII or IP-literal host is dropped where Cloudflare's
+parser might keep its canonical form. A backslash before the query becomes
+`/`, and other bytes outside printable ASCII are percent-encoded, as a
+browser reads the URL.
+
+**Why.** rust-stdlib's `net/url` is Go's parser, which reads some URLs
+differently from browsers; a URL kept here must name the host a viewer's
+browser loads.
+
 ### Read receipts, `--read-receipts`
 
 **Reference.** apron-server-cloudflare sends an account's read cursor only

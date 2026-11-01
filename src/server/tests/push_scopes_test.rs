@@ -1,6 +1,7 @@
 //! Which wake scopes a message triggers, ported from push_test.go. The relay
 //! fixture lives in push_test.rs.
 
+use crate::server::host_list::HostList;
 use rust_stdlib::time::Duration;
 
 use super::helpers::*;
@@ -296,7 +297,7 @@ fn test_joined_never_for_a_bot_mod() {
     let relay = new_test_relay();
     let mut config = default_config();
     config.allow_insecure_push = true;
-    config.push_hosts = PushHosts::Any;
+    config.push_hosts = HostList::Any;
     config.admin_token = super::helpers::admin_config().admin_token;
     let server = new_test_server(config);
     let mut admin = super::helpers::admin_on(&server, "http://localhost:5173");
@@ -335,7 +336,7 @@ fn test_joined_only_for_admins_and_mods() {
     let relay = new_test_relay();
     let mut config = default_config();
     config.allow_insecure_push = true;
-    config.push_hosts = PushHosts::Any;
+    config.push_hosts = HostList::Any;
     config.admin_token = super::helpers::admin_config().admin_token;
     config.push_delay = Duration::from_secs(0);
     let server = new_test_server(config);

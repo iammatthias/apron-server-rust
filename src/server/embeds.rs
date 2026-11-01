@@ -10,6 +10,7 @@ use rust_stdlib::time::{self, Duration, Timer};
 use rust_stdlib_crypto::{rand, subtle};
 
 use super::client::Client;
+use super::host_list::HostList;
 use super::protocol::*;
 use super::server::State;
 use super::streams::StreamBuffer;
@@ -151,10 +152,135 @@ fn og_image_alt(og: Option<&Json>) -> String {
 const OG_TEXT_FIELDS: [(&str, usize); 3] =
     [("title", 256), ("description", 512), ("site_name", 128)];
 
-/// Reduces a sender's `og` to its text fields, each one plain line, so a
-/// client never loads media a sender named; drops `og` when nothing is
-/// left. The server's own og, of a link preview or upload, replaces it.
-fn clean_og(embed: &mut Object) {
+/// The media of a sender's `og` this server keeps from `og_media_hosts`, and
+/// their bounds (apron-server-cloudflare's OG_MEDIA_*).
+const OG_MEDIA_FIELDS: [&str; 3] = ["image", "video", "audio"];
+const OG_MEDIA_URL_BYTES: usize = 2048;
+const OG_MEDIA_TYPE_BYTES: usize = 128;
+const OG_MEDIA_ALT_CODE_POINTS: usize = 512;
+const OG_MEDIA_MAX_DIMENSION: i64 = 16_384;
+
+/// The media hosts a sender's `og` may name when `--unfurl.media-hosts` is
+/// not set: big platforms' own image CDNs, whose access logs whoever posts a
+/// link cannot read, and which do not redirect elsewhere
+/// (apron-server-cloudflare's DEFAULT_OG_MEDIA_HOSTS).
+pub const DEFAULT_OG_MEDIA_HOSTS: [&str; 15] = [
+    "i.ytimg.com",
+    "img.youtube.com",
+    "i.vimeocdn.com",
+    "opengraph.githubassets.com",
+    "repository-images.githubusercontent.com",
+    "avatars.githubusercontent.com",
+    "pbs.twimg.com",
+    "cdn.bsky.app",
+    "i.redd.it",
+    "preview.redd.it",
+    "external-preview.redd.it",
+    "upload.wikimedia.org",
+    "i.imgur.com",
+    "static-cdn.jtvnw.net",
+    "substackcdn.com",
+];
+
+pub fn default_og_media_hosts() -> HostList {
+    HostList::of(&DEFAULT_OG_MEDIA_HOSTS)
+}
+
+/// Reads `--unfurl.media-hosts`: none given is DEFAULT_OG_MEDIA_HOSTS, and
+/// only empty ones keep no media.
+pub fn parse_og_media_hosts(entries: &[String]) -> Result<HostList, String> {
+    match HostList::parse(entries, "--unfurl.media-hosts")? {
+        Some(hosts) => Ok(hosts),
+        None if entries.is_empty() => Ok(default_og_media_hosts()),
+        None => Ok(HostList::default()),
+    }
+}
+
+/// A sender's `og` media URL, kept only when it is `https:` on one of
+/// `hosts`, without credentials or a port, and spelled so that a WHATWG URL
+/// parser reads the same host: a host of letters, digits, dots and dashes
+/// with no trailing dot, ended by `/`, `\`, `?` or `#`. A backslash before
+/// the query reads as `/`, as browsers read it; other bytes outside
+/// printable ASCII are percent-encoded, as browsers encode them.
+fn og_media_url(raw: &str, hosts: &HostList) -> Option<String> {
+    if raw.len() > OG_MEDIA_URL_BYTES {
+        return None;
+    }
+    let scheme = raw.get(..8)?;
+    if !scheme.eq_ignore_ascii_case("https://") {
+        return None;
+    }
+    let rest = &raw[8..];
+    let end = rest.find(['/', '\\', '?', '#']).unwrap_or(rest.len());
+    let host = rest[..end].to_ascii_lowercase();
+    let host_ok = !host.is_empty()
+        && !host.starts_with('.')
+        && !host.ends_with('.')
+        && host
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'.' || b == b'-');
+    if !host_ok || !hosts.allows(&host) {
+        return None;
+    }
+    let mut url = format!("https://{host}");
+    let path = &rest[end..];
+    let query = path.find(['?', '#']).unwrap_or(path.len());
+    if !path.starts_with(['/', '\\']) {
+        url.push('/');
+    }
+    for (i, b) in path.bytes().enumerate() {
+        match b {
+            b'\\' if i < query => url.push('/'),
+            0x21..=0x7e => url.push(b as char),
+            _ => url.push_str(&format!("%{b:02X}")),
+        }
+    }
+    Some(url)
+}
+
+/// A sender's `og` media object with a kept `url` (og_media_url) and its
+/// bounded `type`, `width`, `height` and `alt`, or `None`.
+fn og_media(value: &Json, hosts: &HostList) -> Option<Object> {
+    let media = value.as_object()?;
+    let url = og_media_url(media.get("url")?.as_str()?, hosts)?;
+    let mut kept = obj! {"url" => url};
+    if let Some(kind) = media.get("type").and_then(Json::as_str) {
+        let valid = |part: &str| {
+            !part.is_empty()
+                && part
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'+' | b'-'))
+        };
+        if kind.len() <= OG_MEDIA_TYPE_BYTES
+            && kind
+                .split_once('/')
+                .is_some_and(|(a, b)| valid(a) && valid(b))
+        {
+            kept.insert("type".into(), kind.into());
+        }
+    }
+    for field in ["width", "height"] {
+        if let Some(&Json::Number(size)) = media.get(field) {
+            if size.fract() == 0.0 && size > 0.0 && size <= OG_MEDIA_MAX_DIMENSION as f64 {
+                kept.insert(field.into(), (size as i64).into());
+            }
+        }
+    }
+    if let Some(alt) = media
+        .get("alt")
+        .and_then(Json::as_str)
+        .and_then(|alt| og_line(alt, OG_MEDIA_ALT_CODE_POINTS))
+    {
+        kept.insert("alt".into(), alt.into());
+    }
+    Some(kept)
+}
+
+/// Reduces a sender's `og` to its text fields, each one plain line, and its
+/// media on one of `media_hosts`, so a client never loads media from a host
+/// whose logs a sender may read; drops `og` when nothing is left. The
+/// server's own og, of a link preview or upload, replaces it.
+fn clean_og(embed: &mut Object, media_hosts: &HostList) {
     let Some(og) = embed.remove("og") else {
         return;
     };
@@ -169,6 +295,13 @@ fn clean_og(embed: &mut Object) {
             .and_then(|v| og_line(v, max))
         {
             clean.insert(field.into(), line.into());
+        }
+    }
+    if !media_hosts.is_empty() {
+        for field in OG_MEDIA_FIELDS {
+            if let Some(media) = og.get(field).and_then(|v| og_media(v, media_hosts)) {
+                clean.insert(field.into(), media.into());
+            }
         }
     }
     if !clean.is_empty() {
@@ -366,7 +499,7 @@ impl State {
                 if let Some(kind) = previous[&id].get("kind").cloned() {
                     embed.insert("kind".into(), kind);
                 }
-                clean_og(&mut embed);
+                clean_og(&mut embed, &self.config.og_media_hosts);
                 embed.remove("write_url");
                 if let Some(e) = self.embeds.get(&id) {
                     embed.remove("url");
@@ -383,7 +516,7 @@ impl State {
                 .to_owned();
             let id = self.next_embed_id();
             let alt = og_image_alt(embed.get("og"));
-            clean_og(&mut embed);
+            clean_og(&mut embed, &self.config.og_media_hosts);
             embed.remove("write_url");
             embed.insert("embed_id".into(), id.as_str().into());
             if kind == "upload" || kind == "stream" {

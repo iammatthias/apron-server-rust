@@ -2,6 +2,7 @@
 //! `push.integration.test.ts`: "push delay", "held wakes", and the store's
 //! coalescing and `wakesPerMessage` cases.
 
+use crate::server::push::parse_push_hosts;
 use rust_stdlib::time::{self, Duration};
 
 use super::helpers::*;
@@ -9,15 +10,16 @@ use super::push_test::*;
 use super::webauthn_test::{new_test_authenticator, register_test_passkey, TEST_PASSKEY_ORIGIN};
 use crate::obj;
 use crate::server::config::Config;
+use crate::server::host_list::HostList;
 use crate::server::protocol::*;
-use crate::server::push::{PushHosts, WakeScope};
+use crate::server::push::WakeScope;
 
 const DELAY: Duration = Duration::from_millis(300);
 
 fn wake_config(delay: Duration) -> Config {
     let mut config = default_config();
     config.allow_insecure_push = true;
-    config.push_hosts = PushHosts::Any;
+    config.push_hosts = HostList::Any;
     config.push_delay = delay;
     config.web_authn = Some(super::webauthn_test::test_web_authn());
     config
@@ -343,7 +345,7 @@ fn test_wakes_coalesce_per_user_and_room() {
 fn test_wakes_at_most_ten_users_a_message() {
     let relay = new_test_relay();
     let mut config = wake_config(Duration::from_secs(0));
-    config.push_hosts = PushHosts::parse(&strs(&["127.0.0.1"])).unwrap();
+    config.push_hosts = parse_push_hosts(&strs(&["127.0.0.1"])).unwrap();
     let server = new_test_server(config);
     let mut alice = push_client(&server);
     let port = relay.url.rsplit_once(':').unwrap().1.to_owned();
@@ -619,7 +621,7 @@ fn test_wakes_wait_by_default() {
     let relay = new_test_relay();
     let mut config = default_config();
     config.allow_insecure_push = true;
-    config.push_hosts = PushHosts::Any;
+    config.push_hosts = HostList::Any;
     let server = new_test_server(config);
     let mut alice = push_client(&server);
     let mut bob = push_client(&server);

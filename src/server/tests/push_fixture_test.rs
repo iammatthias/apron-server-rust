@@ -182,7 +182,7 @@ fn test_push_fixture_payloads() {
 fn test_push_fixture_registrations() {
     let fixture = fixture();
     let mut config = default_config();
-    config.push_hosts = crate::server::push::PushHosts::Any;
+    config.push_hosts = crate::server::host_list::HostList::Any;
     let server = new_test_server(config);
     let mut c = dial_test_client(&server);
     make_account(&server, &c.user_id);

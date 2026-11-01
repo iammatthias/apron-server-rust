@@ -10,6 +10,7 @@ use rust_stdlib::net::url;
 use rust_stdlib::time::{self, Duration, Time};
 
 use super::client::Client as Connection;
+use super::host_list::HostList;
 use super::messages::mentions;
 use super::protocol::*;
 use super::push_delivery::DoneFn;
@@ -68,78 +69,16 @@ pub const DEFAULT_PUSH_HOSTS: [&str; 5] = [
     "*.notify.windows.com",
 ];
 
-/// The push services endpoints may name (`--push.hosts`), for every kind:
-/// a relay's host is allowed only once it is listed.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum PushHosts {
-    Any,
-    /// Exact host names, and `*.` suffixes, lowercase.
-    Listed(Vec<String>),
+/// The push services endpoints may name when `--push.hosts` is not set.
+pub fn default_push_hosts() -> HostList {
+    HostList::of(&DEFAULT_PUSH_HOSTS)
 }
 
-impl Default for PushHosts {
-    fn default() -> PushHosts {
-        PushHosts::Listed(DEFAULT_PUSH_HOSTS.iter().map(|h| (*h).to_owned()).collect())
-    }
-}
-
-impl PushHosts {
-    /// Reads `--push.hosts`: host names or `*.` suffixes, or a standalone
-    /// `*`; none gives DEFAULT_PUSH_HOSTS.
-    pub fn parse(entries: &[String]) -> Result<PushHosts, String> {
-        let hosts: Vec<String> = entries
-            .iter()
-            .flat_map(|entry| entry.split(','))
-            .map(|host| host.trim().to_ascii_lowercase())
-            .filter(|host| !host.is_empty())
-            .collect();
-        if hosts.is_empty() {
-            return Ok(PushHosts::default());
-        }
-        if hosts == ["*"] {
-            return Ok(PushHosts::Any);
-        }
-        for host in &hosts {
-            if !valid_host_pattern(host) {
-                return Err(format!(
-                    "invalid --push.hosts {}: list host names, *.host suffixes, or a standalone *",
-                    rust_stdlib::strconv::quote(host)
-                ));
-            }
-        }
-        Ok(PushHosts::Listed(hosts))
-    }
-
-    /// Whether an endpoint's host, lowercase without a trailing dot, is one
-    /// of these.
-    pub fn allows(&self, host: &str) -> bool {
-        match self {
-            PushHosts::Any => true,
-            PushHosts::Listed(hosts) => hosts.iter().any(|entry| match entry.strip_prefix('*') {
-                Some(suffix) => host.ends_with(suffix),
-                None => host == entry,
-            }),
-        }
-    }
-
-    pub fn allows_url(&self, endpoint: &str) -> bool {
-        url::parse(endpoint).is_ok_and(|u| self.allows(&u.hostname().to_ascii_lowercase()))
-    }
-}
-
-/// `^(\*\.)?label(\.label)+$`, each label letters, digits and inner `-`.
-fn valid_host_pattern(host: &str) -> bool {
-    let name = host.strip_prefix("*.").unwrap_or(host);
-    let labels: Vec<&str> = name.split('.').collect();
-    labels.len() >= 2
-        && labels.iter().all(|label| {
-            !label.is_empty()
-                && !label.starts_with('-')
-                && !label.ends_with('-')
-                && label
-                    .bytes()
-                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
-        })
+/// Reads `--push.hosts`: host names or `*.` suffixes, or a standalone `*`;
+/// none gives DEFAULT_PUSH_HOSTS. A relay's host is allowed only once it is
+/// listed.
+pub fn parse_push_hosts(entries: &[String]) -> Result<HostList, String> {
+    Ok(HostList::parse(entries, "--push.hosts")?.unwrap_or_else(default_push_hosts))
 }
 
 /// A set of wake scopes (§4.9).
@@ -650,7 +589,7 @@ pub fn normalize_push_url(endpoint: &str) -> Option<(String, url::Url)> {
 pub fn check_push_url(
     endpoint: &str,
     allow_insecure: bool,
-    hosts: &PushHosts,
+    hosts: &HostList,
 ) -> Result<String, &'static str> {
     let Some((normalized, parsed)) = normalize_push_url(endpoint) else {
         return Err("url must be an https URL");

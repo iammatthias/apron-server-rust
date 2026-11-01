@@ -2,6 +2,7 @@
 //! encryption, payload size, the daily limit, and the per-host lanes. The
 //! relay fixture lives in push_test.rs.
 
+use crate::server::host_list::HostList;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::mpsc::channel;
@@ -30,7 +31,7 @@ fn test_web_push_delivery() {
     let relay = new_test_relay();
     let mut config = default_config();
     config.allow_insecure_push = true;
-    config.push_hosts = PushHosts::Any;
+    config.push_hosts = HostList::Any;
     config.public_url = "https://chat.example".into();
     config.push_delay = Duration::from_secs(0);
     let server = new_test_server(config);

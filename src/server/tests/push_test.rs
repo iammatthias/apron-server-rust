@@ -3,6 +3,7 @@
 //! push_registration_test.rs, push_hosts_test.rs, push_badge_test.rs and
 //! push_delivery_test.rs.
 
+use crate::server::host_list::HostList;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
@@ -125,7 +126,7 @@ pub(super) fn paths(requests: &[RelayRequest]) -> Vec<String> {
 pub(super) fn push_test_server() -> TestServer {
     let mut config = default_config();
     config.allow_insecure_push = true;
-    config.push_hosts = PushHosts::Any;
+    config.push_hosts = HostList::Any;
     config.push_delay = Duration::from_secs(0);
     let server = new_test_server(config);
     server.app.lock().badge_delay = Duration::from_secs(0);
