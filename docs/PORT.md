@@ -104,7 +104,7 @@ and the earlier row stays as it was decided.
 ## Protocol v10
 
 Ported from apron-server-cloudflare 2cb64d3 to 1556026 and shazow/apron
-b8f2b26 to 1e12d15 (the `REFERENCE` pins), on 2026-11-01, once the
+b8f2b26 to 1e12d15 (the `REFERENCE` pins at the time), on 2026-11-01, once the
 protocol author asked servers to try `embed:terminal` and `embed:append`.
 
 - `apron: 10` as `apron-rust/10`; `/.well-known/webauthn` on the RP ID host
