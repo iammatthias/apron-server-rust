@@ -26,6 +26,8 @@
 // gets two new server frames. The push checks make one more livecheck_
 // account, which registers an fcm.googleapis.com endpoint and unregisters it
 // at once; nothing mentions that account, so no push is ever sent.
+// The live text checks stream a terminal and an append in Track C's private
+// room, as its account, and the read receipt checks read that room's cursors.
 import { createECDH, randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 
@@ -179,7 +181,11 @@ await check("server frame: settings, welcome, ext:media, signup, auth", async ()
     const problems = [];
     const settings = p.ext?.settings;
     const keys = Object.keys(settings ?? {}).sort().join(",");
-    if (keys !== "private_rooms,read_cursors") problems.push(`ext.settings keys ${keys}`);
+    if (keys !== "private_rooms,read_cursors,read_receipts") problems.push(`ext.settings keys ${keys}`);
+    if (settings?.read_receipts !== "private") problems.push(`ext.settings.read_receipts ${JSON.stringify(settings?.read_receipts)}`);
+    if (p.apron !== 10) problems.push(`apron ${p.apron}`);
+    for (const cap of ["embed:terminal", "embed:append"]) if (!p.capabilities?.includes(cap)) problems.push(`no ${cap} capability`);
+    if (p.capabilities?.includes("embed:stream")) problems.push("embed:stream offered");
     if (!p.capabilities?.includes("ext:permissions")) problems.push("no ext:permissions capability");
     if (!p.capabilities?.includes("ext:limits")) problems.push("no ext:limits capability");
     const upload = Object.keys(p.ext?.media?.upload ?? {}).sort().join(",");
@@ -450,7 +456,7 @@ if (!tokenFile) {
   await renameAndPurge(adminToken, linkToken);
   await modEmoji(adminToken, linkToken);
 
-  await trackC(admin);
+  await trackC(admin, adminToken);
   admin.close();
 
   for (const [command, usage] of [
@@ -675,9 +681,91 @@ async function pushChecks(run, linkToken) {
   }
 }
 
+// A streaming PUT of a live text's write_url: send() writes a chunk, end()
+// closes the body, and answer resolves to the status and text.
+function streamTo(url) {
+  let controller;
+  const body = new ReadableStream({ start: (c) => (controller = c) });
+  const answer = fetch(url, { method: "PUT", body, duplex: "half" }).then(async (r) => ({ status: r.status, text: await r.text() }));
+  return { send: (text) => controller.enqueue(typeof text === "string" ? new TextEncoder().encode(text) : text), end: () => controller.close(), answer };
+}
+// A reader of a live text's url, collecting what it reads as text.
+async function readLive(url) {
+  const response = await fetch(url);
+  const got = { status: response.status, headers: response.headers, text: "", done: false };
+  const decoder = new TextDecoder();
+  got.ended = (async () => {
+    const reader = response.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      got.text += decoder.decode(value, { stream: true });
+    }
+    got.done = true;
+  })();
+  got.waitFor = async (want, ms = 8000) => {
+    const end = Date.now() + ms;
+    while (!got.text.includes(want)) {
+      if (got.done || Date.now() > end) throw new Error(`reader never got ${JSON.stringify(want)}, had ${JSON.stringify(got.text)}`);
+      await new Promise((r) => setTimeout(r, 50));
+    }
+  };
+  return got;
+}
+
+// Live text (embed:terminal, embed:append), as the account in the private room.
+async function liveText(acct, roomID, acctID) {
+  const snapshotOf = (c, from, id, pred) => c.until(() => c.frames.slice(from).find((f) => f.method === "message" && f.params?.message_id === id && pred(f.params)), 15000, `a snapshot of ${id}`);
+  await check("live text: a terminal streams to a reader, then keeps its output; its write_url is then 409", async () => {
+    const from = acct.frames.length;
+    const r = await acct.call("message", { room_id: roomID, body: { text: "livecheck build", embeds: [{ kind: "terminal", title: "livecheck" }] } });
+    if (r.error) return `error ${JSON.stringify(r.error)}`;
+    const posted = r.frames.find((f) => f.method === "message" && f.params?.message_id === r.result.message_id);
+    const embed = posted?.params?.body?.embeds?.[0] ?? {};
+    const write = r.result.embeds?.[0]?.write_url;
+    if (!embed.url?.startsWith(`${base}/live/`) || embed.title !== "livecheck" || !write) return `embed ${JSON.stringify(embed)}, result ${JSON.stringify(r.result)}`;
+    const reader = await readLive(embed.url);
+    const headers = [reader.status, reader.headers.get("content-type"), reader.headers.get("x-content-type-options"), reader.headers.get("cache-control")].join(" ");
+    if (headers !== "200 text/plain; charset=utf-8 nosniff no-store, no-transform") return `reader ${headers}`;
+    const put = streamTo(write);
+    put.send("\x1b[32mok\x1b[0m 1\r\n");
+    await reader.waitFor("ok\x1b[0m 1\r\n");
+    put.send("done\r\n");
+    await reader.waitFor("done");
+    put.end();
+    const answer = await put.answer;
+    if (answer.status !== 200 || answer.text !== "Done: the text is posted.\n") return `writer ${answer.status} ${JSON.stringify(answer.text)}`;
+    await reader.ended;
+    const finished = await snapshotOf(acct, from, r.result.message_id, (p) => p.body?.embeds?.[0]?.output !== undefined);
+    const kept = finished.params.body.embeds[0];
+    if (kept.output !== "\x1b[32mok\x1b[0m 1\r\ndone\r\n" || kept.url !== undefined) return `finished ${JSON.stringify(kept)}`;
+    if (reader.text !== kept.output) return `reader read ${JSON.stringify(reader.text)}`;
+    const again = await fetch(write, { method: "PUT", body: "again" });
+    if (again.status !== 409) return `write_url again ${again.status}`;
+    return same((await fetch(embed.url)).status, 404);
+  });
+  await check("live text: /embed-append revises with backspace and form feed, then merges into the body", async () => {
+    const from = acct.frames.length;
+    const r = await acct.call("command", { room_id: roomID, body: { text: "/embed-append **livecheck:** " } });
+    if (r.error) return `error ${JSON.stringify(r.error)}`;
+    const write = r.result.embeds?.[0]?.write_url;
+    if (!/your-llm-command \| curl -sT - '/.test(noticeText(r.frames)) || !write) return `notice ${noticeText(r.frames)}`;
+    const put = streamTo(write);
+    put.send("draft\f Hello wrold\b\b\b\b");
+    const posted = await acct.until(() => acct.frames.slice(from).find((f) => f.method === "message" && f.params?.from?.user_id === acctID && f.params?.body?.embeds?.[0]?.kind === "append"), 15000, "the append's message");
+    if (posted.params.body.text !== "**livecheck:**\n\n" || posted.params.body.format !== "markdown") return `posted ${JSON.stringify(posted.params.body)}`;
+    put.send("orld, caf\u00e9\be!");
+    put.end();
+    const answer = await put.answer;
+    if (answer.status !== 200) return `writer ${answer.status} ${JSON.stringify(answer.text)}`;
+    const merged = await snapshotOf(acct, from, posted.params.message_id, (p) => p.prev_log_id !== undefined);
+    return same(JSON.stringify(merged.params.body), JSON.stringify({ text: "**livecheck:**\n\n Hello world, cafe!", format: "markdown" }));
+  });
+}
+
 // Track C (rooms, messages, permissions), as the admin and the account
 // /invite-token made, in a private room the admin makes and leaves.
-async function trackC(admin) {
+async function trackC(admin, adminToken) {
   const room = `livecheck_${suffix}`;
   let roomID, threadID, accountMessage, acct;
   const ok = (r) => !r.error || `error ${JSON.stringify(r.error)}`;
@@ -732,6 +820,16 @@ async function trackC(admin) {
     const sent = r.frames.find((f) => f.method === "message" && f.params?.message_id === accountMessage);
     return same(JSON.stringify(sent?.params?.body?.embeds?.[0]?.og), '{"title":"Livecheck card"}');
   });
+  await check("C7: a sender's og keeps media from an image CDN (--unfurl.media-hosts)", async () => {
+    const image = { url: "https://i.ytimg.com/vi/livecheck/hqdefault.jpg", width: 480, height: 360 };
+    const r = await acct.call("message", {
+      room_id: roomID,
+      body: { text: "livecheck video", embeds: [{ kind: "link", url: "https://www.youtube.com/watch?v=livecheck", og: { title: "Livecheck", image, video: { url: "https://www.youtube.com/embed/livecheck" } } }] },
+    });
+    if (r.error) return `error ${JSON.stringify(r.error)}`;
+    const sent = r.frames.find((f) => f.method === "message" && f.params?.message_id === r.result.message_id);
+    return same(JSON.stringify(sent?.params?.body?.embeds?.[0]?.og), JSON.stringify({ title: "Livecheck", image }));
+  });
   await check("C6: nine emoji are denied, eight are kept", async () => {
     const nine = ["1","2","3","4","5","6","7","8","9"].map((n) => `${n}\uFE0F\u20E3`);
     const denied = await acct.call("reactions", { message_id: accountMessage, emojis: nine });
@@ -755,17 +853,33 @@ async function trackC(admin) {
     const r = await acct.call("me", { avatar: "https://example.com/livecheck.png" });
     return (!r.error && r.result.you.avatar === undefined) || `reply ${JSON.stringify(r.error ?? r.result.you)}`;
   });
-  await check("C8: typing is capped at 30 s, and a read cursor reaches no one else", async () => {
+  await check("C8: typing is capped at 30 s, and a read cursor in the small private room reaches its other member", async () => {
     const from = admin.frames.length;
     acct.ws.send(JSON.stringify({ method: "activity", params: { room_id: roomID, typing: 600 } }));
     acct.ws.send(JSON.stringify({ method: "activity", params: { room_id: roomID, read_message_id: accountMessage } }));
     const own = acct.frames.length;
     const typing = await admin.until(() => admin.frames.slice(from).find((f) => f.method === "activity" && f.params?.typing !== undefined), 8000, "typing");
-    await new Promise((r) => setTimeout(r, 1000));
-    const reads = admin.frames.slice(from).filter((f) => f.method === "activity" && f.params?.read_message_id);
-    const echoed = acct.frames.slice(own).filter((f) => f.method === "activity" && f.params?.typing !== undefined);
-    return (typing.params.typing === 30 && reads.length === 0 && echoed.length === 0) || `typing ${typing.params.typing}, ${reads.length} read cursors, ${echoed.length} typing echoes`;
+    const read = await admin.until(() => admin.frames.slice(from).find((f) => f.method === "activity" && f.params?.read_message_id), 8000, "the read receipt");
+    await new Promise((r) => setTimeout(r, 500));
+    const echoed = acct.frames.slice(own).filter((f) => f.method === "activity");
+    return (typing.params.typing === 30 && read.params.from?.user_id === acctID && read.params.read_message_id === accountMessage && echoed.length === 0) ||
+      `typing ${typing.params.typing}, read ${JSON.stringify(read.params)}, ${echoed.length} echoes`;
   });
+  await check("read receipts: a listing shows the other member's cursor, by user_id", async () => {
+    const other = await connect();
+    try {
+      await other.server();
+      await other.call("auth", { scheme: "token", token: adminToken });
+      const from = other.frames.length;
+      const listed = await other.call("room_list", { filter: "joined" });
+      if (listed.error) return `room_list ${JSON.stringify(listed.error)}`;
+      const receipt = await other.until(() => other.frames.slice(from).find((f) => f.method === "activity" && f.params?.room_id === roomID && f.params?.from?.user_id === acctID), 8000, "the listed receipt");
+      return same(JSON.stringify(receipt.params), JSON.stringify({ room_id: roomID, from: { user_id: acctID }, read_message_id: accountMessage }));
+    } finally {
+      other.close();
+    }
+  });
+  await liveText(acct, roomID, acctID);
   await check("status: a timed mute's end is sent on the next 15 s boundary", async () => {
     // Waiting status work goes out on presence boundaries (--limit.presence-alarm-seconds),
     // unless another frame on the server comes after it is due.
@@ -806,6 +920,8 @@ async function trackC(admin) {
     const from = acct.frames.length;
     const put = await fetch(url, { method: "PUT", headers: { "Content-Type": "image/png" }, body: png });
     if (put.status !== 201) return `PUT ${put.status}`;
+    const again = await fetch(url, { method: "PUT", headers: { "Content-Type": "image/png" }, body: png });
+    if (again.status !== 409) return `a used write URL is ${again.status}, not 409`;
     const done = await acct.until(() => acct.frames.slice(from).find((f) => f.method === "message" && f.params?.message_id === r.result.message_id && f.params.body?.embeds?.[0]?.url), 8000, "the written upload");
     const file = done.params.body.embeds[0].url;
     const fileTrusted = trustedMedia(p, file);
