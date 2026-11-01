@@ -69,7 +69,9 @@ pub enum LiveEnd {
 
 impl LiveEnd {
     /// The `PUT` response, once the text has ended and what was kept is
-    /// published (`published`): apron-server-cloudflare's words.
+    /// published (`published`), in apron-server-cloudflare's words: an
+    /// error status for a write that failed or reached a limit, and 200
+    /// for any other (§4.8.3).
     pub fn response(
         self,
         published: bool,
@@ -78,14 +80,21 @@ impl LiveEnd {
         max: Duration,
         limits: &LiveLimits,
     ) -> (u16, String) {
-        if self == LiveEnd::Unavailable {
-            return (
-                http::STATUS_SERVICE_UNAVAILABLE,
-                "Server storage is unavailable; the text could not be posted.".into(),
-            );
-        }
+        let status = match self {
+            LiveEnd::Complete | LiveEnd::Removed => http::STATUS_OK,
+            LiveEnd::Time => http::STATUS_REQUEST_TIMEOUT,
+            LiveEnd::Size => http::STATUS_REQUEST_ENTITY_TOO_LARGE,
+            LiveEnd::Disconnected => http::STATUS_BAD_REQUEST,
+            LiveEnd::Unavailable => {
+                return (
+                    http::STATUS_SERVICE_UNAVAILABLE,
+                    "Server storage is unavailable; the text could not be posted.".into(),
+                )
+            }
+        };
         if !published && self != LiveEnd::Removed {
-            return LiveEnd::Removed.response(true, kind, limit, max, limits);
+            let (_, text) = LiveEnd::Removed.response(true, kind, limit, max, limits);
+            return (status, text);
         }
         let text = match self {
             LiveEnd::Complete => "Done: the text is posted.".to_owned(),
@@ -110,7 +119,7 @@ impl LiveEnd {
             LiveEnd::Removed => "Stopped: the message or its embed was removed.".to_owned(),
             LiveEnd::Unavailable => unreachable!("answered above"),
         };
-        (http::STATUS_OK, text)
+        (status, text)
     }
 }
 
@@ -798,9 +807,8 @@ impl Server {
     }
 
     /// Serves a live text at its `url` (§4.8.3): the kept text, then more as
-    /// it arrives, in batches, until the text ends. A reader of a message's
-    /// text whose write has not started waits for it; an ended or unknown
-    /// text is 404.
+    /// it arrives, in batches, until the text ends. The url exists from the
+    /// write's start (§4.8.5); an ended or unknown text is 404.
     pub(crate) fn handle_live(self: &Arc<Self>, w: &mut dyn ResponseWriter, r: &mut HttpRequest) {
         if r.method == http::METHOD_OPTIONS {
             let header = w.header();
@@ -825,7 +833,6 @@ impl Server {
             st.live_ids
                 .get(&secret)
                 .and_then(|id| st.embeds.get(id))
-                .filter(|e| !e.message_id.is_empty())
                 .and_then(|e| e.live.as_ref())
                 .map(|live| live.text.clone())
         };
@@ -866,7 +873,7 @@ impl Server {
         };
         set_live_headers(w);
         w.write_header(http::STATUS_OK);
-        // A reader before the write sees its headers now, and waits.
+        // A reader before the first bytes sees its headers now, and waits.
         if !initial.is_empty() && io::Write::write_all(w, &initial).is_err() {
             text.close_reader();
             return;
@@ -898,8 +905,10 @@ impl Server {
         text.close_reader();
     }
 
-    /// A live text's write arrived (§4.8.3): a command's message is posted
-    /// now, the text starts streaming, and its time limit starts.
+    /// A live text's write arrived (§4.8.3): its embed gets its `url`, a
+    /// command's message is posted with it now and a message's is
+    /// republished with it (§4.8.5), the text starts streaming, and its
+    /// time limit starts.
     pub(super) fn start_live_write(
         self: &Arc<Self>,
         w: &mut dyn ResponseWriter,
@@ -908,6 +917,7 @@ impl Server {
     ) {
         let text = {
             let mut st = self.lock();
+            st.add_live_url_locked(id);
             if let Err(err) = st.post_live_message_locked(id) {
                 st.remove_embed_locked(id);
                 drop(st);
@@ -1038,11 +1048,32 @@ impl State {
             post: None,
             text: Arc::new(LiveText::new(kind, limit, max_input)),
         });
+        Ok(id)
+    }
+
+    /// Gives a live embed its `url` as its write starts (§4.8.5): readers
+    /// find the text from then on, and a message's text is republished
+    /// with the url, as an upload is with its file's.
+    fn add_live_url_locked(&mut self, id: &str) {
+        let Some(e) = self.embeds.get_mut(id) else {
+            return;
+        };
         let url = e.live_url();
         e.owned = obj! {"url" => url.as_str()};
-        let secret = e.secret.clone();
-        self.live_ids.insert(secret, id.clone());
-        Ok(id)
+        let (secret, message_id) = (e.secret.clone(), e.message_id.clone());
+        self.live_ids.insert(secret, id.to_owned());
+        self.touch_embed(id);
+        if self.messages.contains_key(&message_id) {
+            self.republish_locked(&message_id, |body| {
+                replace_embed(
+                    body,
+                    id,
+                    Some(&|embed: &mut Object| {
+                        embed.insert("url".into(), url.as_str().into());
+                    }),
+                )
+            });
+        }
     }
 
     pub(super) fn embed_terminal_command(&mut self, cx: &CommandCtx) -> Result<Object, RpcError> {
@@ -1105,9 +1136,9 @@ impl State {
     /// Posts a command's message when its write arrives, from the sender,
     /// in the command's room, with the command's `reply_to`: `{text: "",
     /// embeds: [terminal]}` or `{text, format: "markdown", embeds:
-    /// [append]}`, a new message that wakes as one does (§4.9). A text that
-    /// was started in a message needs nothing. Fails when the room or the
-    /// reply is gone.
+    /// [append]}`, a new message that wakes as one does (§4.9), its embed
+    /// with the `url` the write's start gave it. A text that was started in
+    /// a message needs nothing. Fails when the room or the reply is gone.
     fn post_live_message_locked(&mut self, id: &str) -> Result<(), RpcError> {
         let Some(e) = self.embeds.get(id) else {
             return Ok(());

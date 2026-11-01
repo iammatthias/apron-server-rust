@@ -693,9 +693,9 @@ function streamTo(url) {
     .catch((e) => ({ status: 0, text: String(e.cause ?? e) }));
   return { send: (text) => controller.enqueue(typeof text === "string" ? new TextEncoder().encode(text) : text), end: () => controller.close(), answer };
 }
-// A reader of a live text's url, collecting what it reads as text. It is
-// not awaited before the write starts: through the Cloudflare edge, a
-// reader's response headers arrive with its first bytes.
+// A reader of a live text's url, collecting what it reads as text. Through
+// the Cloudflare edge, a reader's response headers arrive with its first
+// bytes, so it is not awaited before they come.
 function readLive(url) {
   const got = { status: 0, headers: new Headers(), text: "", done: false };
   const decoder = new TextDecoder();
@@ -727,31 +727,40 @@ function readLive(url) {
 // Live text (embed:terminal, embed:append), as the account in the private room.
 // Through the Cloudflare edge a PUT's body reaches the server only when it
 // ends, so these checks write the whole text before they read: they check
-// what readers and the snapshot get, not that the text streams.
+// what readers and the snapshots get, not that the text streams. A live
+// embed has no url until its write starts (§4.8.5), and here the write
+// starts and ends at once, so a reader that opens the url from the snapshot
+// that adds it may find the text already ended: 404 then passes.
 async function liveText(acct, roomID, acctID) {
   const snapshotOf = (c, from, id, pred) => c.until(() => c.frames.slice(from).find((f) => f.method === "message" && f.params?.message_id === id && pred(f.params)), 15000, `a snapshot of ${id}`);
-  await check("live text: a terminal streams to a reader, then keeps its output; its write_url is then 409", async () => {
+  await check("live text: a terminal waits for its writer, gets its url when the write starts, then keeps its output; its write_url is then 409", async () => {
     const from = acct.frames.length;
     const r = await acct.call("message", { room_id: roomID, body: { text: "livecheck build", embeds: [{ kind: "terminal", title: "livecheck" }] } });
     if (r.error) return `error ${JSON.stringify(r.error)}`;
-    const posted = r.frames.find((f) => f.method === "message" && f.params?.message_id === r.result.message_id);
-    const embed = posted?.params?.body?.embeds?.[0] ?? {};
+    const id = r.result.message_id;
+    const posted = r.frames.find((f) => f.method === "message" && f.params?.message_id === id);
+    const waiting = posted?.params?.body?.embeds?.[0] ?? {};
     const write = r.result.embeds?.[0]?.write_url;
-    if (!embed.url?.startsWith(`${base}/live/`) || embed.title !== "livecheck" || !write) return `embed ${JSON.stringify(embed)}, result ${JSON.stringify(r.result)}`;
-    const reader = readLive(embed.url);
+    if (!write || canonical(waiting) !== canonical({ embed_id: r.result.embeds[0].embed_id, kind: "terminal", title: "livecheck" })) return `waiting embed ${JSON.stringify(waiting)}, result ${JSON.stringify(r.result)}`;
     const put = streamTo(write);
     put.send("\x1b[32mok\x1b[0m 1\r\n");
     put.send("done\r\n");
     put.end();
+    const started = await snapshotOf(acct, from, id, (p) => p.body?.embeds?.[0]?.url !== undefined);
+    const embed = started.params.body.embeds[0];
+    if (!embed.url.startsWith(`${base}/live/`) || started.params.prev_log_id !== posted.params.log_id || canonical({ ...embed, url: "" }) !== canonical({ ...waiting, url: "" })) return `started ${JSON.stringify(started.params)}`;
+    const reader = readLive(embed.url);
     const answer = await put.answer;
     if (answer.status !== 200 || answer.text !== "Done: the text is posted.\n") return `writer ${answer.status} ${JSON.stringify(answer.text)}`;
     await reader.ended;
-    const headers = [reader.status, reader.headers.get("content-type"), reader.headers.get("x-content-type-options"), reader.headers.get("cache-control")].join(" ");
-    if (headers !== "200 text/plain; charset=utf-8 nosniff no-store, no-transform") return `reader ${headers}`;
-    const finished = await snapshotOf(acct, from, r.result.message_id, (p) => p.body?.embeds?.[0]?.output !== undefined);
+    const finished = await snapshotOf(acct, from, id, (p) => p.body?.embeds?.[0]?.output !== undefined);
     const kept = finished.params.body.embeds[0];
-    if (kept.output !== "\x1b[32mok\x1b[0m 1\r\ndone\r\n" || kept.url !== undefined) return `finished ${JSON.stringify(kept)}`;
-    if (reader.text !== kept.output) return `reader read ${JSON.stringify(reader.text)}`;
+    if (kept.output !== "\x1b[32mok\x1b[0m 1\r\ndone\r\n" || kept.url !== undefined || finished.params.prev_log_id !== started.params.log_id) return `finished ${JSON.stringify(finished.params)}`;
+    if (reader.status === 200) {
+      const headers = [reader.headers.get("content-type"), reader.headers.get("x-content-type-options"), reader.headers.get("cache-control")].join(" ");
+      if (headers !== "text/plain; charset=utf-8 nosniff no-store, no-transform") return `reader ${headers}`;
+      if (reader.text !== kept.output) return `reader read ${JSON.stringify(reader.text)}`;
+    } else if (reader.status !== 404) return `reader ${reader.status} ${JSON.stringify(reader.text)}`;
     const again = await fetch(write, { method: "PUT", body: "again" });
     if (again.status !== 409) return `write_url again ${again.status}`;
     return same((await fetch(embed.url)).status, 404);
@@ -768,7 +777,7 @@ async function liveText(acct, roomID, acctID) {
     put.end();
     const answer = await put.answer;
     const posted = await acct.until(() => acct.frames.slice(from).find((f) => f.method === "message" && f.params?.from?.user_id === acctID && f.params?.body?.embeds?.[0]?.kind === "append"), 15000, "the append's message");
-    if (posted.params.body.text !== "**livecheck:**\n\n" || posted.params.body.format !== "markdown") return `posted ${JSON.stringify(posted.params.body)}`;
+    if (posted.params.body.text !== "**livecheck:**\n\n" || posted.params.body.format !== "markdown" || !posted.params.body.embeds[0].url?.startsWith(`${base}/live/`)) return `posted ${JSON.stringify(posted.params.body)}`;
     if (answer.status !== 200) return `writer ${answer.status} ${JSON.stringify(answer.text)}`;
     const merged = await snapshotOf(acct, from, posted.params.message_id, (p) => p.prev_log_id !== undefined);
     return same(canonical(merged.params.body), canonical({ text: "**livecheck:**\n\n Hello world, cafe!", format: "markdown" }));

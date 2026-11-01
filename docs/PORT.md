@@ -133,6 +133,47 @@ cases), `activity_test.rs` (read receipts), `server_messages_test.rs` (og
 media). The differences kept are in `docs/DEVIATIONS.md` (live text, og
 media, read receipts).
 
+### shazow/apron 6687409 and 44bf5eb
+
+Ported on 2026-11-01, moving the shazow/apron pin from 1e12d15 to 44bf5eb.
+apron-server-cloudflare's port of #106 (8651282) is on the unmerged branch
+`claude/apron-web-live-typing-7aptrn`, so its pin stays at f27167f and this
+server follows the spec, with that commit as the shape.
+
+- 6687409 (#106): a live embed has no `url` until its write starts. The
+  creating broadcast carries `{embed_id, kind, title?}`, and the result
+  gives `write_url` to the sender only. The write's start sets the embed's
+  owned `url`, registers it under `/live/`, and republishes a message's
+  text with it at a new `log_id` (`add_live_url_locked` in
+  `src/server/live_text.rs`, the pattern an upload's finish uses). A
+  command's message is posted at that moment with its `url`, as before, so
+  it gets no extra snapshot. No reader can `GET url` before the write,
+  since nothing has the url. A reader still waits for the first bytes.
+- There was no grace period here. A writer that disconnects already ended
+  the text at once; `test_a_writer_that_disconnects_ends_the_text` pins it.
+- A `PUT` to `write_url` from any origin, preflight included, was already
+  allowed (`set_embed_cors` in `src/server/uploads.rs`);
+  `test_writes_are_allowed_from_any_origin` pins it. The `PUT` is answered
+  when the write finishes, as before, and now with an error status at a
+  limit: 413 for size, 408 for time, and 400 for a writer that went away.
+  It gets 200 when it completed or a save or deletion ended it. Cloudflare
+  main answers 200 at limits, so docs/DEVIATIONS.md lists it.
+- 44bf5eb (#107): `tests/fixtures/terminal.json` and its `validate.py`
+  checks are client screen fixtures, run by terminal.apron.chat's
+  `npm test` (DEVELOPMENT.md). The server keeps bytes with `keep_last`, so
+  there is nothing to port.
+- Cloudflare 8c112de, on the same branch, turns off the zone's request body
+  buffering for `PUT` on `/w/`. The homelab's edge still buffers `PUT`
+  bodies, so `tools/deploy/live-check.mjs` still writes whole texts.
+
+Checked: `cargo test`, and the protocol's `tests/conformance/conform.py`
+at 44bf5eb against a local `aprond --store memory` with the interop shim's
+limit flags, as a guest. All five live text checks pass. The last two ran
+in a second run without the first three, because a guest's live text start
+burst is 3 and no flag changes it. The 6 failures and 1 warning are guest
+policy (guests cannot rename, set a profile, create rooms or private
+rooms, or register push) and the frame size limit, none in live text.
+
 ## Migrating a guest_<n> account
 
 Accounts registered before 2026-10-28, such as the live `guest_1` with its

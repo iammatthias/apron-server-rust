@@ -393,6 +393,29 @@ fn snapshot_of(c: &TestClient, message_id: &str) -> Object {
     }
 }
 
+/// Reads frames until the snapshot of `message_id` that gives its live
+/// embed a `url` (§4.8.5), returning the snapshot and the url.
+fn url_added(c: &TestClient, message_id: &str) -> (Object, String) {
+    let snapshot = snapshot_of(c, message_id);
+    let url = body_of(&snapshot)["embeds"].as_list()[0]
+        .as_object()
+        .unwrap()
+        .get("url")
+        .and_then(Json::as_str)
+        .unwrap_or_else(|| panic!("the next snapshot has no url: {snapshot:?}"))
+        .to_owned();
+    (snapshot, url)
+}
+
+/// The live embed of a message's first snapshot, which has no `url` while
+/// it waits for its writer (§4.8.5).
+fn waiting_embed(result: &Object) -> Object {
+    body_of(result["snapshot"].as_object().unwrap())["embeds"].as_list()[0]
+        .as_object()
+        .unwrap()
+        .clone()
+}
+
 fn live_config() -> Config {
     default_config()
 }
@@ -562,15 +585,10 @@ fn test_append_edits_reach_readers_and_the_snapshot() {
         "revise",
         obj! {"body" => obj! {"text" => "Plan:", "format" => "markdown", "embeds" => vec![Json::from(obj! {"kind" => "append"})]}},
     );
-    let snapshot = result["snapshot"].as_object().unwrap();
-    let url = body_of(snapshot)["embeds"].as_list()[0]
-        .as_object()
-        .unwrap()["url"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    let early = Reader::open(&url);
+    let message_id = result["message_id"].as_str().unwrap().to_owned();
     let (put, done) = stream_to(written(&result)["write_url"].as_str().unwrap());
+    let (_, url) = url_added(&writer, &message_id);
+    let early = Reader::open(&url);
     put.write_shared(b"\x08\x08 first draft\x0c").unwrap();
     put.write_shared(b" Hello wrold\x08\x08\x08\x08").unwrap();
     early.wait_for(b"wrold\x08\x08\x08\x08");
@@ -589,7 +607,7 @@ fn test_append_edits_reach_readers_and_the_snapshot() {
         encode("\x08\x08 first draft\x0c Hello wrold\x08\x08\x08\x08orld, caf\u{e9}\x08e \u{1F680}\x08!")
     );
     assert_eq!(late.ended(), encode(" Hello world, cafe \u{1F680}\x08!"));
-    let merged = snapshot_of(&writer, result["message_id"].as_str().unwrap());
+    let merged = snapshot_of(&writer, &message_id);
     assert_eq!(
         body_of(&merged),
         obj! {"text" => "Plan: Hello world, cafe !", "format" => "markdown"}
@@ -616,7 +634,7 @@ fn test_append_write_stops_at_what_it_keeps() {
     assert_eq!(
         answer(&done),
         (
-            200,
+            413,
             "Stopped at the 4 KB limit; what was kept is posted.\n".into()
         )
     );
@@ -639,8 +657,11 @@ fn test_append_write_stops_at_what_it_keeps() {
     let _ = put.write_shared(&encode("\u{e9} and more"));
     put.close();
     assert_eq!(
-        answer(&done).1,
-        "Stopped at the 4 KB limit; what was kept is posted.\n"
+        answer(&done),
+        (
+            413,
+            "Stopped at the 4 KB limit; what was kept is posted.\n".into()
+        )
     );
     assert_eq!(reader.ended(), b"x");
     assert_eq!(
@@ -653,7 +674,7 @@ fn test_append_write_stops_at_what_it_keeps() {
 }
 
 #[test]
-fn test_message_embeds_start_live_text_and_readers_wait() {
+fn test_message_embeds_get_their_url_when_the_write_starts() {
     let server = new_test_server(live_config());
     let mut writer = dial_test_client(&server);
     writer.drain();
@@ -662,35 +683,51 @@ fn test_message_embeds_start_live_text_and_readers_wait() {
         "post",
         obj! {"body" => obj! {"text" => "Build:", "embeds" => vec![Json::from(obj! {"kind" => "terminal", "title" => "ci", "output" => "forged", "og" => obj! {"title" => "x"}})]}},
     );
+    let message_id = result["message_id"].as_str().unwrap().to_owned();
     let posted = result["snapshot"].as_object().unwrap().clone();
-    let live = body_of(&posted)["embeds"].as_list()[0]
-        .as_object()
-        .unwrap()
-        .clone();
-    let embed_id = live["embed_id"].clone();
-    let url = live["url"].as_str().unwrap().to_owned();
+    let embed_id = waiting_embed(&result)["embed_id"].clone();
     assert_eq!(
-        live,
-        obj! {"embed_id" => embed_id.clone(), "kind" => "terminal", "title" => "ci", "url" => url.as_str()}
+        waiting_embed(&result),
+        obj! {"embed_id" => embed_id.clone(), "kind" => "terminal", "title" => "ci"},
+        "the embed waits for its writer, with no url"
     );
     assert_eq!(
         written(&result).keys().cloned().collect::<Vec<_>>(),
         ["embed_id", "kind", "write_url"]
     );
+    assert!(
+        server.app.lock().live_ids.is_empty(),
+        "no url before the write"
+    );
+    let (put, done) = stream_to(written(&result)["write_url"].as_str().unwrap());
+    let (started, url) = url_added(&writer, &message_id);
+    assert!(
+        url.starts_with(&format!("{}{LIVE_PATH}", server.http.url)),
+        "{url}"
+    );
+    assert_eq!(
+        body_of(&started),
+        obj! {"text" => "Build:", "format" => "plain", "embeds" => vec![Json::from(obj! {
+            "embed_id" => embed_id.clone(), "kind" => "terminal", "title" => "ci", "url" => url.as_str(),
+        })]}
+    );
+    assert_eq!(started["prev_log_id"], posted["log_id"]);
+    assert_ne!(started["log_id"], posted["log_id"]);
+    // A reader before the first bytes waits for them.
     let early = Reader::open(&url);
     assert_eq!(early.status, 200);
     std::thread::sleep(std::time::Duration::from_millis(50));
     assert!(
         !early.got.lock().unwrap().1,
-        "a reader before the write ended"
+        "a reader before the first bytes ended"
     );
-    let (put, done) = stream_to(written(&result)["write_url"].as_str().unwrap());
     put.write_shared(b"step 1\n").unwrap();
     early.wait_for(b"step 1\n");
     put.close();
-    answer(&done);
+    assert_eq!(answer(&done), (200, "Done: the text is posted.\n".into()));
     assert_eq!(early.ended(), b"step 1\n");
-    let finished = snapshot_of(&writer, result["message_id"].as_str().unwrap());
+    let finished = snapshot_of(&writer, &message_id);
+    assert_eq!(finished["prev_log_id"], started["log_id"]);
     assert_eq!(
         body_of(&finished),
         obj! {"text" => "Build:", "format" => "plain", "embeds" => vec![Json::from(obj! {
@@ -766,7 +803,7 @@ fn test_saving_without_the_embed_ends_the_text() {
     );
     let (put, done) = stream_to(written(&result)["write_url"].as_str().unwrap());
     put.write_shared(b"partial").unwrap();
-    wait_for(|| server.app.lock().writes.is_empty());
+    url_added(&writer, result["message_id"].as_str().unwrap());
     save(
         &mut writer,
         "stop",
@@ -799,7 +836,7 @@ fn test_time_limits_by_role() {
     assert_eq!(
         answer(&done),
         (
-            200,
+            408,
             "Stopped at the 0-second limit; what was kept is posted.\n".into()
         )
     );
@@ -813,8 +850,11 @@ fn test_time_limits_by_role() {
     put.write_shared(b"tick\n").unwrap();
     let started = std::time::Instant::now();
     assert_eq!(
-        answer(&done).1,
-        "Stopped at the 1-second limit; what was kept is posted.\n"
+        answer(&done),
+        (
+            408,
+            "Stopped at the 1-second limit; what was kept is posted.\n".into()
+        )
     );
     assert!(started.elapsed() >= std::time::Duration::from_millis(900));
     put.close();
@@ -900,12 +940,8 @@ fn test_start_and_reader_limits() {
         "post",
         obj! {"body" => obj! {"text" => "x", "embeds" => vec![Json::from(obj! {"kind" => "terminal"})]}},
     );
-    let url = body_of(result["snapshot"].as_object().unwrap())["embeds"].as_list()[0]
-        .as_object()
-        .unwrap()["url"]
-        .as_str()
-        .unwrap()
-        .to_owned();
+    let (put, done) = stream_to(written(&result)["write_url"].as_str().unwrap());
+    let (_, url) = url_added(&writer, result["message_id"].as_str().unwrap());
     let one = Reader::open(&url);
     let two = Reader::open(&url);
     assert_eq!((one.status, two.status), (200, 200));
@@ -922,7 +958,6 @@ fn test_start_and_reader_limits() {
             "This live text has as many readers as it may have\n".into()
         )
     );
-    let (put, done) = stream_to(written(&result)["write_url"].as_str().unwrap());
     put.write_shared(b"x").unwrap();
     put.close();
     answer(&done);
@@ -939,12 +974,8 @@ fn test_start_and_reader_limits() {
         "again",
         obj! {"body" => obj! {"text" => "x", "embeds" => vec![Json::from(obj! {"kind" => "terminal"})]}},
     );
-    let url = body_of(result["snapshot"].as_object().unwrap())["embeds"].as_list()[0]
-        .as_object()
-        .unwrap()["url"]
-        .as_str()
-        .unwrap()
-        .to_owned();
+    let (put, done) = stream_to(written(&result)["write_url"].as_str().unwrap());
+    let (_, url) = url_added(&writer, result["message_id"].as_str().unwrap());
     let readers = [Reader::open(&url), Reader::open(&url)];
     assert_eq!(
         readers.iter().map(|r| r.status).collect::<Vec<_>>(),
@@ -958,7 +989,6 @@ fn test_start_and_reader_limits() {
             "This live text has been read as often as it may be\n".into()
         )
     );
-    let (put, done) = stream_to(written(&result)["write_url"].as_str().unwrap());
     put.write_shared(b"x").unwrap();
     put.close();
     answer(&done);
@@ -1008,17 +1038,15 @@ fn test_live_urls_take_get_and_head_only() {
         "post",
         obj! {"body" => obj! {"text" => "x", "embeds" => vec![Json::from(obj! {"kind" => "append"})]}},
     );
-    let url = body_of(result["snapshot"].as_object().unwrap())["embeds"].as_list()[0]
-        .as_object()
-        .unwrap()["url"]
-        .as_str()
-        .unwrap()
-        .to_owned();
+    let (put, done) = stream_to(written(&result)["write_url"].as_str().unwrap());
+    let (_, url) = url_added(&writer, result["message_id"].as_str().unwrap());
     let (status, header, body) = http_do("HEAD", &url, None, "");
     assert_eq!(
         (status, header.get("Content-Security-Policy"), body.len()),
         (200, Some("default-src 'none'"), 0)
     );
+    put.close();
+    answer(&done);
 }
 
 /// What a text kept while it streams is in memory only: a restart keeps a
@@ -1049,6 +1077,7 @@ fn test_a_finished_terminal_outlives_a_restart_and_an_open_one_does_not() {
         .0,
         200
     );
+    url_added(&writer, finished["message_id"].as_str().unwrap());
     snapshot_of(&writer, finished["message_id"].as_str().unwrap());
     let open = super::helpers::post_embeds(
         &mut writer,
@@ -1072,4 +1101,78 @@ fn test_a_finished_terminal_outlives_a_restart_and_an_open_one_does_not() {
         Json::from(obj! {"text" => "b", "format" => "plain"})
     );
     assert!(st.live_ids.is_empty());
+}
+
+/// A web writer's `PUT` comes from another origin (§4.8.3): its preflight
+/// and its answer allow any.
+#[test]
+fn test_writes_are_allowed_from_any_origin() {
+    let server = new_test_server(live_config());
+    let mut writer = dial_test_client(&server);
+    writer.drain();
+    let (_, result) = live_command(&mut writer, "/embed-append", Object::new());
+    let write_url = written(&result)["write_url"].as_str().unwrap().to_owned();
+    let (status, header, _) = http_do("OPTIONS", &write_url, None, "");
+    assert_eq!(
+        (
+            status,
+            header.get("Access-Control-Allow-Origin"),
+            header.get("Access-Control-Allow-Methods"),
+            header.get("Access-Control-Allow-Headers"),
+        ),
+        (204, Some("*"), Some("PUT, OPTIONS"), Some("Content-Type"))
+    );
+    let (status, header, body) = http_do("PUT", &write_url, Some(b"hi"), "text/plain");
+    assert_eq!(
+        (
+            status,
+            header.get("Access-Control-Allow-Origin"),
+            header.get("Content-Type"),
+            String::from_utf8_lossy(&body).into_owned()
+        ),
+        (
+            200,
+            Some("*"),
+            Some("text/plain; charset=utf-8"),
+            "Done: the text is posted.\n".into()
+        )
+    );
+}
+
+/// A writer that disconnects ends the text at once, with what arrived
+/// (§4.8.5): there is no grace period.
+#[test]
+fn test_a_writer_that_disconnects_ends_the_text() {
+    use std::io::Write;
+    let server = new_test_server(live_config());
+    let mut writer = dial_test_client(&server);
+    writer.drain();
+    let result = super::helpers::post_embeds(
+        &mut writer,
+        "post",
+        obj! {"body" => obj! {"text" => "Build:", "embeds" => vec![Json::from(obj! {"kind" => "terminal"})]}},
+    );
+    let message_id = result["message_id"].as_str().unwrap().to_owned();
+    let write_url = written(&result)["write_url"].as_str().unwrap().to_owned();
+    let address = server.http.url.trim_start_matches("http://").to_owned();
+    let path = &write_url[server.http.url.len()..];
+    let mut socket = std::net::TcpStream::connect(&address).unwrap();
+    write!(
+        socket,
+        "PUT {path} HTTP/1.1\r\nHost: {address}\r\nContent-Length: 1000\r\n\r\nhalf\n"
+    )
+    .unwrap();
+    url_added(&writer, &message_id);
+    let cut = std::time::Instant::now();
+    drop(socket);
+    let finished = snapshot_of(&writer, &message_id);
+    assert!(cut.elapsed() < std::time::Duration::from_secs(1));
+    assert_eq!(
+        body_of(&finished)["embeds"].as_list()[0]
+            .as_object()
+            .unwrap()
+            .get("output"),
+        Some(&Json::from("half\n"))
+    );
+    assert!(server.app.lock().live_ids.is_empty());
 }
