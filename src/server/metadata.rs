@@ -427,7 +427,8 @@ impl State {
         purpose: EmbedPurpose,
     ) -> Object {
         let id = self.next_embed_id();
-        self.new_write_locked(c, &id, "upload", "");
+        let window = self.config.upload_start_timeout;
+        self.new_write_locked(c, &id, "upload", "", window);
         let uploader = self.client_user(c).unwrap_or_default();
         let e = self.embeds.get_mut(&id).expect("just registered");
         e.purpose = purpose;

@@ -36,9 +36,6 @@ pub const DEFAULT_MAX_UPLOAD_STORAGE: i64 = 1000 << 20;
 /// one record.
 pub const MAX_HISTORY_REPLY_BYTES: usize = 256 << 10;
 pub const DEFAULT_UPLOAD_START_TIMEOUT: Duration = Duration::from_mins(5);
-pub const DEFAULT_STREAM_KEEP_BYTES: usize = 64 << 10;
-pub const DEFAULT_STREAM_MAX_BYTES: i64 = 16 << 20;
-pub const DEFAULT_STREAM_MAX_DURATION: Duration = Duration::from_hours(1);
 pub const DEFAULT_MAX_LISTED_MEMBERS: usize = 1000;
 /// The delay suggested by connection-level retry_after errors (capacity and
 /// shutdown).
@@ -86,9 +83,9 @@ pub struct Config {
     pub max_upload_storage_bytes: i64,
     pub upload_dir: String,
     pub upload_start_timeout: Duration,
-    pub stream_keep_bytes: usize,
-    pub stream_max_bytes: i64,
-    pub stream_max_duration: Duration,
+    /// The limits live text is held to (§4.8.3), Cloudflare's Workers Paid
+    /// policy by default.
+    pub live: super::live_text::LiveLimits,
     /// Keeps the server's state across restarts; `None` keeps it in memory
     /// for this Server only. The server closes it on `shutdown`.
     pub store: Option<Arc<dyn Store>>,
@@ -204,9 +201,7 @@ pub fn default_config() -> Config {
         max_upload_storage_bytes: DEFAULT_MAX_UPLOAD_STORAGE,
         upload_dir: String::new(),
         upload_start_timeout: DEFAULT_UPLOAD_START_TIMEOUT,
-        stream_keep_bytes: DEFAULT_STREAM_KEEP_BYTES,
-        stream_max_bytes: DEFAULT_STREAM_MAX_BYTES,
-        stream_max_duration: DEFAULT_STREAM_MAX_DURATION,
+        live: super::live_text::LiveLimits::default(),
         store: None,
         disable_push: false,
         allow_insecure_push: false,
@@ -280,15 +275,6 @@ impl Config {
         }
         if self.upload_start_timeout.as_nanos() <= 0 {
             self.upload_start_timeout = defaults.upload_start_timeout;
-        }
-        if self.stream_keep_bytes == 0 {
-            self.stream_keep_bytes = defaults.stream_keep_bytes;
-        }
-        if self.stream_max_bytes <= 0 {
-            self.stream_max_bytes = defaults.stream_max_bytes;
-        }
-        if self.stream_max_duration.as_nanos() <= 0 {
-            self.stream_max_duration = defaults.stream_max_duration;
         }
         self.public_url = self.public_url.trim_end_matches('/').to_owned();
         self

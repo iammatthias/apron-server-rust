@@ -358,6 +358,7 @@ pub enum Scope {
     Frame,
     History,
     Registration,
+    LiveStart,
 }
 
 /// What a client holds back after a refusal (EXTENSIONS.md `ext:limits`):
@@ -775,6 +776,56 @@ impl State {
         self.limits
             .charge(Scope::Upload, &charges, n)
             .map_err(|refusal| refusal.error(Some(Category::Upload)))
+    }
+
+    /// Charges a live text start (§4.8.3) to its user (a guest: the guests
+    /// of its IP), its IP and the server, as Cloudflare's startLiveText
+    /// does: `starts_per_user` at once and as many again each
+    /// `start_window`, twice that for an IP, and `starts_per_user_day` and
+    /// `starts_per_day` a UTC day. A start weighs LIVE_START_WEIGHT, so that
+    /// a rate of starts per window, under one a minute, is whole events a
+    /// minute.
+    pub fn charge_live_start_locked(&mut self, c: &Client, user_id: &str) -> Result<(), RpcError> {
+        const LIVE_START_WEIGHT: u32 = 10;
+        let live = &self.config.live;
+        let window_minutes = (live.start_window.as_nanos() / time::MINUTE.as_nanos()).max(1) as u32;
+        let rate = |starts: u32| Rate {
+            per_minute: starts * LIVE_START_WEIGHT / window_minutes,
+            burst: starts * LIVE_START_WEIGHT,
+        };
+        let weighed = |starts: u32| starts * LIVE_START_WEIGHT;
+        let own = match self.users.get(user_id) {
+            Some(u) if u.persists() => Principal::User(user_id.to_owned()),
+            _ => Principal::Guests(c.ip_key.clone()),
+        };
+        let ip = Principal::Ip(c.ip_key.clone());
+        let charges = [
+            Charge::new(
+                &own,
+                Allowance::rate(
+                    rate(live.starts_per_user),
+                    weighed(live.starts_per_user_day),
+                ),
+                "Live text limit reached",
+            )
+            .daily("Daily live text limit reached"),
+            Charge::new(
+                &ip,
+                Allowance::rate(rate(live.starts_per_ip), 0),
+                "Live text limit reached",
+            ),
+            Charge::new(
+                &Principal::Server,
+                Allowance::rate(
+                    Rate::per_minute(weighed(live.starts_per_day)),
+                    weighed(live.starts_per_day),
+                ),
+                "Daily live text limit reached for the server",
+            ),
+        ];
+        self.limits
+            .charge(Scope::LiveStart, &charges, LIVE_START_WEIGHT)
+            .map_err(|refusal| refusal.error(None))
     }
 
     /// Charges one registration from `c`'s IP to its day and the server's,

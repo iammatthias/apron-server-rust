@@ -1,6 +1,7 @@
 //! Server commands (§4.1), run from a `command` request and answered with
 //! scoped system notices (Appendix A.1). In the order /help lists them:
-//! /admin, /avatar, /emoji, /help, /invite-bot, /invite-code,
+//! /admin, /avatar, /embed-append, /embed-terminal, /emoji, /help,
+//! /invite-bot, /invite-code,
 //! /invite-device, /invite-purge, /invite-token, /kick, /passkeys, /purge,
 //! /rename, /role, /server and /toggle.
 
@@ -24,7 +25,9 @@ pub const PRIVATE_NOTICE_ID: &str = "~private";
 pub const PRIVATE_NOTICE_NAME: &str = "System message to you";
 
 /// What a command runs with: the connection and user that sent it, the room
-/// it runs in, the message body, and the arguments after the command word.
+/// it runs in, the message body, its reply_to, the arguments after the
+/// command word, and the command text after it untrimmed but for the
+/// spaces and line break that follow the word (`rest`).
 /// A command that revokes the asking connection's own sign-in sets
 /// `close_after`, which closes it once its result is sent.
 #[derive(Clone, Copy)]
@@ -33,7 +36,9 @@ pub(super) struct CommandCtx<'a> {
     pub user_id: &'a str,
     pub room_id: &'a str,
     pub body: &'a Object,
+    pub reply_to: Option<&'a str>,
     pub args: &'a str,
+    pub rest: &'a str,
     pub close_after: &'a Cell<Option<RpcError>>,
 }
 
@@ -122,6 +127,26 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         writes: true,
         feature: Some(Feature::Uploads),
         run: State::avatar_command,
+    },
+    ServerCommand {
+        name: "embed-append",
+        usage: "/embed-append [markdown]",
+        help: "get a link to stream text into a message that starts with [markdown], such as an LLM's reply: the message appears when the stream starts",
+        audience: Audience::Everyone,
+        forgives_params: false,
+        writes: true,
+        feature: Some(Feature::LiveText),
+        run: State::embed_append_command,
+    },
+    ServerCommand {
+        name: "embed-terminal",
+        usage: "/embed-terminal [title]",
+        help: "get a link to stream a terminal (80×40) into this room, such as a build: the message appears when the stream starts",
+        audience: Audience::Everyone,
+        forgives_params: false,
+        writes: true,
+        feature: Some(Feature::LiveText),
+        run: State::embed_terminal_command,
     },
     ServerCommand {
         name: "emoji",
@@ -255,8 +280,8 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
     },
     ServerCommand {
         name: "toggle",
-        usage: "/toggle <activity|uploads|presence|addmember>",
-        help: "turn typing activity, uploads, user status (presence), or users adding others to rooms (addmember) off or on for everyone",
+        usage: "/toggle <activity|uploads|presence|addmember|livetext>",
+        help: "turn typing activity, uploads, user status (presence), users adding others to rooms (addmember), or live text (livetext: terminals and appends) off or on for everyone",
         audience: Audience::Admins,
         forgives_params: true,
         writes: true,
@@ -352,10 +377,41 @@ impl State {
         let Some(rest) = line.strip_prefix('/') else {
             return Err(invalid_params("A command starts with /; try /help").forgiven());
         };
-        let (word, args) = rest.split_once(' ').unwrap_or((rest, ""));
+        let (word, args) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
         let name = word.to_lowercase();
+        // A live text embed starts in a message, or with its own command.
+        let live_embed = body
+            .get("embeds")
+            .map(Json::as_list)
+            .unwrap_or(&[])
+            .iter()
+            .any(|embed| {
+                embed
+                    .as_object()
+                    .and_then(|e| e.get("kind"))
+                    .and_then(Json::as_str)
+                    .and_then(super::live_text::LiveKind::parse)
+                    .is_some()
+            });
+        if live_embed && !name.starts_with("embed-") {
+            return Err(invalid_params(
+                "A terminal or append embed goes in a message; or use /embed-terminal or /embed-append",
+            ));
+        }
+        // What follows the command word and its spaces, and one line break.
+        let after = text.trim_start();
+        let after = after[after.find(char::is_whitespace).unwrap_or(after.len())..]
+            .trim_start_matches([' ', '\t']);
+        let after = after
+            .strip_prefix("\r\n")
+            .or_else(|| after.strip_prefix('\n'))
+            .unwrap_or(after);
         for command in SERVER_COMMANDS {
-            if command.name == name {
+            // Live text's commands are unknown while it is off.
+            if command.name == name
+                && !(command.feature == Some(Feature::LiveText)
+                    && !self.feature_on(Feature::LiveText))
+            {
                 if command.writes && self.read_only_guest(&user_id) {
                     return Err(RpcError::new(CODE_DENIED, GUEST_READ_ONLY));
                 }
@@ -371,7 +427,9 @@ impl State {
                     user_id: &user_id,
                     room_id: &room_id,
                     body: &body,
+                    reply_to: reply_id.as_deref(),
                     args: args.trim(),
+                    rest: after,
                     close_after: &close_after,
                 };
                 let result = (command.run)(self, &cx).map_err(|err| {

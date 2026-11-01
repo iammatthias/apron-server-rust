@@ -95,8 +95,7 @@ impl LiveEnd {
             ),
             LiveEnd::Size => match kind {
                 LiveKind::Append => format!(
-                    "Stopped at the {} limit; the first {} is posted.",
-                    byte_size(limit),
+                    "Stopped at the {} limit; what was kept is posted.",
                     byte_size(limit)
                 ),
                 LiveKind::Terminal => format!(
@@ -105,7 +104,9 @@ impl LiveEnd {
                     byte_size(limit)
                 ),
             },
-            LiveEnd::Disconnected => "The write was interrupted; what arrived is posted.".to_owned(),
+            LiveEnd::Disconnected => {
+                "The write was interrupted; what arrived is posted.".to_owned()
+            }
             LiveEnd::Removed => "Stopped: the message or its embed was removed.".to_owned(),
             LiveEnd::Unavailable => unreachable!("answered above"),
         };
@@ -237,16 +238,16 @@ pub fn terminal_output(bytes: &[u8]) -> String {
 
 /// A byte count as people read it: 4 KB, 32 KB, 2 MB, 4,000 bytes.
 pub fn byte_size(bytes: usize) -> String {
-    if bytes >= 1 << 20 && bytes % (1 << 20) == 0 {
+    if bytes >= 1 << 20 && bytes.is_multiple_of(1 << 20) {
         return format!("{} MB", bytes >> 20);
     }
-    if bytes >= 1 << 10 && bytes % (1 << 10) == 0 {
+    if bytes >= 1 << 10 && bytes.is_multiple_of(1 << 10) {
         return format!("{} KB", bytes >> 10);
     }
     let digits = bytes.to_string();
     let mut grouped = String::new();
     for (i, c) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i) % 3 == 0 {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
             grouped.push(',');
         }
         grouped.push(c);
@@ -302,7 +303,7 @@ pub fn command_notice(
         .join("\n"),
         LiveKind::Append => [
             format!(
-                "Stream text into this room within {window} (up to {seconds} seconds and {}; it is appended to your message as markdown):",
+                "Stream text into this room within {window} (up to {seconds} seconds and {}; it is appended to your message as markdown, revised by backspace and form feed):",
                 byte_size(limit)
             ),
             String::new(),
@@ -316,8 +317,9 @@ pub fn command_notice(
     }
 }
 
-/// The kept bytes of one text: the last part for a terminal, the first for
-/// an append (apron-server-cloudflare's LiveBuffer).
+/// The kept bytes of one text (apron-server-cloudflare's LiveBuffer): the
+/// last part for a terminal; for an append, its text so far as decoded and
+/// edited (§4.8.5), re-encoded as UTF-8, its first part.
 #[derive(Debug)]
 pub struct LiveBuffer {
     kind: LiveKind,
@@ -329,6 +331,9 @@ pub struct LiveBuffer {
     /// An append that reached its limit keeps nothing more.
     pub full: bool,
     bytes: Vec<u8>,
+    /// An append's bytes of a character split across chunks, which the next
+    /// chunk completes.
+    partial: Vec<u8>,
 }
 
 impl LiveBuffer {
@@ -339,11 +344,14 @@ impl LiveBuffer {
             received: 0,
             full: false,
             bytes: Vec::new(),
+            partial: Vec::new(),
         }
     }
 
-    /// Takes a chunk and returns the bytes readers get now: all of a
-    /// terminal's chunk, and an append's up to its limit.
+    /// Takes a chunk and returns the bytes readers get now: a terminal's
+    /// chunk; for an append, the whole characters it decoded up to its
+    /// limit, edits included (clients apply them), so a reader that
+    /// connects later can follow the edited text.
     pub fn push(&mut self, chunk: &[u8]) -> Vec<u8> {
         self.received += chunk.len();
         match self.kind {
@@ -363,17 +371,95 @@ impl LiveBuffer {
                 if self.full {
                     return Vec::new();
                 }
-                if self.bytes.len() + chunk.len() <= self.limit {
-                    self.bytes.extend_from_slice(chunk);
-                    return chunk.to_vec();
-                }
-                let before = self.bytes.len();
-                self.bytes.extend_from_slice(chunk);
-                let kept = keep_first(&self.bytes, self.limit).to_vec();
-                self.bytes = kept;
-                self.full = true;
-                self.bytes[before.min(self.bytes.len())..].to_vec()
+                let mut input = std::mem::take(&mut self.partial);
+                input.extend_from_slice(chunk);
+                let text = self.decode_stream(&input);
+                self.append(&text)
             }
+        }
+    }
+
+    /// Decodes an append's bytes as WHATWG's streaming UTF-8 decode does:
+    /// each maximal invalid subsequence reads as U+FFFD, and an incomplete
+    /// character at the end waits for the next chunk.
+    fn decode_stream(&mut self, mut input: &[u8]) -> String {
+        let mut text = String::new();
+        loop {
+            match std::str::from_utf8(input) {
+                Ok(valid) => {
+                    text.push_str(valid);
+                    return text;
+                }
+                Err(e) => {
+                    let (valid, rest) = input.split_at(e.valid_up_to());
+                    text.push_str(std::str::from_utf8(valid).expect("checked"));
+                    match e.error_len() {
+                        Some(n) => {
+                            text.push('\u{FFFD}');
+                            input = &rest[n..];
+                        }
+                        None => {
+                            self.partial = rest.to_vec();
+                            return text;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Ends an append's text: a character left incomplete reads as U+FFFD
+    /// (§4.8.3), unless the write was `cut` at its input limit, which keeps
+    /// the text up to a whole character (§4.8.5). Returns what readers get
+    /// of it.
+    pub fn end(&mut self, cut: bool) -> Vec<u8> {
+        let partial = std::mem::take(&mut self.partial);
+        if self.kind != LiveKind::Append || self.full || cut || partial.is_empty() {
+            return Vec::new();
+        }
+        self.append("\u{FFFD}")
+    }
+
+    /// Adds decoded text to an append (§4.8.5): backspace removes the code
+    /// point before it, never reaching before the live text, and form feed
+    /// removes all of it. The limit counts the edited text: at the first
+    /// character that does not fit, the append is full.
+    fn append(&mut self, text: &str) -> Vec<u8> {
+        let before = self.bytes.len();
+        let mut edited = false;
+        let mut read = 0;
+        for (at, c) in text.char_indices() {
+            match c {
+                '\u{0C}' => {
+                    self.bytes.clear();
+                    edited = true;
+                }
+                '\u{08}' => {
+                    while let Some(b) = self.bytes.pop() {
+                        if b & 0xc0 != 0x80 {
+                            break;
+                        }
+                    }
+                    edited = true;
+                }
+                c => {
+                    if self.bytes.len() + c.len_utf8() > self.limit {
+                        self.full = true;
+                        break;
+                    }
+                    let mut buf = [0u8; 4];
+                    self.bytes
+                        .extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
+                }
+            }
+            read = at + c.len_utf8();
+        }
+        // Without edits, readers get what was added; with them, the text
+        // that was read, edits and all.
+        if edited {
+            text.as_bytes()[..read].to_vec()
+        } else {
+            self.bytes[before..].to_vec()
         }
     }
 
@@ -432,7 +518,7 @@ pub enum ReaderRefusal {
 }
 
 /// A reader's next step.
-pub enum Read {
+pub enum ReadStep {
     /// Nothing arrived within the wait.
     Nothing,
     /// The reader fell MAX_READER_BACKLOG_BYTES behind and is dropped.
@@ -442,6 +528,31 @@ pub enum Read {
         next: usize,
         ended: bool,
     },
+}
+
+impl LiveInner {
+    /// Queues bytes for the readers, dropping what the slowest may no longer
+    /// catch up on.
+    fn send(&mut self, bytes: &[u8]) {
+        self.log.extend_from_slice(bytes);
+        self.total += bytes.len();
+        if self.log.len() > MAX_READER_BACKLOG_BYTES {
+            let excess = self.log.len() - MAX_READER_BACKLOG_BYTES;
+            self.log.drain(..excess);
+            self.start += excess;
+        }
+    }
+
+    /// Records why the text ended, once; an append's last incomplete
+    /// character reads as U+FFFD for its readers too, unless the write was
+    /// cut at its limit.
+    fn finish(&mut self, why: LiveEnd) {
+        if self.end.is_none() {
+            let rest = self.buffer.end(why == LiveEnd::Size);
+            self.send(&rest);
+            self.end = Some(why);
+        }
+    }
 }
 
 impl LiveText {
@@ -484,15 +595,9 @@ impl LiveText {
         let room = self.max_input.saturating_sub(b.buffer.received);
         let chunk = &chunk[..chunk.len().min(room)];
         let send = b.buffer.push(chunk);
-        b.log.extend_from_slice(&send);
-        b.total += send.len();
-        if b.log.len() > MAX_READER_BACKLOG_BYTES {
-            let excess = b.log.len() - MAX_READER_BACKLOG_BYTES;
-            b.log.drain(..excess);
-            b.start += excess;
-        }
+        b.send(&send);
         if b.buffer.full || b.buffer.received >= self.max_input {
-            b.end = Some(LiveEnd::Size);
+            b.finish(LiveEnd::Size);
         }
         b.version += 1;
         self.changed.notify_all();
@@ -503,7 +608,7 @@ impl LiveText {
     pub fn end(&self, why: LiveEnd) {
         let mut b = self.lock();
         if b.end.is_none() {
-            b.end = Some(why);
+            b.finish(why);
             b.version += 1;
             self.changed.notify_all();
         }
@@ -557,7 +662,7 @@ impl LiveText {
     /// What a reader at `position` gets next, waiting up to `wait` for
     /// something to arrive, and then up to READER_FLUSH for more to go with
     /// it, unless READER_FLUSH_BYTES wait or the text has ended.
-    pub fn read(&self, position: usize, wait: Duration) -> Read {
+    pub fn read(&self, position: usize, wait: Duration) -> ReadStep {
         let std_wait = |d: Duration| std::time::Duration::from_nanos(d.as_nanos().max(0) as u64);
         let b = self.lock();
         let quiet = |b: &LiveInner| b.total == position && b.end.is_none();
@@ -566,7 +671,7 @@ impl LiveText {
             .wait_timeout_while(b, std_wait(wait), |b| quiet(b))
             .unwrap_or_else(|e| e.into_inner());
         if quiet(&b) {
-            return Read::Nothing;
+            return ReadStep::Nothing;
         }
         let small = |b: &LiveInner| b.end.is_none() && b.total - position < READER_FLUSH_BYTES;
         if small(&b) {
@@ -576,9 +681,9 @@ impl LiveText {
                 .unwrap_or_else(|e| e.into_inner());
         }
         if position < b.start {
-            return Read::Behind;
+            return ReadStep::Behind;
         }
-        Read::Chunk {
+        ReadStep::Chunk {
             bytes: b.log[position - b.start..].to_vec(),
             next: b.total,
             ended: b.end.is_some(),
@@ -641,18 +746,19 @@ impl Server {
             let text = text.clone();
             thread::spawn(move || {
                 let mut buf = vec![0u8; 32 << 10];
-                loop {
+                let why = loop {
                     match body.read(&mut buf) {
-                        Ok(0) => return LiveEnd::Complete,
-                        Err(_) => return LiveEnd::Disconnected,
+                        Ok(0) => break LiveEnd::Complete,
+                        Err(_) => break LiveEnd::Disconnected,
                         Ok(n) => {
                             if !text.write(&buf[..n]) {
-                                text.writer_done();
-                                return LiveEnd::Size;
+                                break LiveEnd::Size;
                             }
                         }
                     }
-                }
+                };
+                text.writer_done();
+                why
             })
         });
         let Some(reader) = reader else {
@@ -660,10 +766,12 @@ impl Server {
             self.answer_live_write(w, id, text);
             return;
         };
-        if !text.wait_writer() {
+        let body_done = text.wait_writer();
+        if !body_done || text.ended() == Some(LiveEnd::Size) {
             // Unblock a body read still waiting on the writer, and let it
-            // finish. The expired deadline also cancels the connection, so
-            // the connection must not serve another request.
+            // finish, or leave the rest of a body past a limit unread. The
+            // expired deadline also cancels the connection, so the
+            // connection must not serve another request.
             w.header().set("Connection", "close");
             let _ = ResponseController::new(w).set_read_deadline(&time::now());
         }
@@ -677,7 +785,7 @@ impl Server {
         let finished = if end == LiveEnd::Unavailable {
             None
         } else {
-            self.lock().finish_live_locked(id, end)
+            self.lock().finish_live_locked(id)
         };
         let limits = &self.config.live;
         let (status, message) = match finished {
@@ -703,7 +811,12 @@ impl Server {
             return;
         }
         if r.method != http::METHOD_GET && r.method != http::METHOD_HEAD {
-            live_answer(w, http::STATUS_METHOD_NOT_ALLOWED, "Method not allowed", None);
+            live_answer(
+                w,
+                http::STATUS_METHOD_NOT_ALLOWED,
+                "Method not allowed",
+                None,
+            );
             return;
         }
         let secret = r.url.path.strip_prefix(LIVE_PATH).unwrap_or("").to_owned();
@@ -762,19 +875,15 @@ impl Server {
         let ctx = r.context();
         loop {
             match text.read(position, Duration::from_secs(1)) {
-                Read::Nothing => {
+                ReadStep::Nothing => {
                     // The wait is bounded so a reader whose connection went
                     // away is noticed.
                     if ctx.err().is_some() {
                         break;
                     }
                 }
-                Read::Behind => break,
-                Read::Chunk {
-                    bytes,
-                    next,
-                    ended,
-                } => {
+                ReadStep::Behind => break,
+                ReadStep::Chunk { bytes, next, ended } => {
                     if !bytes.is_empty() && io::Write::write_all(w, &bytes).is_err() {
                         break;
                     }
@@ -847,8 +956,11 @@ impl State {
         if !self.feature_on(super::toggles::Feature::LiveText) {
             return Err(RpcError::new(CODE_DENIED, LIVE_TEXT_OFF));
         }
-        let open: Vec<&super::embeds::LiveEmbed> =
-            self.embeds.values().filter_map(|e| e.live.as_ref()).collect();
+        let open: Vec<&super::embeds::LiveEmbed> = self
+            .embeds
+            .values()
+            .filter_map(|e| e.live.as_ref())
+            .collect();
         if open.iter().any(|live| live.owner == user_id) {
             return Err(RpcError::new(
                 CODE_DENIED,
@@ -907,9 +1019,15 @@ impl State {
         } else {
             limits.max
         };
-        let (write_window, max_input) = (limits.write_window, limits.max_input_bytes);
+        // An append takes no more input than it keeps, so its edits never
+        // let it send more than an append without them.
+        let max_input = match kind {
+            LiveKind::Terminal => limits.max_input_bytes,
+            LiveKind::Append => limits.max_input_bytes.min(limit),
+        };
+        let write_window = limits.write_window;
         let id = self.next_embed_id();
-        self.new_write_locked(c, &id, kind.as_str(), message_id, write_window, true);
+        self.new_write_locked(c, &id, kind.as_str(), message_id, write_window);
         let e = self.embeds.get_mut(&id).expect("just registered");
         e.live = Some(super::embeds::LiveEmbed {
             kind,
@@ -927,6 +1045,14 @@ impl State {
         Ok(id)
     }
 
+    pub(super) fn embed_terminal_command(&mut self, cx: &CommandCtx) -> Result<Object, RpcError> {
+        self.live_command(cx, LiveKind::Terminal)
+    }
+
+    pub(super) fn embed_append_command(&mut self, cx: &CommandCtx) -> Result<Object, RpcError> {
+        self.live_command(cx, LiveKind::Append)
+    }
+
     /// `/embed-terminal [title]` and `/embed-append [markdown]` (§4.8.3):
     /// everything is checked and charged now, the post included, and
     /// nothing is posted until the write arrives. The rest of the line is
@@ -934,11 +1060,7 @@ impl State {
     /// a paragraph break follows when it is not empty, so the streamed text
     /// starts a new paragraph. The result carries the write URL, after a
     /// `~private` notice with it in copy-paste recipes.
-    pub(super) fn live_command(
-        &mut self,
-        cx: &CommandCtx,
-        kind: LiveKind,
-    ) -> Result<Object, RpcError> {
+    fn live_command(&mut self, cx: &CommandCtx, kind: LiveKind) -> Result<Object, RpcError> {
         let CommandCtx {
             client: c,
             room_id,
@@ -964,6 +1086,7 @@ impl State {
         let from = self.users[&user_id].from();
         let e = self.embeds.get_mut(&id).expect("just opened");
         e.title = super::embeds::og_line(title, 256).unwrap_or_default();
+        let write_url = e.write_url();
         let live = e.live.as_mut().expect("just opened");
         live.post = Some(LivePost {
             room_id: room_id.to_owned(),
@@ -971,9 +1094,9 @@ impl State {
             reply_to: cx.reply_to.map(str::to_owned),
             from,
         });
-        let notice = command_notice(kind, &e.write_url(), live.max, live.limit, &self.config.live);
+        let notice = command_notice(kind, &write_url, live.max, live.limit, &self.config.live);
         let result = obj! {
-            "embeds" => vec![Json::from(obj! {"embed_id" => id.as_str(), "kind" => kind.as_str(), "write_url" => e.write_url()})],
+            "embeds" => vec![Json::from(obj! {"embed_id" => id.as_str(), "kind" => kind.as_str(), "write_url" => write_url.as_str()})],
         };
         c.enqueue(&private_notice(&self.rooms[room_id], &notice));
         Ok(result)
@@ -1009,9 +1132,7 @@ impl State {
         }
         if let Some(reply_to) = &post.reply_to {
             if !self.messages.contains_key(reply_to) {
-                return Err(invalid_params(
-                    "reply_to must name an existing message",
-                ));
+                return Err(invalid_params("reply_to must name an existing message"));
             }
         }
         let log_id = self.next_id_locked();
@@ -1070,7 +1191,7 @@ impl State {
     /// embed removed (§4.8.5); with nothing kept, the embed is removed, and
     /// a message left with neither text nor embeds becomes a tombstone. An
     /// embed that is gone publishes nothing.
-    pub fn finish_live_locked(&mut self, id: &str, end: LiveEnd) -> Option<Finished> {
+    pub fn finish_live_locked(&mut self, id: &str) -> Option<Finished> {
         let e = self.embeds.get_mut(id)?;
         let live = e.live.take()?;
         if let Some(timer) = e.timer.take() {
@@ -1116,13 +1237,11 @@ impl State {
                     .unwrap_or("")
                     .to_owned();
                 // A save may have lengthened the text while it streamed: the
-                // body stays within the text limit, cut at a whole character,
-                // and replacement characters may lengthen what was cut.
+                // body stays within the text limit, cut at a whole
+                // character. The kept text is edited already (§4.8.5), and
+                // never reaches into `base`.
                 let room = self.config.frame.max_text_bytes.saturating_sub(base.len());
-                let mut added = live_text_string(keep_first(keep_first(&kept, limit), room));
-                if added.len() > room {
-                    added = live_text_string(keep_first(added.as_bytes(), room));
-                }
+                let added = live_text_string(keep_first(&kept, limit.min(room)));
                 if added.is_empty() {
                     self.fail_write_locked(id);
                     false

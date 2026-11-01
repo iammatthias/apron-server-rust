@@ -1,9 +1,8 @@
-//! The upload, write, and stream tests of reference_test.go, test by test,
+//! The upload and write tests of reference_test.go, test by test,
 //! with the helpers the other reference_*_test.rs files share. Each keeps the
 //! Go test's name, tables, and literal expectations.
 
-use std::io::{Read, Write};
-use std::sync::{mpsc, Arc};
+use std::sync::mpsc;
 
 use rust_stdlib::context::Context;
 use rust_stdlib::io::PipeWriter;
@@ -12,7 +11,7 @@ use rust_stdlib::time::Duration;
 
 use super::helpers::*;
 use crate::obj;
-use crate::server::embeds::{FILE_PATH, STREAM_PATH, WRITE_PATH};
+use crate::server::embeds::{FILE_PATH, WRITE_PATH};
 use crate::server::media_types::{image_size, upload_content_type};
 use crate::server::protocol::*;
 
@@ -191,7 +190,7 @@ fn test_failed_and_expired_writes_drop_the_embed() {
         &mut a,
         "two",
         obj! {"room_id" => "general", "body" => obj! {
-            "embeds" => vec![Json::from(obj! {"kind" => "upload"}), Json::from(obj! {"kind" => "stream"})],
+            "embeds" => vec![Json::from(obj! {"kind" => "upload"}), Json::from(obj! {"kind" => "upload", "title" => "late.png"})],
         }},
     );
     let written = result["embeds"].as_list();
@@ -205,12 +204,16 @@ fn test_failed_and_expired_writes_drop_the_embed() {
     );
     let left = embeds_of(&a.notification("message"));
     assert!(
-        left.len() == 1 && left[0]["kind"] == Json::from("stream"),
+        left.len() == 1 && left[0]["title"] == Json::from("late.png"),
         "after failed upload: {left:?}"
     );
-    // The stream's write URL is never used, so it expires.
+    // The second write URL is never used, so it expires, and the message,
+    // with neither text nor embeds, is a tombstone.
     let expired = a.notification("message");
-    assert!(embeds_of(&expired).is_empty(), "after expiry: {expired:?}");
+    assert!(
+        expired["deleted"] == Json::from(true) && !expired.contains_key("body"),
+        "after expiry: {expired:?}"
+    );
     let late = written[1].as_object().unwrap()["write_url"]
         .as_str()
         .unwrap();
@@ -269,165 +272,6 @@ pub(super) fn write_urls(result: &Object) -> Vec<String> {
         .collect()
 }
 
-#[test]
-fn test_streams_grow_live_then_keep_their_text() {
-    let mut config = default_config();
-    config.stream_keep_bytes = 16;
-    config.stream_max_bytes = 64;
-    let server = new_test_server(config);
-    let mut a = dial_test_client(&server);
-    let result = post_embeds(
-        &mut a,
-        "stream",
-        obj! {"room_id" => "general", "body" => obj! {
-            "embeds" => vec![Json::from(obj! {"kind" => "stream", "format" => "terminal", "text" => "forged"})],
-        }},
-    );
-    let write_url = write_urls(&result).remove(0);
-    let live = embeds_of(result["snapshot"].as_object().unwrap()).remove(0);
-    let stream_url = live["url"].as_str().unwrap_or("").to_owned();
-    assert!(
-        stream_url.starts_with(&format!("{}{STREAM_PATH}", server.http.url))
-            && live["format"] == Json::from("terminal")
-            && !live.contains_key("text"),
-        "live embed: {live:?}"
-    );
-
-    let reader = http::client::get(&stream_url).expect("stream reader");
-    assert_eq!(reader.status_code, 200, "stream reader");
-    let mut body = reader.body.clone().unwrap();
-    let (mut pipe, writer) = put_from_pipe(&write_url);
-    pipe.write_all(b"hello ").unwrap();
-    let mut first = [0u8; 6];
-    body.read_exact(&mut first).expect("live read");
-    assert_eq!(&first, b"hello ", "live read");
-    let _ = pipe.write_all(b"world, this is a long line\n");
-    pipe.close();
-    // The second write overflows the 16 kept bytes before the reader catches
-    // up, so the reader continues from the kept text.
-    let mut rest = Vec::new();
-    let _ = body.read_to_end(&mut rest);
-    assert_eq!(
-        String::from_utf8_lossy(&rest),
-        " is a long line\n",
-        "reader got {first:?} then {rest:?}"
-    );
-    assert_eq!(writer_status(&writer), 204, "writer status");
-    let finished = embeds_of(&a.notification("message")).remove(0);
-    assert!(
-        finished["text"] == Json::from(" is a long line\n")
-            && !finished.contains_key("url")
-            && finished["format"] == Json::from("terminal"),
-        "finished embed: {finished:?}"
-    );
-    assert_eq!(
-        http_do("GET", &stream_url, None, "").0,
-        404,
-        "finished stream URL"
-    );
-
-    // At the size limit the stream ends and keeps its trailing text.
-    let result = post_embeds(
-        &mut a,
-        "limited",
-        obj! {"room_id" => "general", "body" => obj! {"embeds" => vec![Json::from(obj! {"kind" => "stream"})]}},
-    );
-    let write_url = write_urls(&result).remove(0);
-    let oversized = format!("{}é{}", "x".repeat(63), "y".repeat(20));
-    assert_eq!(
-        http_do("PUT", &write_url, Some(oversized.as_bytes()), "").0,
-        413,
-        "oversized stream"
-    );
-    let text = embeds_of(&a.notification("message")).remove(0)["text"].clone();
-    assert_eq!(
-        text,
-        Json::from(format!("{}\u{FFFD}", "x".repeat(15))),
-        "limited text"
-    );
-}
-
-/// A finished stream write leaves its keep-alive connection usable: a live
-/// stream read next on the same connection follows the stream.
-#[test]
-fn test_stream_write_connection_can_read_a_stream() {
-    let server = new_test_server(default_config());
-    let mut a = dial_test_client(&server);
-    let result = post_embeds(
-        &mut a,
-        "streams",
-        obj! {"room_id" => "general", "body" => obj! {
-            "embeds" => vec![Json::from(obj! {"kind" => "stream"}), Json::from(obj! {"kind" => "stream"})],
-        }},
-    );
-    let written = write_urls(&result);
-    let live = embeds_of(result["snapshot"].as_object().unwrap());
-    // One connection carries the finished write and then the read.
-    let client = http::Client {
-        transport: Some(Arc::new(http::Transport {
-            max_conns_per_host: 1,
-            ..http::Transport::default()
-        })),
-        ..http::Client::default()
-    };
-    let request = http::Request::new("PUT", &written[0])
-        .unwrap()
-        .with_body(b"done".to_vec());
-    let response = client.do_request(request).expect("first stream write");
-    assert_eq!(response.status_code, 204, "first stream write");
-    if let Some(body) = &response.body {
-        body.close().unwrap();
-    }
-    let reader = client
-        .get(live[1]["url"].as_str().unwrap())
-        .expect("stream reader");
-    assert_eq!(reader.status_code, 200, "stream reader");
-    assert_eq!(
-        http_do("PUT", &written[1], Some(b"second"), "text/plain").0,
-        204,
-        "second stream write"
-    );
-    let got = reader.body.as_ref().unwrap().read_all().unwrap_or_default();
-    assert_eq!(
-        String::from_utf8_lossy(&got),
-        "second",
-        "reader on the write's connection"
-    );
-}
-
-#[test]
-fn test_saving_without_a_stream_ends_it() {
-    let server = new_test_server(default_config());
-    let mut a = dial_test_client(&server);
-    let result = post_embeds(
-        &mut a,
-        "stream",
-        obj! {"room_id" => "general", "body" => obj! {"embeds" => vec![Json::from(obj! {"kind" => "stream"})]}},
-    );
-    let write_url = write_urls(&result).remove(0);
-    let (mut pipe, writer) = put_from_pipe(&write_url);
-    let _ = pipe.write_all(b"partial");
-    // The save must find the write started; one that arrives after it is
-    // refused instead (TestRefusedWriteDoesNotWaitForItsBody).
-    let token = write_url[write_url.rfind('/').unwrap() + 1..].to_owned();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    while server.app.lock().writes.contains_key(&token) {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "the stream write never started"
-        );
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    }
-    save(
-        &mut a,
-        "stop",
-        obj! {"message_id" => result["message_id"].clone(), "body" => obj! {"text" => "never mind"}},
-    );
-    assert_eq!(writer_status(&writer), 410, "writer status");
-    pipe.close();
-    a.expect_quiet();
-}
-
 /// Writes use PUT (§4.8.3); another method leaves the write URL unused.
 #[test]
 fn test_writes_are_put() {
@@ -460,8 +304,8 @@ fn test_refused_write_does_not_wait_for_its_body() {
     let mut a = dial_test_client(&server);
     let result = post_embeds(
         &mut a,
-        "stream",
-        obj! {"room_id" => "general", "body" => obj! {"embeds" => vec![Json::from(obj! {"kind" => "stream"})]}},
+        "upload",
+        obj! {"room_id" => "general", "body" => obj! {"embeds" => vec![Json::from(obj! {"kind" => "upload"})]}},
     );
     let write_url = write_urls(&result).remove(0);
     save(

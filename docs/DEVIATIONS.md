@@ -379,10 +379,43 @@ uses `/purge` to remove its `livecheck_` accounts.
 uploads configured and `/toggle presence` only with push configured.
 
 **This server.** Always offers both, because it always takes uploads and
-always offers `status`. Turning presence on sends each user's shown status
-to those who share a room with them as `user` `new`.
+always offers `status`, and `/toggle livetext` too, because live text is
+always configured. Turning presence on sends each user's shown status to
+those who share a room with them as `user` `new`.
 
 **Why.** The features exist in every configuration here.
+
+### Live text, `embed:terminal` and `embed:append` (§4.8.3, §4.8.5, §4.8.6)
+
+**Reference.** apron-server-cloudflare offers live text where
+`PUBLIC_ORIGIN` and its upload signing key are set, with its Workers Paid
+policy (`liveText` in `src/plans/paid.ts`), which `LIVE_TEXT_<KEY>`
+variables lower. A write URL is a signed grant, and `url` is
+`PUBLIC_ORIGIN/live/<id>`. Its entry Worker charges each write and read to
+the address's connection attempts, and its budget guard can refuse a
+start. The alarm ends a text a lost instance left streaming. A reader that
+falls 256 KiB behind gets an error.
+
+**This server.**
+
+- Live text is always configured and on until `/toggle livetext`, with the
+  same Workers Paid policy, which flags do not change (`Config.live`).
+- `url` is `/live/<secret>` on the connection's base URL (`--public-url`
+  where set), and a write URL `/write/<token>`, a random token. A write URL
+  that is unknown, used or expired, a made-up one included, is 409.
+- Reads and writes are not charged to connection attempts, and there is no
+  budget guard.
+- A message's post is charged before its live text start is checked, so a
+  refused start still spends that post, as other refusals after the post
+  charge do. `/embed-terminal` and `/embed-append` charge both together, as
+  on Cloudflare.
+- A restart ends every open text while restoring, removing its embed with
+  nothing kept, and a shutdown answers a streaming writer 503 `Server
+  storage is unavailable; the text could not be posted.`
+- A reader that falls 256 KiB behind has its response ended, not errored.
+
+**Why.** One process holds the text; there is no edge to admit requests or
+budget to guard, and restore runs before any connection.
 
 ### `/server` and `server.title`, `description` and `avatar` (§3.1, §4.1)
 

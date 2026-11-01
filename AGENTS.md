@@ -5,7 +5,7 @@ Instructions for AI coding agents and contributors working in this repository.
 ## What this is
 
 `apron-server-rust` is a Rust server for the
-[Apron](https://github.com/shazow/apron) chat protocol, version 9. It builds
+[Apron](https://github.com/shazow/apron) chat protocol, version 10. It builds
 one binary, `aprond`.
 
 The reference is
@@ -81,7 +81,8 @@ it uses the matching rust-stdlib module.
   hold the larger ones. `remap.rs` is the one walk over every place
   `State` keeps a user_id, which `/purge` and `/rename` share.
 - **Embeds and media.** `embeds.rs` (hosted embeds and their write URLs),
-  `uploads.rs` (`/write/` and `/files/`), `streams.rs` (`/streams/`),
+  `uploads.rs` (`/write/` and `/files/`), `live_text.rs` (terminal and
+  append live text, `/live/`),
   `media_types.rs` (type sniffing) and `unfurl/` (link previews:
   `text.rs`, `page.rs`, `fetch.rs`, `cache.rs`, `mod.rs`).
 - **Push.** `push.rs` (registrations, wake scopes and the payload),
@@ -325,7 +326,7 @@ The Compose project runs three containers behind one hostname:
   publish elsewhere, such as `127.0.0.1:18901` on a Mac.
 
 aprond's paths come from `Server::handler` in `src/server/server.rs`: `/ws`,
-`/healthz`, `/write/`, `/files/`, `/streams/`, `/emoji/`,
+`/healthz`, `/write/`, `/files/`, `/live/`, `/emoji/`,
 `/.well-known/apple-app-site-association` and `/.well-known/webauthn`. A new
 route there needs the same
 path in the router's `@aprond` matcher.

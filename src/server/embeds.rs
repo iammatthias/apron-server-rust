@@ -1,5 +1,5 @@
-//! Embeds (§4.8): uploads and streams the server hosts, their write URLs,
-//! and the /write/, /files/, and /streams/ endpoints.
+//! Embeds (§4.8): the uploads and live text the server hosts, and their
+//! write URLs.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -11,19 +11,19 @@ use rust_stdlib_crypto::{rand, subtle};
 
 use super::client::Client;
 use super::host_list::HostList;
+use super::live_text::{LiveEnd, LiveKind, LiveText, LIVE_PATH};
 use super::protocol::*;
 use super::server::State;
-use super::streams::StreamBuffer;
 use super::toggles::{Feature, UPLOADS_OFF};
 use super::unfurl::Preview;
 use crate::obj;
 
-/// HTTP paths for embed content (§4.8.3, §4.8.5). Write URLs carry a
-/// one-time token; file and stream URLs carry the embed_id and an
-/// unguessable secret, since HTTP requests are not authenticated.
+/// HTTP paths for embed content (§4.8.3). Write URLs carry a one-time
+/// token; file URLs carry the embed_id and an unguessable secret, since HTTP
+/// requests are not authenticated, and live text URLs the secret alone
+/// (`LIVE_PATH`).
 pub const WRITE_PATH: &str = "/write/";
 pub const FILE_PATH: &str = "/files/";
-pub const STREAM_PATH: &str = "/streams/";
 
 /// Bounds body.embeds.
 pub const MAX_EMBEDS_PER_MESSAGE: usize = 32;
@@ -67,10 +67,42 @@ impl EmbedPurpose {
     }
 }
 
-/// A server-hosted embed: an upload, a stream, or a link preview
+/// A message's live text while it is open (§4.8.3): pending until its write
+/// arrives, then streaming until it ends.
+#[derive(Debug)]
+pub struct LiveEmbed {
+    pub kind: LiveKind,
+    pub owner: String,
+    /// How long it may stream from its `PUT`: the owner's, decided at the
+    /// start.
+    pub max: rust_stdlib::time::Duration,
+    /// What it keeps: a terminal's last bytes, or the bytes an append may
+    /// add.
+    pub limit: usize,
+    /// When it ends at the latest: its write URL's expiry while pending,
+    /// then its time limit.
+    pub deadline: rust_stdlib::time::Time,
+    /// A command's message, posted when the write arrives.
+    pub post: Option<LivePost>,
+    pub text: Arc<LiveText>,
+}
+
+/// What `/embed-terminal` and `/embed-append` post when their write
+/// arrives: the room, the opening text, the reply, and the sender as the
+/// message shows them.
+#[derive(Clone, Debug)]
+pub struct LivePost {
+    pub room_id: String,
+    pub text: String,
+    pub reply_to: Option<String>,
+    pub from: Object,
+}
+
+/// A server-hosted embed: an upload, live text, or a link preview
 /// (`unfurl`). Other embed kinds are body content with only an embed_id.
-/// An embed that is no longer in `State.embeds` was removed; its write,
-/// file, and stream URLs are dead.
+/// A finished v9 `stream` embed keeps its `text` as owned fields. An embed
+/// that is no longer in `State.embeds` was removed; its write, file, and
+/// live text URLs are dead.
 #[derive(Debug, Default)]
 pub struct EmbedState {
     pub id: String,
@@ -88,12 +120,12 @@ pub struct EmbedState {
     pub title: String,
     /// The sender's og.image.alt, kept in the server's og.
     pub alt: String,
-    /// Expires an unused write URL, then bounds a stream's duration.
+    /// Expires an unused write URL, then bounds a live text's duration.
     pub timer: Option<Timer>,
     pub started: bool,
     pub finished: bool,
     /// The server fields restored on every save: an upload's url and og, a
-    /// live stream's url, a finished stream's text.
+    /// live text's url, a finished terminal's output, a v9 stream's text.
     pub owned: Object,
     /// The file holding a finished upload's content, `size` its length, and
     /// `seq` its place in `State.uploads`, oldest first.
@@ -101,7 +133,7 @@ pub struct EmbedState {
     pub size: i64,
     pub seq: i64,
     pub content_type: String,
-    pub stream: Option<Arc<StreamBuffer>>,
+    pub live: Option<LiveEmbed>,
 }
 
 impl EmbedState {
@@ -110,9 +142,10 @@ impl EmbedState {
         self.kind == LINK_KIND
     }
 
-    pub fn end_stream(&self) {
-        if let Some(stream) = &self.stream {
-            stream.end();
+    /// Ends the embed's live text, if it has one open.
+    pub fn end_live(&self, why: LiveEnd) {
+        if let Some(live) = &self.live {
+            live.text.end(why);
         }
     }
 
@@ -120,8 +153,8 @@ impl EmbedState {
         format!("{}{FILE_PATH}{}/{}", self.base_url, self.id, self.secret)
     }
 
-    pub fn stream_url(&self) -> String {
-        format!("{}{STREAM_PATH}{}/{}", self.base_url, self.id, self.secret)
+    pub fn live_url(&self) -> String {
+        format!("{}{LIVE_PATH}{}", self.base_url, self.secret)
     }
 
     pub fn write_url(&self) -> String {
@@ -312,7 +345,7 @@ fn clean_og(embed: &mut Object, media_hosts: &HostList) {
 /// `value` as one line: controls and bidirectional overrides become spaces,
 /// runs of whitespace one space, trimmed, and cut to `max` code points with
 /// an ellipsis; `None` when nothing is left.
-fn og_line(value: &str, max: usize) -> Option<String> {
+pub(super) fn og_line(value: &str, max: usize) -> Option<String> {
     let unsafe_char = |c: char| {
         c.is_control()
             || matches!(c, '\u{2028}' | '\u{2029}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
@@ -434,10 +467,12 @@ impl State {
 
     /// Applies embed identity (§4.8.2) to a submitted body. An embed with
     /// embed_id keeps that embed of the current snapshot, with its kind and
-    /// server-owned fields restored from the server's records; one without
-    /// is new and gets an embed_id, and a new upload or stream embed gets a
-    /// write URL, listed in the second result. Senders' og is dropped: the
-    /// server only describes media it hosts.
+    /// server-owned fields restored from the server's records; a live
+    /// text's takes only a terminal's new title. One without is new and gets
+    /// an embed_id, and a new upload, terminal or append embed gets a write
+    /// URL, listed in the second result (§4.8.3). A message has at most one
+    /// append and starts at most one live text (§4.8.5). Senders' og keeps
+    /// media only from Config.og_media_hosts.
     pub fn resolve_embeds_locked(
         &mut self,
         c: &Arc<Client>,
@@ -457,13 +492,28 @@ impl State {
                 }
             }
         }
+        let kind_of = |value: &Json| {
+            value
+                .as_object()
+                .and_then(|e| e.get("kind"))
+                .and_then(Json::as_str)
+                .map(str::to_owned)
+        };
         let mut kept = BTreeSet::new();
         for (i, value) in submitted.iter().enumerate() {
             let Some(raw) = value.as_object().and_then(|e| e.get("embed_id")) else {
                 continue;
             };
             let id = raw.as_str().unwrap_or("");
-            if !previous.contains_key(id) || !kept.insert(id.to_owned()) {
+            // A live text's kind cannot change, nor another embed become one.
+            let changed = previous.get(id).is_some_and(|before| {
+                let (was, now) = (kind_of(&before.clone().into()), kind_of(value));
+                was != now
+                    && [&was, &now]
+                        .iter()
+                        .any(|k| k.as_deref().and_then(LiveKind::parse).is_some())
+            });
+            if changed || !previous.contains_key(id) || !kept.insert(id.to_owned()) {
                 let shown = encode_json(raw)
                     .map(|v| String::from_utf8_lossy(&v).into_owned())
                     .unwrap_or_default();
@@ -473,6 +523,27 @@ impl State {
             }
         }
 
+        let live_kind = |value: &Json| kind_of(value).as_deref().and_then(LiveKind::parse);
+        let appends = submitted
+            .iter()
+            .filter(|value| match embed_id(value) {
+                None => live_kind(value) == Some(LiveKind::Append),
+                Some(id) => previous[id].get("kind").and_then(Json::as_str) == Some("append"),
+            })
+            .count();
+        if appends > 1 {
+            return Err(invalid_params("A message has at most one append embed"));
+        }
+        let fresh_live = submitted
+            .iter()
+            .filter(|value| embed_id(value).is_none() && live_kind(value).is_some())
+            .count();
+        if fresh_live > 1 {
+            return Err(RpcError::new(
+                CODE_DENIED,
+                "A message can start one live text (terminal or append) at a time",
+            ));
+        }
         let new_uploads = submitted
             .iter()
             .filter(|value| {
@@ -496,7 +567,30 @@ impl State {
         for value in submitted {
             let mut embed = value.as_object().cloned().unwrap_or_default();
             if let Some(id) = embed_id(&value).map(str::to_owned) {
-                if let Some(kind) = previous[&id].get("kind").cloned() {
+                let before = &previous[&id];
+                if let Some(kind) = before
+                    .get("kind")
+                    .and_then(Json::as_str)
+                    .and_then(LiveKind::parse)
+                {
+                    // The server owns a live text's url and output (§4.8.2);
+                    // a terminal takes a new title.
+                    let mut restored = before.clone();
+                    restored.remove("title");
+                    let title = embed
+                        .get("title")
+                        .and_then(Json::as_str)
+                        .and_then(|t| og_line(t, 256));
+                    if let (LiveKind::Terminal, Some(title)) = (kind, title) {
+                        restored.insert("title".into(), title.into());
+                    }
+                    if let Some(e) = self.embeds.get(&id) {
+                        restored.extend(e.owned.clone());
+                    }
+                    embeds.push(restored.into());
+                    continue;
+                }
+                if let Some(kind) = before.get("kind").cloned() {
                     embed.insert("kind".into(), kind);
                 }
                 clean_og(&mut embed, &self.config.og_media_hosts);
@@ -514,12 +608,37 @@ impl State {
                 .and_then(Json::as_str)
                 .unwrap_or("")
                 .to_owned();
+            if let Some(kind) = LiveKind::parse(&kind) {
+                let user_id = self.client_user(c).unwrap_or_default();
+                let text = body.get("text").and_then(Json::as_str).unwrap_or("").len();
+                let limit = self.live_start_room_locked(&user_id, kind, text)?;
+                let id = self.open_live_locked(c, &user_id, kind, message_id, limit)?;
+                let e = self.embeds.get_mut(&id).expect("just opened");
+                let mut live = obj! {"embed_id" => id.as_str(), "kind" => kind.as_str()};
+                if kind == LiveKind::Terminal {
+                    if let Some(title) = embed
+                        .get("title")
+                        .and_then(Json::as_str)
+                        .and_then(|t| og_line(t, 256))
+                    {
+                        e.title = title.clone();
+                        live.insert("title".into(), title.into());
+                    }
+                }
+                live.extend(e.owned.clone());
+                written.push(
+                    obj! {"embed_id" => id.as_str(), "kind" => kind.as_str(), "write_url" => e.write_url()}
+                        .into(),
+                );
+                embeds.push(live.into());
+                continue;
+            }
             let id = self.next_embed_id();
             let alt = og_image_alt(embed.get("og"));
             clean_og(&mut embed, &self.config.og_media_hosts);
             embed.remove("write_url");
             embed.insert("embed_id".into(), id.as_str().into());
-            if kind == "upload" || kind == "stream" {
+            if kind == "upload" {
                 embed.remove("url");
                 embed.remove("text");
                 let title = embed
@@ -527,19 +646,11 @@ impl State {
                     .and_then(Json::as_str)
                     .unwrap_or("")
                     .to_owned();
-                self.new_write_locked(c, &id, &kind, message_id);
+                let window = self.config.upload_start_timeout;
+                self.new_write_locked(c, &id, &kind, message_id, window);
                 let e = self.embeds.get_mut(&id).expect("just registered");
                 e.alt = alt;
                 e.title = title;
-                if kind == "stream" {
-                    e.stream = Some(Arc::new(StreamBuffer::new(
-                        self.config.stream_keep_bytes,
-                        self.config.stream_max_bytes,
-                    )));
-                    let url = e.stream_url();
-                    e.owned = obj! {"url" => url.as_str()};
-                    embed.insert("url".into(), url.into());
-                }
                 written.push(
                     obj! {"embed_id" => id.as_str(), "kind" => kind.as_str(), "write_url" => e.write_url()}
                         .into(),
@@ -550,13 +661,20 @@ impl State {
         Ok((embeds, written))
     }
 
-    /// Registers a hosted embed awaiting its write. An unused write URL
-    /// expires, and the embed is dropped.
-    pub fn new_write_locked(&mut self, c: &Arc<Client>, id: &str, kind: &str, message_id: &str) {
+    /// Registers a hosted embed awaiting its write. A write URL unused
+    /// within `window` expires, and the embed is dropped.
+    pub fn new_write_locked(
+        &mut self,
+        c: &Arc<Client>,
+        id: &str,
+        kind: &str,
+        message_id: &str,
+        window: Duration,
+    ) {
         let token = rand::text();
         let server = self.server.clone();
         let expired = id.to_owned();
-        let timer = time::after_func(self.config.upload_start_timeout, move || {
+        let timer = time::after_func(window, move || {
             let Some(server) = server.upgrade() else {
                 return;
             };
@@ -611,7 +729,7 @@ impl State {
     }
 
     /// Forgets a hosted embed and its content, invalidating its write, file,
-    /// and stream URLs.
+    /// and live text URLs. A live text it had ends, publishing nothing.
     pub fn remove_embed_locked(&mut self, id: &str) {
         let Some(e) = self.embeds.remove(id) else {
             return;
@@ -619,7 +737,10 @@ impl State {
         if let Some(timer) = &e.timer {
             timer.stop();
         }
-        e.end_stream();
+        if e.live.is_some() {
+            e.end_live(LiveEnd::Removed);
+            self.live_ids.remove(&e.secret);
+        }
         if self.uploads.remove(&(e.seq, e.id.clone())) {
             self.upload_bytes -= e.size;
         }
@@ -748,7 +869,7 @@ impl State {
         self.touch_embed(id);
     }
 
-    /// Resolves "embed_id/secret" from a file or stream path.
+    /// Resolves "embed_id/secret" from a file path.
     pub fn lookup_embed_locked(&self, path: &str) -> Option<&EmbedState> {
         let (id, secret) = path.split_once('/')?;
         let e = self.embeds.get(id)?;

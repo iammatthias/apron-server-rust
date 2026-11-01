@@ -386,6 +386,7 @@ pub struct StoredEmbed {
     pub title: String,
     #[json("alt,omitzero")]
     pub alt: String,
+    /// Set by a v9 server on a `stream` embed; still read, never written.
     #[json("stream,omitzero")]
     pub stream: bool,
     #[json("finished,omitzero")]
@@ -749,7 +750,7 @@ pub fn stored_embed_of(e: &EmbedState) -> StoredEmbed {
         secret: e.secret.clone(),
         title: e.title.clone(),
         alt: e.alt.clone(),
-        stream: e.stream.is_some(),
+        stream: false,
         finished: e.finished,
         owned: e.owned.clone(),
         file: if e.path.is_empty() {

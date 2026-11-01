@@ -150,7 +150,7 @@ impl Server {
         st.upload_dir = dir.clone();
     }
 
-    /// Accepts an upload or stream body at its write URL, once.
+    /// Accepts an upload or live text body at its write URL, once.
     pub(crate) fn handle_write(self: &Arc<Self>, w: &mut dyn ResponseWriter, r: &mut HttpRequest) {
         set_embed_cors(w, "PUT, OPTIONS");
         if r.method == http::METHOD_OPTIONS {
@@ -163,7 +163,7 @@ impl Server {
             return;
         }
         let token = r.url.path.strip_prefix(WRITE_PATH).unwrap_or("").to_owned();
-        let (id, stream) = {
+        let (id, live) = {
             let mut st = self.lock();
             let Some(id) = st.writes.get(&token).cloned() else {
                 drop(st);
@@ -180,7 +180,8 @@ impl Server {
             // is not is refused before the body is read, and the write stays
             // open (ext:media).
             let (declared, _) = mime::parse_media_type(r.header.get("Content-Type").unwrap_or(""));
-            if e.stream.is_none()
+            let live = e.live.is_some();
+            if !live
                 && e.purpose.image()
                 && !declared.is_empty()
                 && !AVATAR_TYPES.contains(&declared.as_str())
@@ -194,20 +195,13 @@ impl Server {
             if let Some(timer) = e.timer.take() {
                 timer.stop();
             }
-            if let Some(stream) = e.stream.clone() {
-                let ended = stream.clone();
-                e.timer = Some(time::after_func(
-                    self.config.stream_max_duration,
-                    move || ended.end(),
-                ));
-            }
-            let stream = e.stream.clone();
             st.writes.remove(&token);
-            (id, stream)
+            (id, live)
         };
-        match stream {
-            Some(stream) => self.write_stream(w, r, &id, &stream),
-            None => self.write_upload(w, r, &id),
+        if live {
+            self.start_live_write(w, r, &id);
+        } else {
+            self.write_upload(w, r, &id);
         }
     }
 
@@ -494,7 +488,7 @@ impl Server {
             let st = self.lock();
             let Some(e) = st
                 .lookup_embed_locked(&path)
-                .filter(|e| e.finished && e.stream.is_none() && !e.path.is_empty())
+                .filter(|e| e.finished && !e.path.is_empty())
             else {
                 drop(st);
                 http::not_found(w, r);

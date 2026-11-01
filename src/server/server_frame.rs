@@ -39,9 +39,10 @@ impl State {
         // always offered.
         let mut auth_schemes = schemes;
         auth_schemes.push("guest".into());
-        let (activity, uploads) = (
+        let (activity, uploads, live) = (
             self.feature_on(Feature::Activity),
             self.feature_on(Feature::Uploads),
+            self.feature_on(Feature::LiveText),
         );
         // A connection is offered what is on as it connects, and keeps it.
         let mut capabilities: Vec<String> = [
@@ -51,7 +52,8 @@ impl State {
             ("reactions", true),
             ("activity", activity),
             ("embed:upload", uploads),
-            ("embed:stream", true),
+            ("embed:terminal", live),
+            ("embed:append", live),
             ("command", true),
             ("status", true),
             ("ext", true),

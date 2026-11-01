@@ -151,10 +151,17 @@ impl State {
                 for id in gone {
                     self.remove_message_locked(id);
                 }
+                // A purged user's live texts end, publishing nothing, as their
+                // messages are gone.
                 let avatars: Vec<String> = self
                     .embeds
                     .values()
-                    .filter(|e| matches!(&e.purpose, EmbedPurpose::Avatar(id) if ids.contains(id)))
+                    .filter(|e| {
+                        matches!(&e.purpose, EmbedPurpose::Avatar(id) if ids.contains(id))
+                            || e.live
+                                .as_ref()
+                                .is_some_and(|live| ids.contains(&live.owner))
+                    })
                     .map(|e| e.id.clone())
                     .collect();
                 for id in avatars {
@@ -241,6 +248,7 @@ impl State {
             account_number: _,
             embed_number: _,
             writes: _,
+            live_ids: _,
             uploads: _,
             upload_bytes: _,
             upload_seq: _,
@@ -351,6 +359,14 @@ impl State {
         for (id, e) in embeds.iter_mut() {
             if let Fate::Rename(to) = remap.fate(&e.uploader) {
                 e.uploader = to.to_owned();
+            }
+            if let Some(live) = e.live.as_mut() {
+                if let Fate::Rename(to) = remap.fate(&live.owner) {
+                    live.owner = to.to_owned();
+                    if let Some(post) = live.post.as_mut() {
+                        post.from.insert("user_id".into(), to.into());
+                    }
+                }
             }
             if let EmbedPurpose::Avatar(user_id) = &e.purpose {
                 if let Fate::Rename(to) = remap.fate(user_id) {
@@ -466,6 +482,7 @@ impl State {
             account_number: _,
             embed_number: _,
             writes: _,
+            live_ids: _,
             uploads: _,
             upload_bytes: _,
             upload_seq: _,

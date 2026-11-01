@@ -28,7 +28,6 @@ use super::push::{parse_wake_names, PushRegistration};
 use super::rooms::{ReadCursor, RoomState};
 use super::server::{LogRecord, RecordKind, Server, State};
 use super::status::*;
-use super::streams::StreamBuffer;
 use super::toggles::Feature;
 use super::users::{valid_role, MAX_ROLES};
 use super::webauthn::{PasskeyTimes, PasskeyUser, Session};
@@ -341,14 +340,6 @@ impl Server {
                 seq: stored.seq,
                 ..EmbedState::default()
             };
-            if stored.stream {
-                let stream =
-                    StreamBuffer::new(st.config.stream_keep_bytes, st.config.stream_max_bytes);
-                if stored.finished {
-                    stream.end();
-                }
-                e.stream = Some(Arc::new(stream));
-            }
             if !stored.file.is_empty() {
                 e.path = path::join(&[st.upload_dir.as_str(), stored.file.as_str()]);
                 files.insert(e.path.clone());

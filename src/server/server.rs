@@ -135,6 +135,8 @@ pub struct State {
     pub embeds: BTreeMap<String, EmbedState>,
     /// Each unused write token to its embed.
     pub writes: BTreeMap<String, String>,
+    /// Each open live text's URL secret to its embed (`/live/<secret>`).
+    pub live_ids: BTreeMap<String, String>,
     /// The finished uploads, oldest first, by (seq, embed_id), and their
     /// total size; the oldest leave when the total passes
     /// max_upload_storage_bytes.
@@ -322,6 +324,7 @@ pub fn open(config: Config) -> Result<Arc<Server>, store::StoreError> {
                 embed_number: 0,
                 embeds: BTreeMap::new(),
                 writes: BTreeMap::new(),
+                live_ids: BTreeMap::new(),
                 uploads: BTreeSet::new(),
                 upload_bytes: 0,
                 upload_seq: 0,
@@ -465,8 +468,8 @@ impl Server {
         })
         .expect("constant pattern");
         let server = self.clone();
-        mux.handle_func(super::embeds::STREAM_PATH, move |w, r| {
-            server.handle_stream(w, r)
+        mux.handle_func(super::live_text::LIVE_PATH, move |w, r| {
+            server.handle_live(w, r)
         })
         .expect("constant pattern");
         let server = self.clone();
@@ -589,8 +592,10 @@ impl Server {
                         obj! {"retry_after" => 5i64},
                     ));
                 }
+                // A live text streaming now is lost: its writer is told so,
+                // and the next start ends it with nothing kept.
                 for e in st.embeds.values() {
-                    e.end_stream();
+                    e.end_live(super::live_text::LiveEnd::Unavailable);
                 }
                 // Pending badge pushes would only be dropped once they fire,
                 // and the ends of timed mutes and coalesced statuses would

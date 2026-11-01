@@ -35,13 +35,13 @@ fn test_toggle_usage() {
     let mut admin = admin(&server);
     let mut ada = account(&server);
     assert!(private_reply(&mut admin, "/help")
-        .contains("/toggle <activity|uploads|presence|addmember>"));
+        .contains("/toggle <activity|uploads|presence|addmember|livetext>"));
     for bad in ["/toggle", "/toggle typing", "/toggle activity uploads"] {
         assert_eq!(
             command_error(&mut admin, bad),
             (
                 CODE_INVALID_PARAMS,
-                "Usage: /toggle activity|uploads|presence|addmember".into()
+                "Usage: /toggle activity|uploads|presence|addmember|livetext".into()
             ),
             "{bad}"
         );

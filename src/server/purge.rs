@@ -7,6 +7,7 @@ use std::collections::BTreeSet;
 use super::admin::ADMIN_USER_ID;
 use super::commands::{no_user, private_notice, user_id_args, CommandCtx};
 use super::embeds::{EmbedPurpose, EmbedState};
+use super::live_text::LiveKind;
 use super::protocol::*;
 use super::remap::Remap;
 use super::server::State;
@@ -78,7 +79,7 @@ impl State {
             .filter(|m| ids.contains(&m.owner))
             .map(|m| m.id.clone())
             .collect();
-        let hosted = |e: &EmbedState| !e.is_link() && e.stream.is_none();
+        let hosted = |e: &EmbedState| !e.is_link() && LiveKind::parse(&e.kind).is_none();
         let purged = Purged {
             messages: gone.len(),
             reactions: self

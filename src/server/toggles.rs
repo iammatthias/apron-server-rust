@@ -21,14 +21,17 @@ pub enum Feature {
     Presence,
     /// Accounts adding others to rooms with `room_join` and a `user_id`.
     AddMember,
+    /// Terminal and append embeds and their commands (§4.8.3).
+    LiveText,
 }
 
 impl Feature {
-    pub const ALL: [Feature; 4] = [
+    pub const ALL: [Feature; 5] = [
         Feature::Activity,
         Feature::Uploads,
         Feature::Presence,
         Feature::AddMember,
+        Feature::LiveText,
     ];
 
     pub fn name(self) -> &'static str {
@@ -37,6 +40,7 @@ impl Feature {
             Feature::Uploads => "uploads",
             Feature::Presence => "presence",
             Feature::AddMember => "addmember",
+            Feature::LiveText => "livetext",
         }
     }
 
@@ -55,6 +59,8 @@ impl Feature {
             (Feature::AddMember, false) => "Adding members is now **off**: only admins can add others to a room, and owners their bots.",
             (Feature::Uploads, true) => "Uploads are now **on**.",
             (Feature::Uploads, false) => "Uploads are now **off**: new attachments and avatars are refused, and new connections are not offered uploads.",
+            (Feature::LiveText, true) => "Live text is now **on**: terminals and appends can stream, and new connections are offered them.",
+            (Feature::LiveText, false) => "Live text is now **off**: new terminals and appends are refused, and new connections are not offered them. Texts already streaming finish.",
         }
     }
 }
@@ -67,6 +73,7 @@ impl Feature {
             Feature::Activity => "Activity is turned off here",
             Feature::Presence => "Status is turned off here",
             Feature::AddMember => "Adding members is turned off here",
+            Feature::LiveText => super::live_text::LIVE_TEXT_OFF,
         }
     }
 }

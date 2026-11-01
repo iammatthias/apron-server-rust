@@ -611,13 +611,13 @@ fn test_help_lists_invite_device_for_accounts() {
     assert_eq!(
         only_notice(&mut ada, "/help"),
         format!(
-            "- `/avatar`: with one image attached: set your avatar\n- `/help`: list the commands you can use here\n- `/invite-bot`: get a token that signs in as your bot, named after you; again, it replaces the token and renames the bot\n{listed}\n- `/passkeys [remove <n>]`: list your account's passkeys, or remove one of them"
+            "- `/avatar`: with one image attached: set your avatar\n- `/embed-append [markdown]`: get a link to stream text into a message that starts with [markdown], such as an LLM's reply: the message appears when the stream starts\n- `/embed-terminal [title]`: get a link to stream a terminal (80×40) into this room, such as a build: the message appears when the stream starts\n- `/help`: list the commands you can use here\n- `/invite-bot`: get a token that signs in as your bot, named after you; again, it replaces the token and renames the bot\n{listed}\n- `/passkeys [remove <n>]`: list your account's passkeys, or remove one of them"
         ),
         "account's help"
     );
     assert_eq!(
         only_notice(&mut guest, "/help"),
-        "- `/help`: list the commands you can use here",
+        "- `/embed-append [markdown]`: get a link to stream text into a message that starts with [markdown], such as an LLM's reply: the message appears when the stream starts\n- `/embed-terminal [title]`: get a link to stream a terminal (80×40) into this room, such as a build: the message appears when the stream starts\n- `/help`: list the commands you can use here",
         "guest's help"
     );
 }

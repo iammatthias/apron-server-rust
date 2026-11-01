@@ -150,6 +150,8 @@ fn test_admin_commands_for_admins_only() {
         [
             "admin",
             "avatar",
+            "embed-append",
+            "embed-terminal",
             "emoji",
             "help",
             "invite-bot",

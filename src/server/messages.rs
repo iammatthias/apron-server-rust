@@ -430,7 +430,7 @@ impl State {
         if !replacing {
             message_id = format_id(log_id);
         }
-        // Embeds are resolved last: a new upload or stream embed reserves a
+        // Embeds are resolved last: a new upload or live text embed reserves a
         // write.
         let mut written: Vec<Json> = Vec::new();
         if let Some(body) = body.as_mut() {
@@ -578,6 +578,19 @@ impl State {
         };
         if !edit(body) {
             return;
+        }
+        // A message left with neither text nor embeds, as by a failed write
+        // or a live text that kept nothing, is a tombstone (Cloudflare's
+        // rewriteEmbed).
+        let text = body.get("text").and_then(Json::as_str).unwrap_or("");
+        if text.is_empty()
+            && body
+                .get("embeds")
+                .map(Json::as_list)
+                .unwrap_or(&[])
+                .is_empty()
+        {
+            tombstone(&mut snapshot);
         }
         let log_id = self.next_id_locked();
         snapshot.insert("log_id".into(), format_id(log_id).into());
