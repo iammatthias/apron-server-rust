@@ -444,8 +444,8 @@ impl Server {
         }
     }
 
-    /// Returns the HTTP handler serving /ws, /healthz, the upload, file, and
-    /// stream endpoints, and StaticDir.
+    /// Returns the HTTP handler serving /ws, /healthz, the upload, file and
+    /// stream endpoints, the well-known passkey files, and StaticDir.
     pub fn handler(self: &Arc<Self>) -> Arc<dyn Handler> {
         let mux = ServeMux::new();
         let server = self.clone();
@@ -472,6 +472,21 @@ impl Server {
         let server = self.clone();
         mux.handle_func(CATALOG_PATH, move |w, r| server.handle_catalog(w, r))
             .expect("constant pattern");
+        if let Some(web_authn) = &self.config.web_authn {
+            let origins: Vec<Json> = web_authn
+                .config
+                .rp_origins
+                .iter()
+                .map(|origin| Json::from(origin.clone()))
+                .collect();
+            let body =
+                encode_json(&obj! {"origins" => Json::Array(origins)}).expect("strings encode");
+            let rp_id = web_authn.config.rpid.clone();
+            mux.handle_func(super::webauthn::RELATED_ORIGINS_PATH, move |w, r| {
+                super::webauthn::handle_related_origins(w, r, &rp_id, &body)
+            })
+            .expect("constant pattern");
+        }
         if !self.config.apple_app_ids.is_empty() {
             let apps: Vec<Json> = self
                 .config

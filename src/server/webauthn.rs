@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use rust_stdlib::encoding::base64::URL_SAFE_NO_PAD;
 use rust_stdlib::encoding::json::jsontext::Value;
+use rust_stdlib::net::http;
 use rust_stdlib::time::{self, Duration, Time};
 use rust_stdlib_crypto::{rand, sha256};
 
@@ -28,6 +29,42 @@ use crate::webauthn::{self, Credential, SessionData, User};
 pub use crate::webauthn::WebAuthn;
 
 pub const PASSKEY_LIFETIME: Duration = Duration::from_mins(2);
+
+/// Where a browser looks for an RP ID's related origins:
+/// https://www.w3.org/TR/webauthn-3/#sctn-related-origins
+pub const RELATED_ORIGINS_PATH: &str = "/.well-known/webauthn";
+
+/// `GET` or `HEAD` of `/.well-known/webauthn` on the host that is the RP ID:
+/// `--webauthn.origin`s as WebAuthn related origins, so a frontend on
+/// another site may use this RP ID (apron-server-cloudflare's
+/// handleRelatedOrigins). On another host, where a browser never looks, or
+/// with any other method, the path is unknown.
+pub(crate) fn handle_related_origins(
+    w: &mut dyn http::ResponseWriter,
+    r: &mut http::Request,
+    rp_id: &str,
+    body: &[u8],
+) {
+    let host = match rust_stdlib::net::split_host_port(&r.host) {
+        Ok((host, _)) => host,
+        Err(_) => r.host.clone(),
+    };
+    if (r.method != http::METHOD_GET && r.method != http::METHOD_HEAD)
+        || !host.eq_ignore_ascii_case(rp_id)
+    {
+        http::not_found(w, r);
+        return;
+    }
+    let header = w.header();
+    header.set("Content-Type", "application/json");
+    header.set("Cache-Control", "public, max-age=300");
+    header.set("X-Content-Type-Options", "nosniff");
+    if r.method == http::METHOD_HEAD {
+        w.write_header(http::STATUS_OK);
+        return;
+    }
+    let _ = std::io::Write::write_all(w, body);
+}
 pub const SESSION_LIFETIME: Duration = Duration::from_hours(30 * 24);
 /// Passkeys one account may hold (Cloudflare's MAX_PASSKEYS_PER_USER).
 pub const MAX_PASSKEYS: usize = 8;

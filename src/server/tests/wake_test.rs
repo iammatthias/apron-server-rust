@@ -142,6 +142,47 @@ fn test_push_waits_for_those_still_away() {
     assert!(relay.pushes(&server, &mut alice).is_empty(), "pushed again");
 }
 
+/// A role mention, `@&mod` (Appendix A.3), is the client's to expand: the
+/// server keeps `body.mentions` as sent, reads nothing out of the text, and
+/// wakes the users the list names.
+#[test]
+fn test_role_mentions_are_kept_as_sent_and_wake_the_listed_users() {
+    let relay = new_test_relay();
+    let server = wake_server(DELAY);
+    let mut alice = push_client(&server);
+    let mut bob = push_client(&server);
+    let mut cat = push_client(&server);
+    let mut dan = push_client(&server);
+    for (c, name) in [(&mut bob, "bob"), (&mut cat, "cat"), (&mut dan, "dan")] {
+        subscribe(c, &relay, name);
+        go_idle(c);
+    }
+    let (bob_id, cat_id) = (bob.user_id.clone(), cat.user_id.clone());
+    alice.drain();
+    let id = alice.next_id("post");
+    let (_, delivered) = save(
+        &mut alice,
+        &id,
+        mention("general", "@&mod on call?", &[&bob_id, &cat_id]),
+    );
+    assert_eq!(
+        delivered["body"],
+        Json::from(obj! {
+            "text" => "@&mod on call?",
+            "format" => "plain",
+            "embeds" => Json::Array(Vec::new()),
+            "mentions" => list(&[&bob_id, &cat_id]),
+        }),
+        "the body as delivered"
+    );
+    wait_out();
+    assert_eq!(
+        paths(&relay.pushes(&server, &mut alice)),
+        strs(&["/bob", "/cat"]),
+        "the listed users are woken, and no one else"
+    );
+}
+
 #[test]
 fn test_dropped_wake_spends_no_coalescing() {
     let relay = new_test_relay();

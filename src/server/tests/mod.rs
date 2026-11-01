@@ -46,6 +46,7 @@ mod reference_rooms_test;
 mod reference_test;
 mod reference_users_test;
 mod registration_limits_test;
+mod related_origins_test;
 mod rename_test;
 mod retention_test;
 mod server_history_test;

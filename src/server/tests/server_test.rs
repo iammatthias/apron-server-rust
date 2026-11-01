@@ -65,8 +65,8 @@ fn test_server_frame() {
     let (_, frame) = dial_raw(&server);
     let params = frame["params"].as_object().unwrap();
     assert!(
-        params["apron"] == f(9)
-            && params["agent"] == Json::from("apron-rust/9")
+        params["apron"] == f(10)
+            && params["agent"] == Json::from("apron-rust/10")
             && params["ping"] == f(30),
         "version, agent, and ping: {params:?}"
     );

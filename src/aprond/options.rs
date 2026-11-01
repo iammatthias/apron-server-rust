@@ -247,7 +247,7 @@ pub static GROUPS: &[Group] = &[
         namespace: "webauthn",
         options: &[
             spec!("rp-id", Str, webauthn.rp_id, ["localhost"], [], "Passkey relying party domain; empty disables passkeys"),
-            spec!("origin", List, webauthn.origins, ["http://localhost:5173", "http://localhost:8080"], [], "Exact frontend origin for passkeys; repeat for more"),
+            spec!("origin", List, webauthn.origins, ["http://localhost:5173", "http://localhost:8080"], [], "Exact frontend origin for passkeys; repeat for more. One outside --webauthn.rp-id is a WebAuthn related origin, which this server lists for browsers at /.well-known/webauthn on the rp-id host"),
         ],
     },
     Group {
@@ -377,7 +377,7 @@ pub static GROUPS: &[Group] = &[
             spec!("ip-history-per-day", Int, limit.ip_history_per_day, ["6000"], [], "History pages one client address may request a UTC day; 0 is unlimited"),
             spec!("server-history-per-day", Int, limit.server_history_per_day, ["40000"], [], "History pages everyone may request a UTC day; 0 is unlimited"),
             spec!("offline-grace-seconds", Int, limit.offline_grace_seconds, ["60"], [], "Seconds a status change a closed connection caused waits, so a reconnect within them shows others nothing; 0 to 60"),
-            spec!("presence-alarm-seconds", Int, limit.presence_alarm_seconds, ["15"], [], "A registered user's waiting status change, or timed mute's end, goes out at the next multiple of these seconds since the epoch, unless a frame comes after it is due; 0 to 60, 0 for none"),
+            spec!("presence-alarm-seconds", Int, limit.presence_alarm_seconds, ["15"], [], "A registered user's waiting status change, or timed mute's end, goes out at the next multiple of these seconds since the epoch, unless a frame, a WebSocket request or a close comes after it is due; 0 to 60, 0 for none"),
             spec!("guest-presence-alarm-seconds", Int, limit.guest_presence_alarm_seconds, ["60"], [], "The same for a guest, a multiple of --limit.presence-alarm-seconds; 0 to 60"),
             spec!("registrations-per-ip-day", Int, limit.registrations_per_ip_day, ["5"], [], "Registrations from one client address a UTC day: new accounts, by passkey, email or invite, new bots and passkeys added to an account; 0 is unlimited"),
             spec!("registrations-per-day", Int, limit.registrations_per_day, ["300"], [], "Registrations of everyone on the server a UTC day; 0 is unlimited"),

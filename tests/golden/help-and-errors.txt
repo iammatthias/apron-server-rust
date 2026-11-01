@@ -87,7 +87,12 @@ Passkeys:
                                             disables passkeys (default:
                                             localhost)
       --webauthn.origin=                    Exact frontend origin for passkeys;
-                                            repeat for more (default:
+                                            repeat for more. One outside
+                                            --webauthn.rp-id is a WebAuthn
+                                            related origin, which this server
+                                            lists for browsers at
+                                            /.well-known/webauthn on the rp-id
+                                            host (default:
                                             http://localhost:5173,
                                             http://localhost:8080)
 
@@ -374,7 +379,8 @@ Limits:
                                             change, or timed mute's end, goes
                                             out at the next multiple of these
                                             seconds since the epoch, unless a
-                                            frame comes after it is due; 0 to
+                                            frame, a WebSocket request or a
+                                            close comes after it is due; 0 to
                                             60, 0 for none (default: 15)
       --limit.guest-presence-alarm-seconds= The same for a guest, a multiple of
                                             --limit.presence-alarm-seconds; 0
@@ -505,7 +511,12 @@ Passkeys:
                                             disables passkeys (default:
                                             localhost)
       --webauthn.origin=                    Exact frontend origin for passkeys;
-                                            repeat for more (default:
+                                            repeat for more. One outside
+                                            --webauthn.rp-id is a WebAuthn
+                                            related origin, which this server
+                                            lists for browsers at
+                                            /.well-known/webauthn on the rp-id
+                                            host (default:
                                             http://localhost:5173,
                                             http://localhost:8080)
 
@@ -792,7 +803,8 @@ Limits:
                                             change, or timed mute's end, goes
                                             out at the next multiple of these
                                             seconds since the epoch, unless a
-                                            frame comes after it is due; 0 to
+                                            frame, a WebSocket request or a
+                                            close comes after it is due; 0 to
                                             60, 0 for none (default: 15)
       --limit.guest-presence-alarm-seconds= The same for a guest, a multiple of
                                             --limit.presence-alarm-seconds; 0
@@ -923,7 +935,12 @@ Passkeys:
                                             disables passkeys (default:
                                             localhost)
       --webauthn.origin=                    Exact frontend origin for passkeys;
-                                            repeat for more (default:
+                                            repeat for more. One outside
+                                            --webauthn.rp-id is a WebAuthn
+                                            related origin, which this server
+                                            lists for browsers at
+                                            /.well-known/webauthn on the rp-id
+                                            host (default:
                                             http://localhost:5173,
                                             http://localhost:8080)
 
@@ -1210,7 +1227,8 @@ Limits:
                                             change, or timed mute's end, goes
                                             out at the next multiple of these
                                             seconds since the epoch, unless a
-                                            frame comes after it is due; 0 to
+                                            frame, a WebSocket request or a
+                                            close comes after it is due; 0 to
                                             60, 0 for none (default: 15)
       --limit.guest-presence-alarm-seconds= The same for a guest, a multiple of
                                             --limit.presence-alarm-seconds; 0

@@ -61,8 +61,8 @@ impl State {
         .map(|(s, _)| s.to_string())
         .collect();
         let mut params = obj! {
-            "apron" => 9i64,
-            "agent" => "apron-rust/9",
+            "apron" => 10i64,
+            "agent" => "apron-rust/10",
             "auth" => auth_schemes.clone(),
             "ping" => (self.config.ping_interval.as_nanos() / time::SECOND.as_nanos()).max(1),
         };

@@ -54,7 +54,7 @@ admin-token-file = ""
 # Passkey relying party domain; empty disables passkeys
 rp-id = "localhost"
 
-# Exact frontend origin for passkeys; repeat for more
+# Exact frontend origin for passkeys; repeat for more. One outside --webauthn.rp-id is a WebAuthn related origin, which this server lists for browsers at /.well-known/webauthn on the rp-id host
 origin = ["http://localhost:5173", "http://localhost:8080"]
 
 [upload]
@@ -284,7 +284,7 @@ server-history-per-day = 40000
 # Seconds a status change a closed connection caused waits, so a reconnect within them shows others nothing; 0 to 60
 offline-grace-seconds = 60
 
-# A registered user's waiting status change, or timed mute's end, goes out at the next multiple of these seconds since the epoch, unless a frame comes after it is due; 0 to 60, 0 for none
+# A registered user's waiting status change, or timed mute's end, goes out at the next multiple of these seconds since the epoch, unless a frame, a WebSocket request or a close comes after it is due; 0 to 60, 0 for none
 presence-alarm-seconds = 15
 
 # The same for a guest, a multiple of --limit.presence-alarm-seconds; 0 to 60
@@ -368,7 +368,7 @@ admin-token-file = ""
 # Passkey relying party domain; empty disables passkeys
 rp-id = "localhost"
 
-# Exact frontend origin for passkeys; repeat for more
+# Exact frontend origin for passkeys; repeat for more. One outside --webauthn.rp-id is a WebAuthn related origin, which this server lists for browsers at /.well-known/webauthn on the rp-id host
 origin = ["http://localhost:5173", "http://localhost:8080"]
 
 [upload]
@@ -598,7 +598,7 @@ server-history-per-day = 40000
 # Seconds a status change a closed connection caused waits, so a reconnect within them shows others nothing; 0 to 60
 offline-grace-seconds = 60
 
-# A registered user's waiting status change, or timed mute's end, goes out at the next multiple of these seconds since the epoch, unless a frame comes after it is due; 0 to 60, 0 for none
+# A registered user's waiting status change, or timed mute's end, goes out at the next multiple of these seconds since the epoch, unless a frame, a WebSocket request or a close comes after it is due; 0 to 60, 0 for none
 presence-alarm-seconds = 15
 
 # The same for a guest, a multiple of --limit.presence-alarm-seconds; 0 to 60
@@ -683,7 +683,7 @@ admin-token-file = ""
 # Passkey relying party domain; empty disables passkeys
 rp-id = "localhost"
 
-# Exact frontend origin for passkeys; repeat for more
+# Exact frontend origin for passkeys; repeat for more. One outside --webauthn.rp-id is a WebAuthn related origin, which this server lists for browsers at /.well-known/webauthn on the rp-id host
 origin = ["https://only.example"]
 
 [upload]
@@ -913,7 +913,7 @@ server-history-per-day = 40000
 # Seconds a status change a closed connection caused waits, so a reconnect within them shows others nothing; 0 to 60
 offline-grace-seconds = 60
 
-# A registered user's waiting status change, or timed mute's end, goes out at the next multiple of these seconds since the epoch, unless a frame comes after it is due; 0 to 60, 0 for none
+# A registered user's waiting status change, or timed mute's end, goes out at the next multiple of these seconds since the epoch, unless a frame, a WebSocket request or a close comes after it is due; 0 to 60, 0 for none
 presence-alarm-seconds = 15
 
 # The same for a guest, a multiple of --limit.presence-alarm-seconds; 0 to 60
@@ -997,7 +997,7 @@ admin-token-file = ""
 # Passkey relying party domain; empty disables passkeys
 rp-id = "localhost"
 
-# Exact frontend origin for passkeys; repeat for more
+# Exact frontend origin for passkeys; repeat for more. One outside --webauthn.rp-id is a WebAuthn related origin, which this server lists for browsers at /.well-known/webauthn on the rp-id host
 origin = ["http://localhost:5173", "http://localhost:8080"]
 
 [upload]
@@ -1227,7 +1227,7 @@ server-history-per-day = 40000
 # Seconds a status change a closed connection caused waits, so a reconnect within them shows others nothing; 0 to 60
 offline-grace-seconds = 60
 
-# A registered user's waiting status change, or timed mute's end, goes out at the next multiple of these seconds since the epoch, unless a frame comes after it is due; 0 to 60, 0 for none
+# A registered user's waiting status change, or timed mute's end, goes out at the next multiple of these seconds since the epoch, unless a frame, a WebSocket request or a close comes after it is due; 0 to 60, 0 for none
 presence-alarm-seconds = 15
 
 # The same for a guest, a multiple of --limit.presence-alarm-seconds; 0 to 60
