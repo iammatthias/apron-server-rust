@@ -34,6 +34,8 @@
 // room, as its account, and the read receipt checks read that room's cursors.
 import { createECDH, randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
+import http from "node:http";
+import https from "node:https";
 
 const base = (process.env.APRON_PUBLIC_URL ?? "https://apron.farfield.systems").replace(/\/$/, "");
 const wsURL = `${base.replace(/^http/, "ws")}/ws`;
@@ -700,6 +702,17 @@ function streamTo(url) {
     .catch((e) => ({ status: 0, text: String(e.cause ?? e) }));
   return { send: (text) => controller.enqueue(typeof text === "string" ? new TextEncoder().encode(text) : text), end: () => controller.close(), answer };
 }
+// A GET of url as a browser opening it as a page sends it, not following a
+// redirect. fetch always sends Sec-Fetch-Mode: cors, so this uses node:https.
+function openAsPage(url) {
+  return new Promise((resolve, reject) => {
+    const request = (url.startsWith("https:") ? https : http).get(url, { headers: { "Sec-Fetch-Mode": "navigate" } }, (response) => {
+      response.destroy();
+      resolve({ status: response.statusCode, headers: response.headers });
+    });
+    request.on("error", reject);
+  });
+}
 // A reader of a live text's url, collecting what it reads as text. Through
 // the Cloudflare edge, a reader's response headers arrive with its first
 // bytes, so it is not awaited before they come.
@@ -793,10 +806,9 @@ async function liveText(acct, roomID, acctID) {
       const started = await snapshotOf(acct, from, id, (p) => p.body?.embeds?.[0]?.url !== undefined);
       const embed = started.params.body.embeds[0];
       if (canonical(embed.og) !== canonical(terminalCard("Terminal"))) return `og ${JSON.stringify(embed.og)}`;
-      const page = await fetch(embed.url, { headers: { "Sec-Fetch-Mode": "navigate" }, redirect: "manual" });
-      await page.body?.cancel();
+      const page = await openAsPage(embed.url);
       const want = `https://terminal.apron.chat/#${new URLSearchParams({ stream: embed.url })}`;
-      if (page.status !== 302 || page.headers.get("location") !== want) return `page ${page.status} ${page.headers.get("location")}, want 302 ${want}`;
+      if (page.status !== 302 || page.headers.location !== want || page.headers.vary !== "Sec-Fetch-Mode") return `page ${page.status} ${JSON.stringify(page.headers)}, want 302 ${want}`;
       const reader = readLive(embed.url);
       await reader.waitFor("viewer\r\n");
       if (reader.status !== 200 || reader.headers.get("vary") !== "Sec-Fetch-Mode") return `reader ${reader.status}, Vary ${reader.headers.get("vary")}`;
