@@ -174,6 +174,45 @@ burst is 3 and no flag changes it. The 6 failures and 1 warning are guest
 policy (guests cannot rename, set a profile, create rooms or private
 rooms, or register push) and the frame size limit, none in live text.
 
+### Terminal cards and the viewer (CF 7feeebc, shazow/apron 3caa521)
+
+Ported on 2026-11-01, moving the pins to apron-server-cloudflare 7feeebc
+(#72) and shazow/apron 3caa521 (#108). Cloudflare #66 (48784c1), between
+the old pin and this one, merged the `url`-at-write-start shape this server
+already had, so that deviation is gone.
+
+- A terminal embed carries the server's `og` (§4.8.1): `{title, description}`,
+  its title (`Terminal` without one) and "Terminal output. Open it to
+  watch.", one description in every state, as Cloudflare's final commit has
+  it. `terminal_og` in `src/server/live_text.rs` builds it where the embed
+  is assembled: a message's new terminal and a save in
+  `resolve_embeds_locked` (`src/server/embeds.rs`), and a command's message
+  in `post_live_message_locked`. It is not an owned field: a save retitles
+  it, and `owned` is restored as is. The url's and the output's
+  republishes edit the embed in place, so the og rides along. A sender's
+  og is dropped, and an append has none. A finished terminal stored before
+  this change gets its og at its next save, as on Cloudflare.
+- `GET` of a terminal's `url` with `Sec-Fetch-Mode: navigate` is a 302 to
+  `--terminal-viewer-url` (default https://terminal.apron.chat/, empty for
+  none, checked at startup) with `#stream=<url>`, before the read is
+  counted. Other reads of a terminal with a viewer carry
+  `Vary: Sec-Fetch-Mode`; an append's never redirect. An unknown or ended
+  text is 404 first. The commit message mentions `title=` in the fragment
+  and three state descriptions; its last sub-commit dropped both.
+- shazow/apron 3caa521 makes the redirect a MAY with the url kept from the
+  viewer's host (§4.8.5, §5.5), which the fragment does.
+- The router (`deploy/router.Caddyfile`) and the host's Caddy pass request
+  headers through and return an upstream's redirect as is, so nothing
+  there changed; `tools/deploy/live-check.mjs` proves the 302 through the
+  public URL, writing its text to the router's port so the text is still
+  open.
+- apron-server-go has none of this; the words are Cloudflare's.
+
+Tests: `test_a_terminal_opened_as_a_page_goes_to_the_viewer`,
+`test_without_a_viewer_a_page_gets_the_text` and the og literals in
+`live_text_test.rs`; `test_terminal_viewer_url_settings` in
+`src/aprond/config_test.rs` with Cloudflare's invalid values.
+
 ## Migrating a guest_<n> account
 
 Accounts registered before 2026-10-28, such as the live `guest_1` with its

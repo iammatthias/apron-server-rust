@@ -70,6 +70,7 @@ fn server_config(settings: Settings) -> Result<server::Config, String> {
     config.static_dir = settings.static_dir;
     config.allow_any_origin = settings.allow_any_origin;
     config.public_url = settings.public_url;
+    config.terminal_viewer_url = settings.terminal_viewer_url;
     config.max_connections = count(settings.max_connections);
     config.max_listed_members = count(settings.max_listed_members);
     config.max_private_rooms = count(settings.max_private_rooms);

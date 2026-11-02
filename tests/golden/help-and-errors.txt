@@ -25,6 +25,15 @@ Application Options:
                                             https://chat.example (default: each
                                             request's host, or
                                             https://<tls.domain>)
+      --terminal-viewer-url=                Page that a browser opening a
+                                            terminal's live text URL goes to,
+                                            with the URL in its fragment: an
+                                            http(s) URL without a fragment or
+                                            user info, or empty for none, so
+                                            browsers get the plain text (none
+                                            for an http live text URL when it
+                                            is https) (default:
+                                            https://terminal.apron.chat/)
       --max-connections=                    Maximum concurrent WebSockets; 0 is
                                             unlimited (default: 100)
       --max-listener-connections=           Maximum concurrent TCP connections
@@ -462,6 +471,15 @@ Application Options:
                                             https://chat.example (default: each
                                             request's host, or
                                             https://<tls.domain>)
+      --terminal-viewer-url=                Page that a browser opening a
+                                            terminal's live text URL goes to,
+                                            with the URL in its fragment: an
+                                            http(s) URL without a fragment or
+                                            user info, or empty for none, so
+                                            browsers get the plain text (none
+                                            for an http live text URL when it
+                                            is https) (default:
+                                            https://terminal.apron.chat/)
       --max-connections=                    Maximum concurrent WebSockets; 0 is
                                             unlimited (default: 100)
       --max-listener-connections=           Maximum concurrent TCP connections
@@ -899,6 +917,15 @@ Application Options:
                                             https://chat.example (default: each
                                             request's host, or
                                             https://<tls.domain>)
+      --terminal-viewer-url=                Page that a browser opening a
+                                            terminal's live text URL goes to,
+                                            with the URL in its fragment: an
+                                            http(s) URL without a fragment or
+                                            user info, or empty for none, so
+                                            browsers get the plain text (none
+                                            for an http live text URL when it
+                                            is https) (default:
+                                            https://terminal.apron.chat/)
       --max-connections=                    Maximum concurrent WebSockets; 0 is
                                             unlimited (default: 100)
       --max-listener-connections=           Maximum concurrent TCP connections

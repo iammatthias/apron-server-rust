@@ -420,6 +420,11 @@ fn live_config() -> Config {
     default_config()
 }
 
+/// A terminal embed's og, as the server gives it (§4.8.1).
+fn card(title: &str) -> Json {
+    obj! {"title" => title, "description" => "Terminal output. Open it to watch."}.into()
+}
+
 #[test]
 fn test_live_text_is_advertised_and_toggled() {
     let server = admin_test_server();
@@ -488,7 +493,7 @@ fn test_embed_terminal_streams_then_keeps_its_output() {
     assert_eq!(
         body,
         obj! {"text" => "", "format" => "plain", "embeds" => vec![Json::from(obj! {
-            "embed_id" => embed["embed_id"].clone(), "kind" => "terminal", "title" => "make test", "url" => url.as_str(),
+            "embed_id" => embed["embed_id"].clone(), "kind" => "terminal", "title" => "make test", "url" => url.as_str(), "og" => card("make test"),
         })]}
     );
     let reader = Reader::open(&url);
@@ -514,7 +519,7 @@ fn test_embed_terminal_streams_then_keeps_its_output() {
     assert_eq!(
         body_of(&finished)["embeds"],
         Json::from(vec![Json::from(obj! {
-            "embed_id" => embed["embed_id"].clone(), "kind" => "terminal", "title" => "make test", "output" => output,
+            "embed_id" => embed["embed_id"].clone(), "kind" => "terminal", "title" => "make test", "output" => output, "og" => card("make test"),
         })])
     );
     assert_eq!(finished["prev_log_id"], posted["log_id"]);
@@ -688,8 +693,8 @@ fn test_message_embeds_get_their_url_when_the_write_starts() {
     let embed_id = waiting_embed(&result)["embed_id"].clone();
     assert_eq!(
         waiting_embed(&result),
-        obj! {"embed_id" => embed_id.clone(), "kind" => "terminal", "title" => "ci"},
-        "the embed waits for its writer, with no url"
+        obj! {"embed_id" => embed_id.clone(), "kind" => "terminal", "title" => "ci", "og" => card("ci")},
+        "the embed waits for its writer, with no url, and the server's og for the sender's"
     );
     assert_eq!(
         written(&result).keys().cloned().collect::<Vec<_>>(),
@@ -708,7 +713,7 @@ fn test_message_embeds_get_their_url_when_the_write_starts() {
     assert_eq!(
         body_of(&started),
         obj! {"text" => "Build:", "format" => "plain", "embeds" => vec![Json::from(obj! {
-            "embed_id" => embed_id.clone(), "kind" => "terminal", "title" => "ci", "url" => url.as_str(),
+            "embed_id" => embed_id.clone(), "kind" => "terminal", "title" => "ci", "url" => url.as_str(), "og" => card("ci"),
         })]}
     );
     assert_eq!(started["prev_log_id"], posted["log_id"]);
@@ -731,19 +736,31 @@ fn test_message_embeds_get_their_url_when_the_write_starts() {
     assert_eq!(
         body_of(&finished),
         obj! {"text" => "Build:", "format" => "plain", "embeds" => vec![Json::from(obj! {
-            "embed_id" => embed_id.clone(), "kind" => "terminal", "title" => "ci", "output" => "step 1\n",
+            "embed_id" => embed_id.clone(), "kind" => "terminal", "title" => "ci", "output" => "step 1\n", "og" => card("ci"),
         })]}
     );
-    // A save keeps the output and takes a new title; a kind cannot change.
+    // A save keeps the output and takes a new title, its og retitled with
+    // it; a kind cannot change.
     let (_, saved) = save(
         &mut writer,
         "retitle",
-        obj! {"message_id" => result["message_id"].clone(), "body" => obj! {"text" => "Build:", "embeds" => vec![Json::from(obj! {"embed_id" => embed_id.clone(), "kind" => "terminal", "title" => "ci 2", "output" => "forged"})]}},
+        obj! {"message_id" => result["message_id"].clone(), "body" => obj! {"text" => "Build:", "embeds" => vec![Json::from(obj! {"embed_id" => embed_id.clone(), "kind" => "terminal", "title" => "ci 2", "output" => "forged", "og" => obj! {"title" => "forged"}})]}},
     );
     assert_eq!(
         body_of(&saved)["embeds"],
         Json::from(vec![Json::from(
-            obj! {"embed_id" => embed_id.clone(), "kind" => "terminal", "title" => "ci 2", "output" => "step 1\n"}
+            obj! {"embed_id" => embed_id.clone(), "kind" => "terminal", "title" => "ci 2", "output" => "step 1\n", "og" => card("ci 2")}
+        )])
+    );
+    let (_, untitled) = save(
+        &mut writer,
+        "untitle",
+        obj! {"message_id" => result["message_id"].clone(), "body" => obj! {"text" => "Build:", "embeds" => vec![Json::from(obj! {"embed_id" => embed_id.clone(), "kind" => "terminal"})]}},
+    );
+    assert_eq!(
+        body_of(&untitled)["embeds"],
+        Json::from(vec![Json::from(
+            obj! {"embed_id" => embed_id.clone(), "kind" => "terminal", "output" => "step 1\n", "og" => card("Terminal")}
         )])
     );
     writer.expect_error(
@@ -1175,4 +1192,160 @@ fn test_a_writer_that_disconnects_ends_the_text() {
         Some(&Json::from("half\n"))
     );
     assert!(server.app.lock().live_ids.is_empty());
+}
+
+/// A request from a browser that opens `url` as a page
+/// (`Sec-Fetch-Mode: navigate`), not following a redirect; the body is
+/// left unread, since a text's streams until it ends.
+fn navigate(method: &str, url: &str) -> (u16, http::Header) {
+    use rust_stdlib::net::http::client::Client;
+    use rust_stdlib::net::http::{BoxError, ERR_USE_LAST_RESPONSE};
+    let client = Client {
+        check_redirect: Some(Arc::new(|_, _| {
+            Err(Box::new(ERR_USE_LAST_RESPONSE) as BoxError)
+        })),
+        ..Client::default()
+    };
+    let mut request = http::Request::new(method, url).unwrap();
+    request.header.set("Sec-Fetch-Mode", "navigate");
+    let response = client
+        .do_request(request)
+        .unwrap_or_else(|e| panic!("{method} {url}: {e}"));
+    (response.status_code, response.header)
+}
+
+/// Starts a terminal titled `title` in a message, with a sender's og: its
+/// writer, the writer's answer, the message's id, its embed's id and its url.
+fn live_terminal(
+    c: &mut TestClient,
+    title: &str,
+) -> (
+    PipeWriter,
+    mpsc::Receiver<(u16, String)>,
+    String,
+    Json,
+    String,
+) {
+    let result = super::helpers::post_embeds(
+        c,
+        "terminal",
+        obj! {"body" => obj! {"text" => "Build:", "embeds" => vec![Json::from(obj! {"kind" => "terminal", "title" => title, "og" => obj! {"title" => "forged"}})]}},
+    );
+    let message_id = result["message_id"].as_str().unwrap().to_owned();
+    let embed_id = waiting_embed(&result)["embed_id"].clone();
+    let (put, done) = stream_to(written(&result)["write_url"].as_str().unwrap());
+    let (_, url) = url_added(c, &message_id);
+    (put, done, message_id, embed_id, url)
+}
+
+#[test]
+fn test_a_terminal_opened_as_a_page_goes_to_the_viewer() {
+    let mut config = live_config();
+    config.terminal_viewer_url = "http://terminal.test/view".into();
+    let server = new_test_server(config);
+    let mut writer = dial_test_client(&server);
+    writer.drain();
+    let (put, done, message_id, embed_id, url) = live_terminal(&mut writer, "ci");
+    // A save while it is live keeps the server's og too (§4.8.1).
+    let (_, saved) = save(
+        &mut writer,
+        "resave",
+        obj! {"message_id" => message_id.as_str(), "body" => obj! {"text" => "Build:", "embeds" => vec![Json::from(obj! {"embed_id" => embed_id.clone(), "kind" => "terminal", "title" => "ci", "og" => obj! {"title" => "forged"}})]}},
+    );
+    assert_eq!(
+        body_of(&saved)["embeds"],
+        Json::from(vec![Json::from(
+            obj! {"embed_id" => embed_id, "kind" => "terminal", "title" => "ci", "url" => url.as_str(), "og" => card("ci")}
+        )])
+    );
+    // The url goes in the fragment (§4.8.5), and redirects are no reads:
+    // more of them than reads_per_text leave a reader its read.
+    let location = format!(
+        "http://terminal.test/view#stream={}",
+        url.replace(':', "%3A").replace('/', "%2F")
+    );
+    for _ in 0..=server.app.config.live.reads_per_text {
+        let (status, header) = navigate("GET", &url);
+        assert_eq!(
+            (
+                status,
+                header.get("Location"),
+                header.get("Vary"),
+                header.get("Cache-Control")
+            ),
+            (
+                302,
+                Some(location.as_str()),
+                Some("Sec-Fetch-Mode"),
+                Some("no-store")
+            )
+        );
+    }
+    // HEAD, even from a page, gets the text's headers.
+    let (status, header) = navigate("HEAD", &url);
+    assert_eq!(
+        (status, header.get("Content-Type"), header.get("Vary")),
+        (
+            200,
+            Some("text/plain; charset=utf-8"),
+            Some("Sec-Fetch-Mode")
+        )
+    );
+    let reader = Reader::open(&url);
+    assert_eq!(
+        (reader.status, reader.header.get("Vary")),
+        (200, Some("Sec-Fetch-Mode"))
+    );
+    put.write_shared(b"ok\n").unwrap();
+    reader.wait_for(b"ok\n");
+    put.close();
+    assert_eq!(answer(&done), (200, "Done: the text is posted.\n".into()));
+    assert_eq!(reader.ended(), b"ok\n");
+    let finished = snapshot_of(&writer, &message_id);
+    assert_eq!(
+        body_of(&finished)["embeds"].as_list()[0]
+            .as_object()
+            .unwrap()["og"],
+        card("ci")
+    );
+    assert_eq!(navigate("GET", &url).0, 404, "an ended text, from a page");
+
+    // An append's url is never redirected, and it has no og.
+    let result = super::helpers::post_embeds(
+        &mut writer,
+        "append",
+        obj! {"body" => obj! {"text" => "logs:", "embeds" => vec![Json::from(obj! {"kind" => "append", "og" => obj! {"title" => "forged"}})]}},
+    );
+    assert_eq!(waiting_embed(&result).get("og"), None);
+    let (put, done) = stream_to(written(&result)["write_url"].as_str().unwrap());
+    let (_, append_url) = url_added(&writer, result["message_id"].as_str().unwrap());
+    let (status, header) = navigate("GET", &append_url);
+    assert_eq!(
+        (status, header.get("Location"), header.get("Vary")),
+        (200, None, None)
+    );
+    put.close();
+    answer(&done);
+}
+
+#[test]
+fn test_without_a_viewer_a_page_gets_the_text() {
+    // An https viewer reads only https, so an http url has none; an empty
+    // one is none anywhere.
+    for viewer in [DEFAULT_TERMINAL_VIEWER_URL, ""] {
+        let mut config = live_config();
+        config.terminal_viewer_url = viewer.into();
+        let server = new_test_server(config);
+        let mut writer = dial_test_client(&server);
+        writer.drain();
+        let (put, done, _, _, url) = live_terminal(&mut writer, "ci");
+        let (status, header) = navigate("GET", &url);
+        assert_eq!(
+            (status, header.get("Location"), header.get("Vary")),
+            (200, None, None),
+            "{viewer:?}"
+        );
+        put.close();
+        answer(&done);
+    }
 }

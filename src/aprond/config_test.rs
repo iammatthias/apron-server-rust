@@ -531,3 +531,40 @@ fn test_server_metadata_flags() {
     let parser = parse(&["--server.description", &"x".repeat(500)]);
     assert!(server_settings(&parser.options).is_ok(), "500 bytes");
 }
+
+/// apron-server-cloudflare's TERMINAL_VIEWER_URL cases (test/live-text.test.ts).
+#[test]
+fn test_terminal_viewer_url_settings() {
+    let viewer =
+        |args: &[&str]| server_settings(&parse(args).options).map(|s| s.terminal_viewer_url);
+    assert_eq!(viewer(&[]), Ok("https://terminal.apron.chat/".into()));
+    assert_eq!(
+        viewer(&["--terminal-viewer-url", "https://terminal.example/view"]),
+        Ok("https://terminal.example/view".into())
+    );
+    assert_eq!(viewer(&["--terminal-viewer-url="]), Ok(String::new()));
+    assert_eq!(
+        viewer(&["--terminal-viewer-url", " http://localhost:8000/ "]),
+        Ok("http://localhost:8000/".into())
+    );
+    let mut parser = parse(&[]);
+    let (_dir, path) = write_config(r#"terminal-viewer-url = """#);
+    load_config(&mut parser, &path).unwrap();
+    assert_eq!(
+        server_settings(&parser.options).map(|s| s.terminal_viewer_url),
+        Ok(String::new()),
+        "empty in the config file"
+    );
+    for bad in [
+        "terminal.apron.chat",
+        "javascript:alert(1)",
+        "https://terminal.example/#stream=",
+        "https://terminal.example/#",
+        "https://user@terminal.example/",
+    ] {
+        assert_eq!(
+            viewer(&["--terminal-viewer-url", bad]),
+            Err(format!("invalid --terminal-viewer-url \"{bad}\": use an http(s) URL without a fragment or user info, or empty for none")),
+        );
+    }
+}

@@ -16,6 +16,9 @@ allow-any-origin = false
 # External base URL of upload, file, and stream links, such as https://chat.example (default: each request's host, or https://<tls.domain>)
 public-url = ""
 
+# Page that a browser opening a terminal's live text URL goes to, with the URL in its fragment: an http(s) URL without a fragment or user info, or empty for none, so browsers get the plain text (none for an http live text URL when it is https)
+terminal-viewer-url = "https://terminal.apron.chat/"
+
 # Maximum concurrent WebSockets; 0 is unlimited
 max-connections = 100
 
@@ -332,6 +335,9 @@ allow-any-origin = false
 
 # External base URL of upload, file, and stream links, such as https://chat.example (default: each request's host, or https://<tls.domain>)
 public-url = ""
+
+# Page that a browser opening a terminal's live text URL goes to, with the URL in its fragment: an http(s) URL without a fragment or user info, or empty for none, so browsers get the plain text (none for an http live text URL when it is https)
+terminal-viewer-url = "https://terminal.apron.chat/"
 
 # Maximum concurrent WebSockets; 0 is unlimited
 max-connections = 100
@@ -651,6 +657,9 @@ allow-any-origin = false
 # External base URL of upload, file, and stream links, such as https://chat.example (default: each request's host, or https://<tls.domain>)
 public-url = ""
 
+# Page that a browser opening a terminal's live text URL goes to, with the URL in its fragment: an http(s) URL without a fragment or user info, or empty for none, so browsers get the plain text (none for an http live text URL when it is https)
+terminal-viewer-url = "https://terminal.apron.chat/"
+
 # Maximum concurrent WebSockets; 0 is unlimited
 max-connections = 16
 
@@ -967,6 +976,9 @@ allow-any-origin = false
 
 # External base URL of upload, file, and stream links, such as https://chat.example (default: each request's host, or https://<tls.domain>)
 public-url = "https://chat.example"
+
+# Page that a browser opening a terminal's live text URL goes to, with the URL in its fragment: an http(s) URL without a fragment or user info, or empty for none, so browsers get the plain text (none for an http live text URL when it is https)
+terminal-viewer-url = "https://terminal.apron.chat/"
 
 # Maximum concurrent WebSockets; 0 is unlimited
 max-connections = 100

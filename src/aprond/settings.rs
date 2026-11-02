@@ -32,6 +32,8 @@ pub struct Settings {
     pub static_dir: String,
     pub allow_any_origin: bool,
     pub public_url: String,
+    /// `--terminal-viewer-url`; empty for none.
+    pub terminal_viewer_url: String,
     pub max_connections: i64,
     pub max_listed_members: i64,
     pub max_private_rooms: i64,
@@ -146,6 +148,26 @@ fn positive(flag: &str, value: i64) -> Result<usize, String> {
         .ok_or_else(|| format!("invalid --{flag} {value}: use a positive number"))
 }
 
+/// Checks `--terminal-viewer-url`: empty for none, else an http(s) URL
+/// without a fragment or user info, as apron-server-cloudflare's
+/// `TERMINAL_VIEWER_URL` is.
+fn terminal_viewer_url(raw: &str) -> Result<String, String> {
+    let value = raw.trim();
+    if value.is_empty() {
+        return Ok(String::new());
+    }
+    let valid = rust_stdlib::net::url::parse(value).is_ok_and(|u| {
+        (u.scheme == "https" || u.scheme == "http") && !u.host.is_empty() && u.user.is_none()
+    });
+    if !valid || value.contains('#') {
+        return Err(format!(
+            "invalid --terminal-viewer-url {}: use an http(s) URL without a fragment or user info, or empty for none",
+            rust_stdlib::strconv::quote(raw)
+        ));
+    }
+    Ok(value.to_string())
+}
+
 /// main.go's `serverConfig`: turns options into the server's settings, or
 /// the first error Go reports for them.
 pub fn server_settings(options: &Options) -> Result<Settings, String> {
@@ -160,6 +182,7 @@ pub fn server_settings(options: &Options) -> Result<Settings, String> {
             config.public_url = format!("https://{domain}");
         }
     }
+    config.terminal_viewer_url = terminal_viewer_url(&options.terminal_viewer_url)?;
     config.max_connections = options.max_connections;
     config.max_listed_members = options.max_listed_members;
     config.max_private_rooms = options.max_private_rooms;

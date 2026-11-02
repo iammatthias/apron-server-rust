@@ -11,7 +11,7 @@ use rust_stdlib_crypto::{rand, subtle};
 
 use super::client::Client;
 use super::host_list::HostList;
-use super::live_text::{LiveEnd, LiveKind, LiveText, LIVE_PATH};
+use super::live_text::{terminal_og, LiveEnd, LiveKind, LiveText, LIVE_PATH};
 use super::protocol::*;
 use super::server::State;
 use super::toggles::{Feature, UPLOADS_OFF};
@@ -573,16 +573,22 @@ impl State {
                     .and_then(Json::as_str)
                     .and_then(LiveKind::parse)
                 {
-                    // The server owns a live text's url and output (§4.8.2);
-                    // a terminal takes a new title.
+                    // The server owns a live text's url and output, and a
+                    // terminal's og (§4.8.1, §4.8.2); a terminal takes a new
+                    // title, and its og with it.
                     let mut restored = before.clone();
                     restored.remove("title");
-                    let title = embed
-                        .get("title")
-                        .and_then(Json::as_str)
-                        .and_then(|t| og_line(t, 256));
-                    if let (LiveKind::Terminal, Some(title)) = (kind, title) {
-                        restored.insert("title".into(), title.into());
+                    restored.remove("og");
+                    if kind == LiveKind::Terminal {
+                        let title = embed
+                            .get("title")
+                            .and_then(Json::as_str)
+                            .and_then(|t| og_line(t, 256))
+                            .unwrap_or_default();
+                        restored.insert("og".into(), terminal_og(&title).into());
+                        if !title.is_empty() {
+                            restored.insert("title".into(), title.into());
+                        }
                     }
                     if let Some(e) = self.embeds.get(&id) {
                         restored.extend(e.owned.clone());
@@ -624,6 +630,7 @@ impl State {
                         e.title = title.clone();
                         live.insert("title".into(), title.into());
                     }
+                    live.insert("og".into(), terminal_og(&e.title).into());
                 }
                 live.extend(e.owned.clone());
                 written.push(

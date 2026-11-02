@@ -9,6 +9,7 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread;
 
 use rust_stdlib::net::http::{self, Request as HttpRequest, ResponseController, ResponseWriter};
+use rust_stdlib::net::url;
 use rust_stdlib::time::{self, Duration};
 
 use super::client::Client;
@@ -22,6 +23,18 @@ use crate::obj;
 
 /// Where a live text is read: `/live/<secret>`.
 pub const LIVE_PATH: &str = "/live/";
+
+/// Apron's stand-alone terminal viewer, where a browser that opens a
+/// terminal's `url` goes unless `--terminal-viewer-url` says otherwise.
+pub const DEFAULT_TERMINAL_VIEWER_URL: &str = "https://terminal.apron.chat/";
+
+/// A terminal embed's `og` (§4.8.1), for a client that doesn't render
+/// terminal embeds and shows it as the card its `og` describes, which opens
+/// its `url`. Titled as the embed is.
+pub fn terminal_og(title: &str) -> Object {
+    let title = if title.is_empty() { "Terminal" } else { title };
+    obj! {"title" => title, "description" => "Terminal output. Open it to watch."}
+}
 
 /// The two kinds of live text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -702,9 +715,14 @@ impl LiveText {
 
 /// The headers of a live text's `url` (§4.8.3), readable from any origin.
 /// `no-transform` keeps a proxy from compressing it: compression buffers
-/// the stream, so readers would see nothing until the end.
-fn set_live_headers(w: &mut dyn ResponseWriter) {
+/// the stream, so readers would see nothing until the end. With a terminal
+/// viewer, readers that fetch it get the text, and a browser that opens it
+/// as a page the viewer, so it varies with `Sec-Fetch-Mode`.
+fn set_live_headers(w: &mut dyn ResponseWriter, viewer: bool) {
     let header = w.header();
+    if viewer {
+        header.set("Vary", "Sec-Fetch-Mode");
+    }
     header.set("Content-Type", "text/plain; charset=utf-8");
     header.set("X-Content-Type-Options", "nosniff");
     header.set("Cache-Control", "no-store, no-transform");
@@ -828,15 +846,14 @@ impl Server {
             return;
         }
         let secret = r.url.path.strip_prefix(LIVE_PATH).unwrap_or("").to_owned();
-        let text = {
+        let found = {
             let st = self.lock();
             st.live_ids
                 .get(&secret)
                 .and_then(|id| st.embeds.get(id))
-                .and_then(|e| e.live.as_ref())
-                .map(|live| live.text.clone())
+                .and_then(|e| Some((e.live.as_ref()?.text.clone(), e.live_url())))
         };
-        let Some(text) = text else {
+        let Some((text, url)) = found else {
             live_answer(
                 w,
                 http::STATUS_NOT_FOUND,
@@ -845,8 +862,24 @@ impl Server {
             );
             return;
         };
+        let viewer = self.terminal_viewer(text.kind(), &url);
+        if let Some(viewer) = viewer.filter(|_| {
+            r.method == http::METHOD_GET && r.header.get("Sec-Fetch-Mode") == Some("navigate")
+        }) {
+            // The url goes in the fragment, which never reaches the
+            // viewer's host (§4.8.5, §5.5); a redirect is no read.
+            let header = w.header();
+            header.set(
+                "Location",
+                &format!("{viewer}#stream={}", url::query_escape(&url)),
+            );
+            header.set("Cache-Control", "no-store");
+            header.set("Vary", "Sec-Fetch-Mode");
+            w.write_header(http::STATUS_FOUND);
+            return;
+        }
         if r.method == http::METHOD_HEAD {
-            set_live_headers(w);
+            set_live_headers(w, viewer.is_some());
             w.write_header(http::STATUS_OK);
             return;
         }
@@ -871,7 +904,7 @@ impl Server {
                 return;
             }
         };
-        set_live_headers(w);
+        set_live_headers(w, viewer.is_some());
         w.write_header(http::STATUS_OK);
         // A reader before the first bytes sees its headers now, and waits.
         if !initial.is_empty() && io::Write::write_all(w, &initial).is_err() {
@@ -903,6 +936,15 @@ impl Server {
             }
         }
         text.close_reader();
+    }
+
+    /// The terminal viewer a browser that opens `url` as a page goes to, if
+    /// any: only a terminal's, and none for an https viewer when `url` is
+    /// http, since the viewer reads only https.
+    fn terminal_viewer(&self, kind: LiveKind, url: &str) -> Option<&str> {
+        let viewer = self.config.terminal_viewer_url.as_str();
+        let unreadable = viewer.starts_with("https:") && !url.starts_with("https:");
+        (kind == LiveKind::Terminal && !viewer.is_empty() && !unreadable).then_some(viewer)
     }
 
     /// A live text's write arrived (§4.8.3): its embed gets its `url`, a
@@ -1169,6 +1211,9 @@ impl State {
         let log_id = self.next_id_locked();
         let message_id = format_id(log_id);
         let mut embed = obj! {"embed_id" => id, "kind" => kind.as_str()};
+        if kind == LiveKind::Terminal {
+            embed.insert("og".into(), terminal_og(&title).into());
+        }
         if !title.is_empty() {
             embed.insert("title".into(), title.into());
         }

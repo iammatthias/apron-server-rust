@@ -335,7 +335,10 @@ Live text streams end to end on the host, through the router's published
 port. Through the Cloudflare edge, a writer's `PUT` body reaches aprond only
 when it ends, and a reader's response headers arrive with its first bytes,
 so a text written through the public URL appears at once when its writer
-finishes. The live check writes whole texts for that reason.
+finishes. The live check writes whole texts for that reason, except the
+terminal viewer check, which writes to the router's port
+(`APRON_ROUTER_URL`, default `http://172.17.0.1:8901`) so that its text is
+still open when a page request through the public URL is redirected.
 
 `--client-ip-header` is `Cf-Connecting-IP`, not `X-Forwarded-For`. Each proxy
 replaces or appends to `X-Forwarded-For`, so its last entry is the same for

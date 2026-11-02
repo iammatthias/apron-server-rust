@@ -413,23 +413,27 @@ falls 256 KiB behind gets an error.
   nothing kept, and a shutdown answers a streaming writer 503 `Server
   storage is unavailable; the text could not be posted.`
 - A reader that falls 256 KiB behind has its response ended, not errored.
-- A message's live embed has no `url` until its write starts, and the
-  write's start republishes the message with it (shazow/apron#106,
-  §4.8.5). apron-server-cloudflare main posts the embed with its `url` and
-  lets `GET url` wait for the write. Its port of #106, 8651282, is on the
-  unmerged branch `claude/apron-web-live-typing-7aptrn`, and this server
-  matches that branch. Commands are the same on both: their message is
-  posted at the write's start, with its `url`.
 - The writer's `PUT` gets an error status when the text stopped at a limit
   (§4.8.3): 413 at the input cap or an append's kept bytes, and 408 at the
   time limit, with Cloudflare's texts. A writer that went away is answered
-  400, which no one reads. Cloudflare answers all three 200, and the
-  8651282 branch does not change that.
+  400, which no one reads. Cloudflare answers all three 200.
+- The terminal viewer (§4.8.5) is `--terminal-viewer-url` in place of
+  `TERMINAL_VIEWER_URL`, with the same default, checks and redirect. An
+  https viewer is none for an http `url`, which this server decides per
+  text from the url's own scheme, since without `--public-url` the scheme
+  comes from each connection; Cloudflare decides once, from
+  `PUBLIC_ORIGIN`.
+- On the homelab deployment (https://apron.farfield.systems), Cloudflare
+  #65's edge rule `apron_write_streaming`, which streams write bodies, is
+  deliberately not applied: the zone keeps request body buffering on, by
+  the operator's choice. A writer's `PUT` there reaches aprond only when it
+  ends, so a text written through the public URL appears at once when its
+  writer finishes.
 
 **Why.** One process holds the text; there is no edge to admit requests or
-budget to guard, and restore runs before any connection. The `url` and the
-`PUT`'s answer follow shazow/apron 6687409 (#106), which Cloudflare main
-does not implement yet. Delete those two items once it does.
+budget to guard, and restore runs before any connection. The `PUT`'s
+answer follows shazow/apron 6687409 (#106), which Cloudflare main does not
+implement for limits yet. Delete that item once it does.
 
 ### `/server` and `server.title`, `description` and `avatar` (§3.1, §4.1)
 

@@ -11,6 +11,10 @@
 //   APRON_ADMIN_TOKEN_FILE  a local file holding the admin token; without it
 //                           the admin checks are skipped. The token is never
 //                           printed.
+//   APRON_ROUTER_URL        the router's published port, where a live text's
+//                           write stays open, for the terminal viewer check
+//                           (default: http://172.17.0.1:8901, which answers
+//                           on the Docker host; empty fails that check)
 //   --slow                  also waits out the 30 s authentication timeout
 //
 // It posts nothing in general or any public room. The admin checks make
@@ -35,6 +39,9 @@ const base = (process.env.APRON_PUBLIC_URL ?? "https://apron.farfield.systems").
 const wsURL = `${base.replace(/^http/, "ws")}/ws`;
 const appID = process.env.APRON_APP_ID ?? "MP92RCAPRG.app.ladle.ios";
 const slow = process.argv.includes("--slow");
+const routerURL = (process.env.APRON_ROUTER_URL ?? "http://172.17.0.1:8901").replace(/\/$/, "");
+// A terminal embed's og, as the server gives it (§4.8.1).
+const terminalCard = (title) => ({ title, description: "Terminal output. Open it to watch." });
 const welcome = "Guests can read along. Create a passkey to post, react and start threads. Messages are kept for 7 days.";
 const suffix = randomBytes(4).toString("hex");
 
@@ -735,13 +742,13 @@ async function liveText(acct, roomID, acctID) {
   const snapshotOf = (c, from, id, pred) => c.until(() => c.frames.slice(from).find((f) => f.method === "message" && f.params?.message_id === id && pred(f.params)), 15000, `a snapshot of ${id}`);
   await check("live text: a terminal waits for its writer, gets its url when the write starts, then keeps its output; its write_url is then 409", async () => {
     const from = acct.frames.length;
-    const r = await acct.call("message", { room_id: roomID, body: { text: "livecheck build", embeds: [{ kind: "terminal", title: "livecheck" }] } });
+    const r = await acct.call("message", { room_id: roomID, body: { text: "livecheck build", embeds: [{ kind: "terminal", title: "livecheck", og: { title: "forged" } }] } });
     if (r.error) return `error ${JSON.stringify(r.error)}`;
     const id = r.result.message_id;
     const posted = r.frames.find((f) => f.method === "message" && f.params?.message_id === id);
     const waiting = posted?.params?.body?.embeds?.[0] ?? {};
     const write = r.result.embeds?.[0]?.write_url;
-    if (!write || canonical(waiting) !== canonical({ embed_id: r.result.embeds[0].embed_id, kind: "terminal", title: "livecheck" })) return `waiting embed ${JSON.stringify(waiting)}, result ${JSON.stringify(r.result)}`;
+    if (!write || canonical(waiting) !== canonical({ embed_id: r.result.embeds[0].embed_id, kind: "terminal", title: "livecheck", og: terminalCard("livecheck") })) return `waiting embed ${JSON.stringify(waiting)}, result ${JSON.stringify(r.result)}`;
     const put = streamTo(write);
     put.send("\x1b[32mok\x1b[0m 1\r\n");
     put.send("done\r\n");
@@ -755,7 +762,7 @@ async function liveText(acct, roomID, acctID) {
     await reader.ended;
     const finished = await snapshotOf(acct, from, id, (p) => p.body?.embeds?.[0]?.output !== undefined);
     const kept = finished.params.body.embeds[0];
-    if (kept.output !== "\x1b[32mok\x1b[0m 1\r\ndone\r\n" || kept.url !== undefined || finished.params.prev_log_id !== started.params.log_id) return `finished ${JSON.stringify(finished.params)}`;
+    if (kept.output !== "\x1b[32mok\x1b[0m 1\r\ndone\r\n" || canonical(kept.og) !== canonical(terminalCard("livecheck")) || kept.url !== undefined || finished.params.prev_log_id !== started.params.log_id) return `finished ${JSON.stringify(finished.params)}`;
     if (reader.status === 200) {
       const headers = [reader.headers.get("content-type"), reader.headers.get("x-content-type-options"), reader.headers.get("cache-control")].join(" ");
       if (headers !== "text/plain; charset=utf-8 nosniff no-store, no-transform") return `reader ${headers}`;
@@ -764,6 +771,43 @@ async function liveText(acct, roomID, acctID) {
     const again = await fetch(write, { method: "PUT", body: "again" });
     if (again.status !== 409) return `write_url again ${again.status}`;
     return same((await fetch(embed.url)).status, 404);
+  });
+  // Through the edge a write ends as it arrives, so this one goes to the
+  // router's published port on the host, where it stays open while a
+  // browser's page request goes through the public URL.
+  await check("live text: a terminal's url opened as a page goes to the terminal viewer, with the url in the fragment; a fetch gets the text", async () => {
+    if (!routerURL) return "APRON_ROUTER_URL is empty: no direct write, so no live text to open";
+    const from = acct.frames.length;
+    const r = await acct.call("message", { room_id: roomID, body: { text: "livecheck viewer", embeds: [{ kind: "terminal" }] } });
+    if (r.error) return `error ${JSON.stringify(r.error)}`;
+    const id = r.result.message_id;
+    const write = new URL(r.result.embeds?.[0]?.write_url ?? "");
+    const direct = `${routerURL}${write.pathname}`;
+    let controller;
+    const body = new ReadableStream({ start: (c) => (controller = c) });
+    const answer = fetch(direct, { method: "PUT", body, duplex: "half", headers: { "Cf-Connecting-IP": "127.0.0.1" } })
+      .then(async (res) => ({ status: res.status, text: await res.text() }))
+      .catch((e) => ({ status: 0, text: String(e.cause ?? e) }));
+    try {
+      controller.enqueue(new TextEncoder().encode("viewer\r\n"));
+      const started = await snapshotOf(acct, from, id, (p) => p.body?.embeds?.[0]?.url !== undefined);
+      const embed = started.params.body.embeds[0];
+      if (canonical(embed.og) !== canonical(terminalCard("Terminal"))) return `og ${JSON.stringify(embed.og)}`;
+      const page = await fetch(embed.url, { headers: { "Sec-Fetch-Mode": "navigate" }, redirect: "manual" });
+      await page.body?.cancel();
+      const want = `https://terminal.apron.chat/#${new URLSearchParams({ stream: embed.url })}`;
+      if (page.status !== 302 || page.headers.get("location") !== want) return `page ${page.status} ${page.headers.get("location")}, want 302 ${want}`;
+      const reader = readLive(embed.url);
+      await reader.waitFor("viewer\r\n");
+      if (reader.status !== 200 || reader.headers.get("vary") !== "Sec-Fetch-Mode") return `reader ${reader.status}, Vary ${reader.headers.get("vary")}`;
+      controller.close();
+      const done = await answer;
+      if (done.status !== 200) return `writer ${done.status} ${JSON.stringify(done.text)}`;
+      await reader.ended;
+      return same(reader.text, "viewer\r\n");
+    } finally {
+      try { controller.close(); } catch {}
+    }
   });
   await check("live text: /embed-append revises with backspace and form feed, then merges into the body", async () => {
     const from = acct.frames.length;

@@ -86,6 +86,11 @@ pub struct Config {
     /// The limits live text is held to (§4.8.3), Cloudflare's Workers Paid
     /// policy by default.
     pub live: super::live_text::LiveLimits,
+    /// The page a browser that opens a terminal's `url` goes to
+    /// (`--terminal-viewer-url`, apron-server-cloudflare's
+    /// `TERMINAL_VIEWER_URL`), with the url in the fragment (§4.8.5); empty
+    /// for none.
+    pub terminal_viewer_url: String,
     /// Keeps the server's state across restarts; `None` keeps it in memory
     /// for this Server only. The server closes it on `shutdown`.
     pub store: Option<Arc<dyn Store>>,
@@ -202,6 +207,7 @@ pub fn default_config() -> Config {
         upload_dir: String::new(),
         upload_start_timeout: DEFAULT_UPLOAD_START_TIMEOUT,
         live: super::live_text::LiveLimits::default(),
+        terminal_viewer_url: super::live_text::DEFAULT_TERMINAL_VIEWER_URL.to_owned(),
         store: None,
         disable_push: false,
         allow_insecure_push: false,
