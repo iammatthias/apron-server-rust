@@ -22,8 +22,8 @@
 // /invite-purge then signs out and gives a new token, and one from a
 // /invite-code sign-up, one that is renamed and purged, and one given the role mod
 // to run /emoji. At the end the admin
-// purges every livecheck_ account in general, this run's and any an earlier
-// run left. The Track C checks post only in a
+// removes every livecheck_ account in general, this run's and any an earlier
+// run left, with a logged leave that connected clients see, then purges it. The Track C checks post only in a
 // private room named livecheck_<random> that the admin makes, and its
 // thread; both go when the script empties them. The emoji checks add a
 // :livecheck_<random>: custom emoji and remove it again, so every connection
@@ -633,18 +633,28 @@ async function cleanUp(adminToken) {
     };
     let purged = 0;
     await check("cleanup: every livecheck_ account is purged", async () => {
-      for (const id of (await left()).filter((id) => !id.startsWith("bot_"))) {
+      // /purge is silent, so a client watching general would keep showing
+      // the accounts as members; a logged removal first tells it they left.
+      const ids = await left();
+      for (const id of ids) {
+        const r = await admin.call("room_leave", { room_id: "general", user_id: id });
+        if (r.error) return `room_leave ${id}: ${JSON.stringify(r.error)}`;
+      }
+      // An owner's purge takes its bot too, so a bot is purged by itself
+      // only when its owner went in an earlier run.
+      const owners = new Set(ids.filter((id) => !id.startsWith("bot_")));
+      const orphans = ids.filter((id) => id.startsWith("bot_") && !owners.has(id.slice(4)));
+      for (const id of [...owners, ...orphans]) {
         const r = await admin.call("command", { room_id: "general", body: { text: `/purge ${id}` } });
         if (r.error) return `/purge ${id}: ${JSON.stringify(r.error)}`;
         purged++;
       }
-      for (const id of await left()) {
+      // Gone means a second /purge finds no such user.
+      for (const id of ids) {
         const r = await admin.call("command", { room_id: "general", body: { text: `/purge ${id}` } });
-        if (r.error) return `/purge ${id}: ${JSON.stringify(r.error)}`;
-        purged++;
+        if (r.error?.code !== -32602) return `still there: ${id}`;
       }
-      const remaining = await left();
-      return remaining.length === 0 || `still there: ${remaining.join(", ")}`;
+      return true;
     });
     console.log(`     purged ${purged} livecheck_ account(s)`);
   } finally {
