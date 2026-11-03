@@ -74,9 +74,12 @@ pub struct ReadCursor {
 impl RoomState {
     /// Reports whether u may remove target from r with room_leave's
     /// user_id (§4.2.2): an admin anyone, an account its own bot, and the
-    /// room's creator, if an account, anyone.
+    /// creator of a thread or private room, if an account, anyone. A public
+    /// top-level room's creator was an admin or mod when they made it, and
+    /// keeps no power over its members from that (Cloudflare #82).
     pub fn may_remove(&self, u: &UserState, target: Option<&UserState>) -> bool {
-        u.has_role(ADMIN_ROLE) || (u.account() && (self.creator == u.id || owns_bot(u, target)))
+        let creator = self.removable() && self.creator == u.id;
+        u.has_role(ADMIN_ROLE) || (u.account() && (creator || owns_bot(u, target)))
     }
 
     /// Reports whether the room goes once it empties or its log expires: a

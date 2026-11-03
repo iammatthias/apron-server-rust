@@ -187,6 +187,52 @@ fn test_creator_removes_anyone() {
     );
 }
 
+/// A mod who creates a top-level room removes nobody from it, as a mod or
+/// after losing the role, though their thread is theirs to tidy
+/// (apron-server-cloudflare #82).
+#[test]
+fn test_top_level_room_creator_removes_nobody() {
+    let server = admin_test_server();
+    let mut admin = admin(&server);
+    let mut bob = account(&server);
+    let carol = account(&server);
+    let (bob_id, carol_id, admin_id) = (
+        bob.user_id.clone(),
+        carol.user_id.clone(),
+        admin.user_id.clone(),
+    );
+    private_reply(&mut admin, &format!("/role {bob_id} mod"));
+    bob.drain();
+    let (room, _) = save_room(&mut bob, "room", obj! {"title" => "Lounge"});
+    let (thread, _) = save_room(
+        &mut bob,
+        "thread",
+        obj! {"parent_room_id" => "general", "title" => "Side"},
+    );
+    for (id, target) in [("add-room", &room), ("add-thread", &thread)] {
+        admin.drain();
+        join_room(&mut admin, target);
+        assert_eq!(join(&mut admin, id, target, &carol_id), None);
+    }
+    bob.drain();
+
+    assert_eq!(
+        remove(&mut bob, "as-mod", &room, &carol_id),
+        Some(CODE_DENIED)
+    );
+    private_reply(&mut admin, &format!("/role {bob_id} mod"));
+    bob.drain();
+    assert_eq!(
+        remove(&mut bob, "carol", &room, &carol_id),
+        Some(CODE_DENIED)
+    );
+    assert_eq!(
+        remove(&mut bob, "admin", &room, &admin_id),
+        Some(CODE_DENIED)
+    );
+    assert_eq!(remove(&mut bob, "tidy-thread", &thread, &carol_id), None);
+}
+
 /// `/kick <user_id>` removes an account or a guest from the room of the
 /// command and tells the admin; only an admin may kick.
 #[test]

@@ -526,3 +526,18 @@ Without json-v2-time, b75d03a does not build this crate: `src/server/persist.rs`
 | `fix/derive-skip-string-zero` (4513695) | The `MarshalTo` derive compared a `#[json(skip)]` field with `Default::default()`, which does not type-check for `String` | merged into `dogfood/apron` (c970e59) |
 | `fix/rustls-advisories` (d6cf8a4) | rustls 0.23.45 and rustls-webpki 0.103.15 carried RUSTSEC-2026-0346/0347/0348/0349 and RUSTSEC-2026-0382 | merged into `dogfood/apron` (074898d) |
 | `fix/json-unmarshaler-error-path` (1904de8) | A type error returned by a `json::Unmarshaler` got the enclosing field names prefixed, without a separator; Go returns it as the method made it | merged into `dogfood/apron` (40b11f3) |
+
+### Room creators (CF 227d1f0)
+
+Ported on 2026-11-03, moving the apron-server-cloudflare pin to 227d1f0
+(#82).
+
+- A public top-level room's creator removes nobody from it. `may_remove`
+  in `src/server/rooms.rs` counts the creator only for a thread or a
+  private room (`removable`), so the rule holds for rooms that exist
+  already, with no change to stored data.
+  `test_top_level_room_creator_removes_nobody` follows Cloudflare's test.
+  `test_room_list_latest_log_id_delta`, ported from Go, had a mod remove a
+  member of their own top-level room, so an admin does it now.
+- #82's other half, no bot owns a bot, needed nothing. `/invite-bot` has
+  the `Accounts` audience, and a bot of either kind is never an account.

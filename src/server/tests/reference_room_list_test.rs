@@ -288,7 +288,9 @@ fn test_room_list_latest_log_id_delta() {
             && delta.get("left") == Some(&empty()),
         "delta after rejoining: {delta:?}"
     );
-    // A room the user was removed from is left too.
+    // A room the user was removed from is left too. A top-level room's
+    // creator removes nobody (apron-server-cloudflare #82), so an admin does.
+    grant_role(&server, &a.user_id, "admin");
     a.request(
         "room_leave",
         "remove",
