@@ -267,3 +267,110 @@ fn test_history_single_record_walks_prev_log_id() {
         "earlier snapshot in the destination: {page:?}"
     );
 }
+
+/// A guest pages back `guest_history_depth` records from each room's
+/// newest, and no further; the newest page, `before` the head, a window
+/// bounded by both and catching up with `after` stay open (Cloudflare's
+/// "lets a guest page back guestHistoryDepth records from each room's
+/// head, and no further").
+#[test]
+fn test_guest_history_depth() {
+    let mut config = default_config();
+    config.limits.guest_history_depth = 4;
+    let server = new_test_server(config);
+    let mut ada = dial_test_client(&server);
+    make_account(&server, &ada.user_id);
+    let (thread, _) = save_room(
+        &mut ada,
+        "thread",
+        obj! {"parent_room_id" => "general", "title" => "Look around"},
+    );
+    let mut guest = dial_test_client(&server);
+    ada.drain();
+    let logs: Vec<String> = (0..8)
+        .map(|i| {
+            let (_, m) = save(
+                &mut ada,
+                &format!("m{i}"),
+                obj! {"body" => obj! {"text" => format!("entry-{i}")}},
+            );
+            m["log_id"].as_str().unwrap().to_owned()
+        })
+        .collect();
+    save(
+        &mut ada,
+        "in-thread",
+        obj! {"room_id" => thread.as_str(), "body" => obj! {"text" => "in the thread"}},
+    );
+    guest.drain();
+    let page = |c: &mut TestClient, room: &str, mut params: Object| {
+        params.insert("room_id".into(), room.into());
+        params.insert("limit".into(), 2i64.into());
+        let id = c.next_id("history");
+        c.call("history", &id, params)
+    };
+    let messages = |frame: &Object| log_ids(frame["result"].as_object().unwrap(), "messages");
+
+    // The newest page, as a client without a checkpoint asks for it, and
+    // one from a head captured a little earlier.
+    let newest = page(&mut guest, "general", obj! {"before" => logs[7].as_str()});
+    assert_eq!(messages(&newest), logs[6..8].to_vec());
+    let earlier = page(&mut guest, "general", obj! {"before" => logs[6].as_str()});
+    assert_eq!(messages(&earlier), logs[5..7].to_vec());
+    // Scrolling back while fewer than four records lie past `before`.
+    let back = page(&mut guest, "general", obj! {"before" => logs[4].as_str()});
+    assert_eq!(messages(&back), logs[3..5].to_vec());
+    // Four past it is as far as a guest goes: older pages are for accounts.
+    let denied = page(&mut guest, "general", obj! {"before" => logs[3].as_str()});
+    assert_eq!(
+        denied.get("error"),
+        Some(&Json::from(
+            obj! {"code" => CODE_DENIED, "message" => "Sign in to load older history"}
+        ))
+    );
+    let account = page(&mut ada, "general", obj! {"before" => logs[3].as_str()});
+    assert_eq!(messages(&account), logs[2..4].to_vec());
+    // A window bounded by both, and catching up with `after`, stay open.
+    let window = page(
+        &mut guest,
+        "general",
+        obj! {"after" => logs[0].as_str(), "before" => logs[1].as_str()},
+    );
+    assert!(window.contains_key("result"), "{window:?}");
+    let caught_up = page(&mut guest, "general", obj! {"after" => logs[0].as_str()});
+    assert!(caught_up.contains_key("result"), "{caught_up:?}");
+    // Every room is measured from its own newest: a quiet thread opens
+    // however busy general is.
+    let quiet = page(&mut guest, &thread, obj! {"before" => logs[0].as_str()});
+    assert!(quiet.contains_key("result"), "{quiet:?}");
+}
+
+/// A refused guest page is charged as a served one (Cloudflare's "keeps a
+/// refused guest page charged to its address").
+#[test]
+fn test_refused_guest_page_is_charged() {
+    let mut config = default_config();
+    config.limits.guest_history_depth = 1;
+    config.limits.server_history_day = 1;
+    let server = new_test_server(config);
+    let mut ada = dial_test_client(&server);
+    make_account(&server, &ada.user_id);
+    let mut guest = dial_test_client(&server);
+    ada.drain();
+    let (_, first) = save(&mut ada, "m0", obj! {"body" => obj! {"text" => "one"}});
+    save(&mut ada, "m1", obj! {"body" => obj! {"text" => "two"}});
+    guest.drain();
+    let first = first["log_id"].as_str().unwrap();
+    let refused = guest.call(
+        "history",
+        "older",
+        obj! {"room_id" => "general", "before" => first, "limit" => 1i64},
+    );
+    assert_eq!(error_code(&refused), Some(CODE_DENIED), "{refused:?}");
+    let next = guest.call("history", "newest", obj! {"room_id" => "general"});
+    assert_eq!(
+        next["error"].as_object().unwrap()["message"],
+        Json::from("Daily history limit reached for the server"),
+        "{next:?}"
+    );
+}

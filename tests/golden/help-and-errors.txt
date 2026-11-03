@@ -393,6 +393,10 @@ Limits:
       --limit.server-history-per-day=       History pages everyone may request
                                             a UTC day; 0 is unlimited (default:
                                             40000)
+      --limit.guest-history-depth=          How many records back from a room's
+                                            newest a guest may page with
+                                            history's before alone; 0 is
+                                            unlimited (default: 200)
       --limit.offline-grace-seconds=        Seconds a status change a closed
                                             connection caused waits, so a
                                             reconnect within them shows others
@@ -839,6 +843,10 @@ Limits:
       --limit.server-history-per-day=       History pages everyone may request
                                             a UTC day; 0 is unlimited (default:
                                             40000)
+      --limit.guest-history-depth=          How many records back from a room's
+                                            newest a guest may page with
+                                            history's before alone; 0 is
+                                            unlimited (default: 200)
       --limit.offline-grace-seconds=        Seconds a status change a closed
                                             connection caused waits, so a
                                             reconnect within them shows others
@@ -1285,6 +1293,10 @@ Limits:
       --limit.server-history-per-day=       History pages everyone may request
                                             a UTC day; 0 is unlimited (default:
                                             40000)
+      --limit.guest-history-depth=          How many records back from a room's
+                                            newest a guest may page with
+                                            history's before alone; 0 is
+                                            unlimited (default: 200)
       --limit.offline-grace-seconds=        Seconds a status change a closed
                                             connection caused waits, so a
                                             reconnect within them shows others

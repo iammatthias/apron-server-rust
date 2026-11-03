@@ -86,6 +86,11 @@ pub struct Limits {
     pub user_history_day: u32,
     pub ip_history_day: u32,
     pub server_history_day: u32,
+    /// How many records back from a room's newest a guest may page with
+    /// `before` alone (apron-server-cloudflare's guestHistoryDepth): enough
+    /// to look around every public room before signing up, while scrolling
+    /// further back is for accounts. Zero is no limit.
+    pub guest_history_depth: usize,
     /// Registrations (new accounts and bots, and passkeys added to an
     /// account) from one IP, and on the server, a UTC day; and the accounts
     /// and bots the server holds, past which a new one is refused.
@@ -226,6 +231,7 @@ impl Default for Limits {
             user_history_day: 3_000,
             ip_history_day: 6_000,
             server_history_day: 40_000,
+            guest_history_depth: 200,
             registrations_per_ip_day: 5,
             registrations_per_day: 300,
             identities: 10_000,
@@ -288,6 +294,7 @@ impl Limits {
             user_history_day: 0,
             ip_history_day: 0,
             server_history_day: 0,
+            guest_history_depth: 0,
             registrations_per_ip_day: 0,
             registrations_per_day: 0,
             identities: 0,

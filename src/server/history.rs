@@ -85,6 +85,22 @@ impl State {
                 windows.push(records);
             }
         }
+        // A guest pages back (`before` alone) at most guest_history_depth
+        // records from each room's newest, counted past `before`; the
+        // newest page, `before` the head, is always open (§4.3.5).
+        let depth = self.config.limits.guest_history_depth;
+        if depth > 0 && before.is_some() && !has_after && !self.users[&user_id].persists() {
+            let past: usize = rooms
+                .iter()
+                .map(|r| r.log.len() - r.log.partition_point(|id| Some(*id) <= before))
+                .sum();
+            if past >= depth.max(limit) {
+                // A refused page is charged as a served one, as Cloudflare
+                // charges the rows it read to measure it.
+                self.charge_history_locked(c, &user_id)?;
+                return Err(RpcError::new(CODE_DENIED, "Sign in to load older history"));
+            }
+        }
         let mut matching: Vec<i64> = Vec::new();
         while matching.len() <= limit {
             let mut next: Option<i64> = None;

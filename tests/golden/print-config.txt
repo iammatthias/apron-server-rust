@@ -287,6 +287,9 @@ ip-history-per-day = 6000
 # History pages everyone may request a UTC day; 0 is unlimited
 server-history-per-day = 40000
 
+# How many records back from a room's newest a guest may page with history's before alone; 0 is unlimited
+guest-history-depth = 200
+
 # Seconds a status change a closed connection caused waits, so a reconnect within them shows others nothing; 0 to 60
 offline-grace-seconds = 60
 
@@ -606,6 +609,9 @@ ip-history-per-day = 6000
 
 # History pages everyone may request a UTC day; 0 is unlimited
 server-history-per-day = 40000
+
+# How many records back from a room's newest a guest may page with history's before alone; 0 is unlimited
+guest-history-depth = 200
 
 # Seconds a status change a closed connection caused waits, so a reconnect within them shows others nothing; 0 to 60
 offline-grace-seconds = 60
@@ -928,6 +934,9 @@ ip-history-per-day = 6000
 # History pages everyone may request a UTC day; 0 is unlimited
 server-history-per-day = 40000
 
+# How many records back from a room's newest a guest may page with history's before alone; 0 is unlimited
+guest-history-depth = 200
+
 # Seconds a status change a closed connection caused waits, so a reconnect within them shows others nothing; 0 to 60
 offline-grace-seconds = 60
 
@@ -1247,6 +1256,9 @@ ip-history-per-day = 6000
 
 # History pages everyone may request a UTC day; 0 is unlimited
 server-history-per-day = 40000
+
+# How many records back from a room's newest a guest may page with history's before alone; 0 is unlimited
+guest-history-depth = 200
 
 # Seconds a status change a closed connection caused waits, so a reconnect within them shows others nothing; 0 to 60
 offline-grace-seconds = 60

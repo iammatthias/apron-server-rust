@@ -615,10 +615,15 @@ opt-in. `log_id` already carries the commit time here.
 one connection with `History request already in progress`.
 
 **This server.** Has the same sizes and limits by default, as flags (0 is
-unlimited). It has no in-flight refusal.
+unlimited). It has no in-flight refusal. `--limit.guest-history-depth`
+(default 200) is Cloudflare's `guestHistoryDepth`, with no ceiling of
+1,000, since measuring a page reads nothing here; a refused page is
+charged as a served one, as on Cloudflare. There is no degraded tier, so
+older history is never refused for the day's budget.
 
 **Why.** A connection's frames run one at a time, each to completion, so a
-second page can never be in flight.
+second page can never be in flight. The room logs are in memory, so a
+deeper guest scroll costs no more than another page.
 
 ### Uploads and `ext:media` (EXTENSIONS.md, §4.8)
 
