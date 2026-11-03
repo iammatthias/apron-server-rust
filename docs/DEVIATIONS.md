@@ -423,12 +423,6 @@ falls 256 KiB behind gets an error.
   text from the url's own scheme, since without `--public-url` the scheme
   comes from each connection; Cloudflare decides once, from
   `PUBLIC_ORIGIN`.
-- On the homelab deployment (https://apron.farfield.systems), Cloudflare
-  #65's edge rule `apron_write_streaming`, which streams write bodies, is
-  deliberately not applied: the zone keeps request body buffering on, by
-  the operator's choice. A writer's `PUT` there reaches aprond only when it
-  ends, so a text written through the public URL appears at once when its
-  writer finishes.
 
 **Why.** One process holds the text; there is no edge to admit requests or
 budget to guard, and restore runs before any connection. The `PUT`'s

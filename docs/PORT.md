@@ -163,8 +163,11 @@ server follows the spec, with that commit as the shape.
   `npm test` (DEVELOPMENT.md). The server keeps bytes with `keep_last`, so
   there is nothing to port.
 - Cloudflare 8c112de, on the same branch, turns off the zone's request body
-  buffering for `PUT` on `/w/`. The homelab's edge still buffers `PUT`
-  bodies, so `tools/deploy/live-check.mjs` still writes whole texts.
+  buffering for `PUT` on `/w/`. The homelab's zone has the same rule,
+  `apron_write_streaming` (Request Body Buffering: None for `PUT` on
+  `/write/` at apron.farfield.systems), added 2026-11-02; without it the
+  edge held a writer's whole body, so readers saw the text only at its end.
+  `tools/deploy/live-check.mjs` still writes whole texts.
 
 Checked: `cargo test`, and the protocol's `tests/conformance/conform.py`
 at 44bf5eb against a local `aprond --store memory` with the interop shim's
