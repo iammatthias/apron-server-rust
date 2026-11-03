@@ -49,6 +49,8 @@ type CommandFn = fn(&mut State, &CommandCtx) -> Result<Object, RpcError>;
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Audience {
     Everyone,
+    /// Accounts and bots: everyone but guests.
+    Registered,
     /// Accounts, which bots and guests are not.
     Accounts,
     /// Accounts with the admin role.
@@ -67,6 +69,7 @@ impl Audience {
     fn refusal(self, u: &UserState, name: &str) -> Option<RpcError> {
         let allowed = match self {
             Audience::Everyone => true,
+            Audience::Registered => u.persists(),
             Audience::Accounts => u.kind() == Identity::Account,
             Audience::Admins => u.kind() == Identity::Account && u.has_role(ADMIN_ROLE),
             Audience::Roles(roles) => u.has_any_role(roles),
@@ -122,7 +125,7 @@ const SERVER_COMMANDS: &[ServerCommand] = &[
         name: "avatar",
         usage: "/avatar",
         help: "with one image attached: set your avatar",
-        audience: Audience::Accounts,
+        audience: Audience::Registered,
         forgives_params: false,
         writes: true,
         feature: Some(Feature::Uploads),

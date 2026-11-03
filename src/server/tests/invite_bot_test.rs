@@ -11,6 +11,7 @@ use super::persist_test::start_with_store;
 use super::webauthn_test::*;
 use crate::obj;
 use crate::server::config::Config;
+use crate::server::embeds::FILE_PATH;
 use crate::server::protocol::*;
 use crate::store::{self, Store};
 
@@ -63,7 +64,7 @@ fn invite_bot(c: &mut TestClient, bot_id: &str, name: &str, server: &str) -> (St
     assert_eq!(
         text,
         format!(
-            "This token signs in as your bot **{name}** (`{bot_id}`) and replaces any earlier one. Anyone who has it can post as the bot, so keep it secret.\n\n```\n{token}\n```\n\nIf you're using an LLM, you can give it these instructions:\n\n```\nRead https://github.com/shazow/apron/blob/main/PROTOCOL.md\nConnect to {server}\nAuth using token scheme with this token: \"{token}\"\n```"
+            "This token signs in as your bot **{name}** (`{bot_id}`) and replaces any earlier one. Anyone who has it can post as the bot, so keep it secret.\n\n```\n{token}\n```\n\nIf you're using an LLM, you can give it these instructions:\n\n```\nRead https://apron.chat/protocol\nConnect to {server}\nAuth using token scheme with this token: \"{token}\"\n```"
         ),
         "invite-bot notice"
     );
@@ -388,34 +389,42 @@ fn test_help_lists_invite_bot_for_accounts() {
 }
 
 #[test]
-fn test_bot_keeps_its_name() {
+fn test_bot_names_itself_only_with_bot_in_the_name() {
     let server = passkey_test_server();
     let (mut ada, ada_id) = account(&server, "Ada");
-    let (token, _) = invite_bot(&mut ada, &format!("bot_{ada_id}"), "Bot of Ada", NO_URL);
+    let bot_id = format!("bot_{ada_id}");
+    let (token, _) = invite_bot(&mut ada, &bot_id, "Bot of Ada", NO_URL);
     let (mut b, _) = bot(&server, "", &token);
-    let frame = b.call("me", "rename", obj! {"name" => "Skynet"});
+    for (id, name) in [("evil", "Evil"), ("empty", "")] {
+        let frame = b.call("me", id, obj! {"name" => name});
+        assert_eq!(
+            frame.get("error"),
+            Some(&Json::from(obj! {
+                "code" => CODE_DENIED,
+                "message" => "A bot's name must contain \"bot\"",
+            })),
+            "bot rename to {name:?}"
+        );
+    }
     assert_eq!(
-        frame.get("error"),
-        Some(&Json::from(obj! {
-            "code" => CODE_DENIED,
-            "message" => "A bot is named after its owner, who can rename it with /invite-bot",
-        })),
-        "bot rename"
-    );
-    assert_eq!(
-        server.app.lock().users[&format!("bot_{ada_id}")].name,
+        server.app.lock().users[&bot_id].name,
         "Bot of Ada",
         "a denied rename changed the name"
     );
-    // The name it has, as a bot client sends on every connection, is no
-    // change; nor is one that normalizes to it.
-    for (id, name) in [("same", "Bot of Ada"), ("spaced", "  Bot  of Ada ")] {
+    ada.drain();
+    for (id, name) in [("threader", "Threader Bot"), ("robotic", "roBOTic")] {
         let result = b.result("me", id, obj! {"name" => name});
-        assert_eq!(
-            you_of(&result)["name"],
-            Json::from("Bot of Ada"),
-            "me {name:?}"
-        );
+        assert_eq!(you_of(&result)["name"], Json::from(name), "me {name:?}");
+    }
+    // The owner, who shares general with it, sees each new name.
+    for name in ["Threader Bot", "roBOTic"] {
+        let frame = ada.read();
+        let new = notification_params(&frame, "user")["new"]
+            .as_object()
+            .unwrap()
+            .clone();
+        assert_eq!(new["user_id"], Json::from(bot_id.as_str()));
+        assert_eq!(new["name"], Json::from(name));
     }
     // Other fields still change.
     let result = b.result("me", "status", obj! {"status" => "dnd"});
@@ -704,5 +713,82 @@ fn test_invite_bot_tokens_survive_restart() {
             "message" => "A bot can't use /invite-bot",
         }),
         "bot after restart"
+    );
+}
+
+/// A bot sets its avatar with /avatar and streams live text, but invites no
+/// bots or devices and manages no passkeys (Cloudflare's "lets a bot set its
+/// avatar with /avatar and stream live text, but not invite bots or
+/// devices").
+#[test]
+fn test_bot_sets_its_avatar_and_streams_live_text() {
+    let server = passkey_test_server();
+    let (mut ada, ada_id) = account(&server, "Ada");
+    let bot_id = format!("bot_{ada_id}");
+    let (token, _) = invite_bot(&mut ada, &bot_id, "Bot of Ada", NO_URL);
+    let (mut b, _) = bot(&server, "", &token);
+
+    let (_, help) = notice_after(&mut b, "/help");
+    for name in ["/avatar", "/embed-append", "/embed-terminal"] {
+        assert!(help.contains(&format!("`{name}")), "{name} in {help:?}");
+    }
+    for name in ["/invite-bot", "/invite-device", "/passkeys"] {
+        assert!(!help.contains(&format!("`{name}")), "{name} in {help:?}");
+    }
+    for (text, name) in [
+        ("/invite-bot", "invite-bot"),
+        ("/invite-device add laptop", "invite-device"),
+        ("/passkeys", "passkeys"),
+    ] {
+        assert_eq!(
+            command_error(&mut b, text),
+            Json::from(
+                obj! {"code" => CODE_DENIED, "message" => format!("A bot can't use /{name}")}
+            ),
+        );
+    }
+
+    ada.drain();
+    let started = b.result(
+        "command",
+        "avatar",
+        obj! {"body" => obj! {"text" => "/avatar", "embeds" => vec![Json::from(obj! {"kind" => "upload"})]}},
+    );
+    let write_url = started["embeds"].as_list()[0].as_object().unwrap()["write_url"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(
+        http_do("PUT", &write_url, Some(&test_png()), "").0,
+        201,
+        "avatar upload"
+    );
+    let you = b.notification("user")["you"].as_object().cloned().unwrap();
+    assert_eq!(you["user_id"], Json::from(bot_id.as_str()));
+    let avatar = you["avatar"].as_str().unwrap().to_owned();
+    assert!(avatar.contains(FILE_PATH), "avatar: {you:?}");
+    let new = ada.notification("user")["new"]
+        .as_object()
+        .cloned()
+        .unwrap();
+    assert_eq!(new["user_id"], Json::from(bot_id.as_str()));
+    assert_eq!(new["avatar"], Json::from(avatar.as_str()));
+
+    // /embed-append starts a text, and /embed-terminal is refused only by
+    // the one-open-at-a-time rule everyone has, not for being a bot.
+    b.drain();
+    let (_, appended) = b.request(
+        "command",
+        "live-append",
+        obj! {"body" => obj! {"text" => "/embed-append"}},
+    );
+    assert!(appended.contains_key("embeds"), "{appended:?}");
+    let refused = command_error(&mut b, "/embed-terminal build");
+    assert!(
+        refused.as_object().unwrap()["message"]
+            .as_str()
+            .unwrap()
+            .starts_with("You already have a live text open"),
+        "{refused:?}"
     );
 }

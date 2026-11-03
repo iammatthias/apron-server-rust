@@ -203,7 +203,7 @@ impl State {
             server
         };
         let text = format!(
-            "This token signs in as your bot **{name}** (`{bot_id}`) and replaces any earlier one. Anyone who has it can post as the bot, so keep it secret.\n\n```\n{token}\n```\n\nIf you're using an LLM, you can give it these instructions:\n\n```\nRead https://github.com/shazow/apron/blob/main/PROTOCOL.md\nConnect to {server}\nAuth using token scheme with this token: \"{token}\"\n```"
+            "This token signs in as your bot **{name}** (`{bot_id}`) and replaces any earlier one. Anyone who has it can post as the bot, so keep it secret.\n\n```\n{token}\n```\n\nIf you're using an LLM, you can give it these instructions:\n\n```\nRead https://apron.chat/protocol\nConnect to {server}\nAuth using token scheme with this token: \"{token}\"\n```"
         );
         c.enqueue(&super::commands::private_notice(
             &self.rooms[room_id],

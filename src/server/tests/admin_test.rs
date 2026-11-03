@@ -589,9 +589,11 @@ fn test_role_bot_makes_a_token_account_a_bot() {
     assert_eq!(
         renamed.get("error"),
         Some(&Json::from(
-            obj! {"code" => CODE_DENIED, "message" => "A bot can't change its name"}
+            obj! {"code" => CODE_DENIED, "message" => "A bot's name must contain \"bot\""}
         )),
     );
+    let renamed = bot.result("me", "rename-bot", obj! {"name" => "Announcer bot"});
+    assert_eq!(you_of(&renamed)["name"], Json::from("Announcer bot"));
     assert_eq!(
         command_error(&mut admin, "/admin announcer"),
         (CODE_DENIED, "A bot can't be an admin".into()),

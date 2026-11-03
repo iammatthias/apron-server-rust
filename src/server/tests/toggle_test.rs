@@ -222,7 +222,7 @@ fn test_toggle_addmember() {
     assert_eq!(
         refused.get("error"),
         Some(&Json::from(
-            obj! {"code" => CODE_DENIED, "message" => "Only an admin, or a bot's owner, can add someone else here"}
+            obj! {"code" => CODE_DENIED, "message" => "Only an admin, a threader in a thread, or a bot's owner, can add someone else here"}
         )),
     );
     let bot_id = format!("bot_{}", ada.user_id);

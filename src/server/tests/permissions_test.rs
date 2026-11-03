@@ -147,6 +147,133 @@ fn test_permissions_and_moderator_moves() {
     private_reply(&mut admin, &format!("/role {bot_id} mod"));
     assert_eq!(own_ext(&mut bot), permissions(&[]), "bot with mod");
     assert!(denied(&move_to(&mut bot, "bot-move", &posted, &thread)));
+
+    // With `threader` it may re-thread others' messages, and is told so.
+    private_reply(&mut admin, &format!("/role {bot_id} threader"));
+    assert_eq!(
+        own_ext(&mut bot),
+        permissions(&["move_any"]),
+        "bot with threader"
+    );
+    let frame = move_to(&mut bot, "bot-threader-in", &posted, &thread);
+    assert!(frame.contains_key("result"), "bot in: {frame:?}");
+    let frame = move_to(&mut bot, "bot-threader-out", &posted, "general");
+    assert!(frame.contains_key("result"), "bot out: {frame:?}");
+    private_reply(&mut admin, &format!("/role {bot_id} threader"));
+    assert_eq!(own_ext(&mut bot), permissions(&[]), "bot without threader");
+    assert!(denied(&move_to(
+        &mut bot,
+        "bot-unthreader-move",
+        &posted,
+        &thread
+    )));
+}
+
+/// A threader, a threader bot included, adds anyone to a thread whatever
+/// addmember says, but not to a top-level room, and removes no one
+/// (Cloudflare's "lets a threader, a threader bot included, add anyone to
+/// a thread").
+#[test]
+fn test_threaders_add_anyone_to_a_thread() {
+    let server = admin_test_server();
+    let mut admin = admin(&server);
+    let mut tia = account(&server);
+    let mut owner = account(&server);
+    let others: Vec<TestClient> = (0..3).map(|_| account(&server)).collect();
+    let tia_id = tia.user_id.clone();
+    admin.drain();
+    let (thread, _) = save_room(
+        &mut admin,
+        "thread",
+        obj! {"parent_room_id" => "general", "title" => "Rethreaded"},
+    );
+    let text = private_reply(&mut owner, "/invite-bot");
+    let token = text
+        .split("```\n")
+        .nth(1)
+        .unwrap()
+        .lines()
+        .next()
+        .unwrap()
+        .to_owned();
+    let (mut bot, _) = dial_raw(&server);
+    token_auth(&mut bot, &token);
+    let bot_id = format!("bot_{}", owner.user_id);
+    private_reply(&mut admin, "/toggle addmember");
+    // This server has the adder join the room first (docs/DEVIATIONS.md,
+    // Memberships of others).
+    for c in [&mut tia, &mut bot] {
+        reply(
+            c,
+            "room_join",
+            "join-thread",
+            obj! {"room_id" => thread.as_str()},
+        );
+    }
+    let add = |c: &mut TestClient, id: &str, room_id: &str, user_id: &str| {
+        reply(
+            c,
+            "room_join",
+            id,
+            obj! {"room_id" => room_id, "user_id" => user_id},
+        )
+    };
+    let refusal = Json::from(obj! {
+        "code" => CODE_DENIED,
+        "message" => "Only an admin, a threader in a thread, or a bot's owner, can add someone else here",
+    });
+
+    // Without a role, neither may add anyone while addmember is off.
+    assert_eq!(
+        add(&mut tia, "tia-before", &thread, &others[0].user_id).get("error"),
+        Some(&refusal)
+    );
+    assert_eq!(
+        add(&mut bot, "bot-before", &thread, &others[0].user_id).get("error"),
+        Some(&refusal)
+    );
+    // `mod` is a label on an owner's bot, so it adds nobody either.
+    private_reply(&mut admin, &format!("/role {bot_id} mod"));
+    assert_eq!(
+        add(&mut bot, "bot-mod", &thread, &others[0].user_id).get("error"),
+        Some(&refusal)
+    );
+
+    // A threader adds anyone to a thread, and a threader bot too.
+    private_reply(&mut admin, &format!("/role {tia_id} threader"));
+    private_reply(&mut admin, &format!("/role {bot_id} threader"));
+    assert_eq!(
+        add(&mut tia, "tia-thread", &thread, &others[0].user_id).get("result"),
+        Some(&Json::from(obj! {}))
+    );
+    assert_eq!(
+        add(&mut bot, "bot-thread", &thread, &others[1].user_id).get("result"),
+        Some(&Json::from(obj! {}))
+    );
+    // But not to a top-level room, which only addmember opens.
+    assert_eq!(
+        add(&mut tia, "tia-general", "general", &others[2].user_id).get("error"),
+        Some(&refusal)
+    );
+    assert_eq!(
+        add(&mut bot, "bot-general", "general", &others[2].user_id).get("error"),
+        Some(&refusal)
+    );
+    // Nor remove anyone from a thread it did not create.
+    let removed = reply(
+        &mut bot,
+        "room_leave",
+        "bot-remove",
+        obj! {"room_id" => thread.as_str(), "user_id" => others[0].user_id.as_str()},
+    );
+    assert!(denied(&removed), "{removed:?}");
+
+    // Without the role again, the bot adds nobody.
+    private_reply(&mut admin, &format!("/role {bot_id} threader"));
+    assert_eq!(
+        add(&mut bot, "bot-after", &thread, &others[2].user_id).get("error"),
+        Some(&refusal)
+    );
 }
 
 /// A guest who may post has the defaults, and `me` cannot write them.

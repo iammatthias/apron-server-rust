@@ -37,12 +37,26 @@ pub const ROOM_CREATOR_ROLES: &[&str] = &[ADMIN_ROLE, MOD_ROLE];
 /// The roles whose accounts move others' messages between rooms
 /// (apron-server-cloudflare's MODERATOR_ROLES).
 pub const MODERATOR_ROLES: &[&str] = &[ADMIN_ROLE, MOD_ROLE, THREADER_ROLE];
+/// The moderator roles an owner's bot acts on (apron-server-cloudflare's
+/// BOT_MODERATOR_ROLES), so a script can re-thread conversations. Its owner
+/// holds its token, so `admin` and `mod` are labels on it.
+pub const BOT_MODERATOR_ROLES: &[&str] = &[THREADER_ROLE];
 /// The roles whose accounts may run `/emoji` (apron-server-cloudflare's
 /// EMOJI_ROLES).
 pub const EMOJI_ROLES: &[&str] = &[ADMIN_ROLE, MOD_ROLE, FRIEND_ROLE];
 /// The key of `you`'s ext that lists what the user may do to others'
 /// messages and memberships (EXTENSIONS.md, `ext:permissions`).
 pub const PERMISSIONS_KEY: &str = "permissions";
+/// Why a bot's `me` with a name without "bot" in it is denied
+/// (apron-server-cloudflare's BOT_NAME_RULE).
+pub const BOT_NAME_RULE: &str = "A bot's name must contain \"bot\"";
+
+/// Reports whether a bot may take `name`: one with "bot" in it, in any case
+/// (apron-server-cloudflare's BOT_NAME_PATTERN), so `""` may not.
+pub fn bot_name_allowed(name: &str) -> bool {
+    name.to_lowercase().contains("bot")
+}
+
 pub const INVALID_ROLE: &str =
     "A role is 1 to 24 lowercase letters, digits, _ or -, starting with a letter";
 
@@ -246,6 +260,19 @@ impl UserState {
         self.roles.iter().any(|r| r == role)
     }
 
+    /// Reports whether the user may move others' messages between rooms
+    /// (`move_any`) and add anyone to a thread: an account, or a user made a
+    /// bot by `/role`, with a moderator role (MODERATOR_ROLES), or an
+    /// owner's bot with `threader` (BOT_MODERATOR_ROLES).
+    pub fn may_move_any(&self) -> bool {
+        let roles = if self.owner.is_some() {
+            BOT_MODERATOR_ROLES
+        } else {
+            MODERATOR_ROLES
+        };
+        self.persists() && roles.iter().any(|role| self.has_role(role))
+    }
+
     /// Reports whether the user holds one of `roles` and is no bot, whose
     /// roles grant nothing. Guests hold no roles: seeding and `/role` both
     /// refuse them.
@@ -291,8 +318,8 @@ impl State {
     /// What u may do beyond PROTOCOL.md's defaults (`ext:permissions`,
     /// EXTENSIONS.md), as the keys that differ from their defaults:
     /// `write: false` for a guest while guests only read; `add_members` for
-    /// an admin, or any account while addmember is on; `move_any` with a
-    /// moderator role. A bot has neither.
+    /// an admin, or any account while addmember is on; `move_any` for
+    /// UserState::may_move_any. A bot never has `add_members`.
     pub fn permissions_locked(&self, u: &UserState) -> Vec<(&'static str, bool)> {
         let mut permissions = Vec::new();
         if !u.persists() {
@@ -306,7 +333,7 @@ impl State {
         {
             permissions.push(("add_members", true));
         }
-        if u.has_any_role(MODERATOR_ROLES) {
+        if u.may_move_any() {
             permissions.push(("move_any", true));
         }
         permissions
@@ -673,17 +700,9 @@ impl State {
                 "Only registered users may change their profile",
             ));
         }
-        // A bot is named after its owner. The bot client sends its name on
-        // every connection, so the name it already has is no change.
-        if has_name && u.bot() && normalize_name(&name) != u.name {
-            return Err(RpcError::new(
-                CODE_DENIED,
-                if u.owner.is_some() {
-                    "A bot is named after its owner, who can rename it with /invite-bot"
-                } else {
-                    "A bot can't change its name"
-                },
-            ));
+        // A bot names itself, so long as the name says it is one.
+        if has_name && u.bot() && !bot_name_allowed(&normalize_name(&name)) {
+            return Err(RpcError::new(CODE_DENIED, BOT_NAME_RULE));
         }
         if has_status && !settable_status(&status) {
             status = STATUS_NONE.into();

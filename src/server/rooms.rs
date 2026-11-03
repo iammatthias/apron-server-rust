@@ -722,11 +722,14 @@ impl State {
                 || (u.account()
                     && (r.private
                         || self.feature_on(Feature::AddMember)
-                        || owns_bot(u, self.users.get(&target_id))));
+                        || owns_bot(u, self.users.get(&target_id))))
+                // Whoever may move others' messages, a threader bot included,
+                // brings people into a thread they moved a conversation to.
+                || (r.parent.is_some() && u.may_move_any());
             if !may_add {
                 return Err(RpcError::new(
                     CODE_DENIED,
-                    "Only an admin, or a bot's owner, can add someone else here",
+                    "Only an admin, a threader in a thread, or a bot's owner, can add someone else here",
                 ));
             }
             if !r.members.contains(&user_id) {

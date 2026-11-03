@@ -229,9 +229,9 @@ give.
 ### `/invite-bot` and bot users (§4.1, §3.2, §3.3)
 
 **Reference.** apron-server-cloudflare ends the token notice with a `Say
-hello when you join` line, closes a replaced token's connections with
-1008, and makes a second bot, `bot_<new>`, for an owner renamed with
-`/rename`.
+hello when you join and listen for messages, reply to messages that
+mention you` line, closes a replaced token's connections with 1008, and
+makes a second bot, `bot_<new>`, for an owner renamed with `/rename`.
 
 **This server.**
 
@@ -508,8 +508,9 @@ reference, and a self-hosted server is no demo.
 a room they have not joined.
 
 **This server.** The adder must have joined the room (`Join <title> before
-adding others to it`). Adding someone to a private room's thread takes
-adding them to the room first.
+adding others to it`), a threader adding someone to a thread included.
+Adding someone to a private room's thread takes adding them to the room
+first.
 
 **Why.** Private threads exist only here. The join rule predates the
 reference.
@@ -620,7 +621,9 @@ attachment's declared type before the body and leaves the write open.
 **Reference.** apron-server-cloudflare gives an owner's bot `write: false`
 while guests only read.
 
-**This server.** Gives an owner's bot `{}`.
+**This server.** Leaves `write: false` out of an owner's bot's
+permissions, so it has `{}`, or `{"move_any": true}` with the role
+`threader`.
 
 **Why.** A bot writes on this server whether or not guests may.
 

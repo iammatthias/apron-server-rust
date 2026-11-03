@@ -9,7 +9,7 @@ use super::emoji::{is_emoji_key, normalize_entries, same_entries};
 use super::limits::Category;
 use super::protocol::*;
 use super::server::{LogRecord, RecordKind, Server, State, DEFAULT_ROOM_ID};
-use super::users::{json_equal, MODERATOR_ROLES};
+use super::users::json_equal;
 use crate::obj;
 
 #[derive(Clone, Debug, Default)]
@@ -336,8 +336,7 @@ impl State {
             };
             // Someone else's message may only be moved, and only by a
             // moderator (MODERATOR_ROLES), who keeps its content as it was.
-            if m.owner != user_id
-                && (m.room_id == room_id || !self.users[&user_id].has_any_role(MODERATOR_ROLES))
+            if m.owner != user_id && (m.room_id == room_id || !self.users[&user_id].may_move_any())
             {
                 return Err(RpcError::new(
                     CODE_DENIED,
