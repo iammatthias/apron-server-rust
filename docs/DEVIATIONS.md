@@ -263,6 +263,31 @@ that keeps it.
 **Why.** The hourly thread already exists. The close follows
 [Closing a connection](#closing-a-connection).
 
+### Account upkeep (SPEC §5; Cloudflare's configuration, Server tiers)
+
+**Reference.** apron-server-cloudflare's alarm removes registered accounts
+inactive for `idleAccountSeconds` (30 days), with their bots, except the
+100 most recently active, role holders, the admin user, connected users
+and owners of live uploads; frees a removed or purged `user_id` after
+`retiredUserIdSeconds` (the message retention); expires a device token
+unused for 30 days (`denied`, `This device token expired after going
+unused; get a new one with /invite-device add on a signed-in device`);
+clears expired mutes; and deletes expired uploads from its bucket. Sessions
+carry the user handle they were issued under, so a session never resumes a
+later account under a freed `user_id`.
+
+**This server.** Keeps every account and device token until its user or
+an admin removes it (`/invite-device remove`, `/invite-purge`, `/purge`),
+and keeps a removed `user_id` in `used_ids` for good (see
+[`/purge`](#purge-41)).
+Uploads are not part of this upkeep.
+
+**Why.** Cloudflare prunes to bound a public demo's storage and identity
+cap. A self-hosted server keeps what its users made unless they or an admin
+remove it, as history retention is opt-in here. A user_id never reissued
+needs no session handle check. Ladle signs in with a device token, which
+should not stop working because a phone sat unused for a month.
+
 ### Closing a connection
 
 **Reference.** apron-server-cloudflare closes a revoked, purged or swept
@@ -403,8 +428,12 @@ falls 256 KiB behind gets an error.
 - `url` is `/live/<secret>` on the connection's base URL (`--public-url`
   where set), and a write URL `/write/<token>`, a random token. A write URL
   that is unknown, used or expired, a made-up one included, is 409.
-- Reads and writes are not charged to connection attempts, and there is no
-  budget guard.
+- Reads and writes are not charged to connection attempts, nor reads to a
+  location's share (`LIVE_READS`) or an IPv6 /48's limit, and there is no
+  budget guard. A read refused with `Apron-Live-Refused` is not
+  remembered: each later read is decided afresh, so a reader gets in as
+  soon as a place frees, where Cloudflare's entry Worker repeats the
+  refusal until its `Retry-After`.
 - A message's post is charged before its live text start is checked, so a
   refused start still spends that post, as other refusals after the post
   charge do. `/embed-terminal` and `/embed-append` charge both together, as
@@ -661,6 +690,22 @@ probe answers in JSON, as Cloudflare's does.
 
 **Why.** The handshake is the Go port's coder/websocket. A WebSocket
 client never sees these refusals.
+
+### A browser opening the server's address
+
+**Reference.** apron-server-cloudflare's edge rules answer a browser's
+plain `GET /` on the server's hostname, which is also its WebSocket
+endpoint, with a 302 to the web client, `https://web.apron.chat/`, with
+`#server=wss://<host>/` in the fragment (`apron_browser_redirect`).
+
+**This server.** Has no edge rules and no redirect. `/` is the web client
+when `--static-dir` names one, as the deployment's router serves it (see
+`AGENTS.md`, Deployment), and 404 otherwise.
+
+**Why.** The WebSocket is at `/ws`, so `/` is free for the web client on
+the same origin, which connects to the server that served it: a browser
+opening the address lands in the client with its server set, which is
+what the redirect does for Cloudflare.
 
 ### Client address (SPEC §5, IP key), `--client-ip-header`
 

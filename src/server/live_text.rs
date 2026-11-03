@@ -4,6 +4,7 @@
 //! and its SPEC section 4.5 have it. The text lives in memory while it
 //! streams; what its kind keeps is published once, when it ends.
 
+use std::collections::HashMap;
 use std::io::{self, Read};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread;
@@ -15,7 +16,7 @@ use rust_stdlib::time::{self, Duration};
 use super::client::Client;
 use super::commands::{private_notice, CommandCtx};
 use super::embeds::{replace_embed, LivePost};
-use super::limits::Category;
+use super::limits::{Category, IpKey};
 use super::protocol::*;
 use super::server::{Server, State};
 use super::uploads::refuse_write;
@@ -23,6 +24,11 @@ use crate::obj;
 
 /// Where a live text is read: `/live/<secret>`.
 pub const LIVE_PATH: &str = "/live/";
+
+/// Marks a read refused for the text or the server, not the reader:
+/// `ended` (or never existed) or `readers`, as apron-server-cloudflare's
+/// object marks them for its entry Worker to repeat.
+pub const LIVE_REFUSED_HEADER: &str = "Apron-Live-Refused";
 
 /// Apron's stand-alone terminal viewer, where a browser that opens a
 /// terminal's `url` goes unless `--terminal-viewer-url` says otherwise.
@@ -163,10 +169,12 @@ pub struct LiveLimits {
     /// Texts open on the server at once, unused write URLs included; zero is
     /// no limit.
     pub concurrent: usize,
-    /// Readers of one text at once, and reads over its life; zero is no
-    /// limit.
+    /// Readers of one text at once, of every text together, and from one
+    /// address (IpKey) across every text; zero is no limit. Reads over a
+    /// text's life are not counted.
     pub readers_per_text: usize,
-    pub reads_per_text: u32,
+    pub readers: usize,
+    pub readers_per_address: usize,
 }
 
 impl Default for LiveLimits {
@@ -184,8 +192,9 @@ impl Default for LiveLimits {
             starts_per_user_day: 20,
             starts_per_day: 100,
             concurrent: 4,
-            readers_per_text: 10,
-            reads_per_text: 30,
+            readers_per_text: 200,
+            readers: 400,
+            readers_per_address: 16,
         }
     }
 }
@@ -527,16 +536,108 @@ struct LiveInner {
     end: Option<LiveEnd>,
     /// Set once the writer's body ended.
     writer_done: bool,
-    /// Readers now, and reads served over the text's life.
+    /// Readers now.
     readers: usize,
-    served: u32,
+}
+
+/// The readers of every live text together, which LiveLimits bounds
+/// server-wide and per address.
+#[derive(Debug, Default)]
+pub struct LiveReaders {
+    total: usize,
+    by_address: HashMap<IpKey, usize>,
 }
 
 /// Why a reader is refused (§4.8.3, SPEC section 4.5).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ReaderRefusal {
-    TooMany,
-    TooOften,
+    /// The text has as many readers as it may have.
+    Text,
+    /// Every text together has as many as the server allows.
+    Server,
+    /// The reader's address has as many as one may have.
+    Address,
+}
+
+impl ReaderRefusal {
+    /// The refusal's text, and its `Apron-Live-Refused` mark: the text's and
+    /// the server's are `readers`, an address's own is not marked.
+    fn answer(self) -> (&'static str, Option<&'static str>) {
+        match self {
+            ReaderRefusal::Text => (
+                "This live text has as many readers as it may have",
+                Some("readers"),
+            ),
+            ReaderRefusal::Server => (
+                "Live text has as many readers as the server allows",
+                Some("readers"),
+            ),
+            ReaderRefusal::Address => ("Too many live text readers from your address", None),
+        }
+    }
+}
+
+/// An admitted reader's place among the readers, given back when dropped.
+pub struct ReaderSlot<'a> {
+    readers: &'a Mutex<LiveReaders>,
+    text: &'a LiveText,
+    address: Option<IpKey>,
+}
+
+impl Drop for ReaderSlot<'_> {
+    fn drop(&mut self) {
+        let mut all = self.readers.lock().unwrap_or_else(|e| e.into_inner());
+        all.total -= 1;
+        if let Some(address) = &self.address {
+            if let Some(count) = all.by_address.get_mut(address) {
+                *count -= 1;
+                if *count == 0 {
+                    all.by_address.remove(address);
+                }
+            }
+        }
+        self.text.lock().readers -= 1;
+    }
+}
+
+/// Admits a reader of `text` within `limits`: its place, the kept bytes it
+/// starts with and the offset it reads on from. Without an address, only
+/// the text's and the server's limits apply.
+pub fn open_reader<'a>(
+    readers: &'a Mutex<LiveReaders>,
+    text: &'a LiveText,
+    address: Option<IpKey>,
+    limits: &LiveLimits,
+) -> Result<(ReaderSlot<'a>, Vec<u8>, usize), ReaderRefusal> {
+    let mut all = readers.lock().unwrap_or_else(|e| e.into_inner());
+    let mut b = text.lock();
+    let over = |limit: usize, count: usize| limit > 0 && count >= limit;
+    if over(limits.readers_per_text, b.readers) {
+        return Err(ReaderRefusal::Text);
+    }
+    if over(limits.readers, all.total) {
+        return Err(ReaderRefusal::Server);
+    }
+    if let Some(address) = &address {
+        let from = all.by_address.get(address).copied().unwrap_or(0);
+        if over(limits.readers_per_address, from) {
+            return Err(ReaderRefusal::Address);
+        }
+        all.by_address.insert(address.clone(), from + 1);
+    }
+    all.total += 1;
+    b.readers += 1;
+    let opened = (b.buffer.kept().to_vec(), b.total);
+    drop(b);
+    Ok((
+        ReaderSlot {
+            readers,
+            text,
+            address,
+        },
+        opened.0,
+        opened.1,
+    ))
 }
 
 /// A reader's next step.
@@ -591,7 +692,6 @@ impl LiveText {
                 end: None,
                 writer_done: false,
                 readers: 0,
-                served: 0,
             }),
             changed: Condvar::new(),
         }
@@ -660,25 +760,6 @@ impl LiveText {
             .wait_while(b, |b| !b.writer_done && b.end.is_none())
             .unwrap_or_else(|e| e.into_inner());
         b.writer_done
-    }
-
-    /// Admits a reader within `limits`: the kept bytes it starts with and
-    /// the offset it reads on from.
-    pub fn open_reader(&self, limits: &LiveLimits) -> Result<(Vec<u8>, usize), ReaderRefusal> {
-        let mut b = self.lock();
-        if limits.reads_per_text > 0 && b.served >= limits.reads_per_text {
-            return Err(ReaderRefusal::TooOften);
-        }
-        if limits.readers_per_text > 0 && b.readers >= limits.readers_per_text {
-            return Err(ReaderRefusal::TooMany);
-        }
-        b.served += 1;
-        b.readers += 1;
-        Ok((b.buffer.kept().to_vec(), b.total))
-    }
-
-    pub fn close_reader(&self) {
-        self.lock().readers -= 1;
     }
 
     /// What a reader at `position` gets next, waiting up to `wait` for
@@ -854,6 +935,7 @@ impl Server {
                 .and_then(|e| Some((e.live.as_ref()?.text.clone(), e.live_url())))
         };
         let Some((text, url)) = found else {
+            w.header().set(LIVE_REFUSED_HEADER, "ended");
             live_answer(
                 w,
                 http::STATUS_NOT_FOUND,
@@ -883,24 +965,20 @@ impl Server {
             w.write_header(http::STATUS_OK);
             return;
         }
-        let (initial, mut position) = match text.open_reader(&self.config.live) {
+        let opened = open_reader(
+            &self.live_readers,
+            &text,
+            self.client_ip(r),
+            &self.config.live,
+        );
+        let (_slot, initial, mut position) = match opened {
             Ok(opened) => opened,
-            Err(ReaderRefusal::TooOften) => {
-                live_answer(
-                    w,
-                    http::STATUS_FORBIDDEN,
-                    "This live text has been read as often as it may be",
-                    None,
-                );
-                return;
-            }
-            Err(ReaderRefusal::TooMany) => {
-                live_answer(
-                    w,
-                    http::STATUS_TOO_MANY_REQUESTS,
-                    "This live text has as many readers as it may have",
-                    Some(10),
-                );
+            Err(refusal) => {
+                let (message, mark) = refusal.answer();
+                if let Some(mark) = mark {
+                    w.header().set(LIVE_REFUSED_HEADER, mark);
+                }
+                live_answer(w, http::STATUS_TOO_MANY_REQUESTS, message, Some(10));
                 return;
             }
         };
@@ -908,7 +986,6 @@ impl Server {
         w.write_header(http::STATUS_OK);
         // A reader before the first bytes sees its headers now, and waits.
         if !initial.is_empty() && io::Write::write_all(w, &initial).is_err() {
-            text.close_reader();
             return;
         }
         let _ = ResponseController::new(w).flush();
@@ -935,7 +1012,6 @@ impl Server {
                 }
             }
         }
-        text.close_reader();
     }
 
     /// The terminal viewer a browser that opens `url` as a page goes to, if

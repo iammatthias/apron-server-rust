@@ -227,6 +227,8 @@ pub struct Server {
     /// Set by `shutdown`; ends the sweep of expired registrations.
     pub(crate) stopped: Arc<Done>,
     pub(crate) methods: BTreeMap<&'static str, &'static Method>,
+    /// The readers of every live text, for the limits across texts.
+    pub(crate) live_readers: Mutex<super::live_text::LiveReaders>,
 }
 
 /// The lock on `State`. Dropping it writes the changes made under the lock
@@ -372,6 +374,7 @@ pub fn open(config: Config) -> Result<Arc<Server>, store::StoreError> {
             unfurler,
             stopped: Arc::new(Done::default()),
             methods: methods(&config),
+            live_readers: Mutex::default(),
         }
     });
     {

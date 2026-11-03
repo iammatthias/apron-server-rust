@@ -945,44 +945,86 @@ fn test_start_and_reader_limits() {
     let (message, data) = retry_after_of(&refusal);
     assert_eq!(message, "Live text limit reached");
     assert!(!data.contains_key("ext"), "{data:?}");
-    // Readers per text, then reads over its life.
+    // Readers of one text at once, then of every text together.
     let mut config = live_config();
     config.live.readers_per_text = 2;
-    config.live.reads_per_text = 3;
+    config.live.readers = 3;
+    config.live.readers_per_address = 0;
     let server = new_test_server(config);
-    let mut writer = dial_test_client(&server);
-    writer.drain();
-    let result = super::helpers::post_embeds(
-        &mut writer,
-        "post",
-        obj! {"body" => obj! {"text" => "x", "embeds" => vec![Json::from(obj! {"kind" => "terminal"})]}},
-    );
-    let (put, done) = stream_to(written(&result)["write_url"].as_str().unwrap());
-    let (_, url) = url_added(&writer, result["message_id"].as_str().unwrap());
-    let one = Reader::open(&url);
-    let two = Reader::open(&url);
-    assert_eq!((one.status, two.status), (200, 200));
-    let (status, header, body) = http_do("GET", &url, None, "");
-    assert_eq!(
+    let mut writers = [dial_test_client(&server), dial_test_client(&server)];
+    let mut texts = Vec::new();
+    for (i, writer) in writers.iter_mut().enumerate() {
+        writer.drain();
+        let result = super::helpers::post_embeds(
+            writer,
+            &format!("post-{i}"),
+            obj! {"body" => obj! {"text" => "x", "embeds" => vec![Json::from(obj! {"kind" => "terminal"})]}},
+        );
+        let (put, done) = stream_to(written(&result)["write_url"].as_str().unwrap());
+        let (_, url) = url_added(writer, result["message_id"].as_str().unwrap());
+        texts.push((put, done, url));
+    }
+    let refused = |url: &str| {
+        let (status, header, body) = http_do("GET", url, None, "");
         (
             status,
-            header.get("Retry-After"),
-            String::from_utf8_lossy(&body).into_owned()
-        ),
+            header.get("Retry-After").map(str::to_owned),
+            header.get("Apron-Live-Refused").map(str::to_owned),
+            String::from_utf8_lossy(&body).into_owned(),
+        )
+    };
+    let first = [Reader::open(&texts[0].2), Reader::open(&texts[0].2)];
+    assert_eq!((first[0].status, first[1].status), (200, 200));
+    assert_eq!(
+        refused(&texts[0].2),
         (
             429,
-            Some("10"),
+            Some("10".into()),
+            Some("readers".into()),
             "This live text has as many readers as it may have\n".into()
         )
     );
+    let second = Reader::open(&texts[1].2);
+    assert_eq!(second.status, 200);
+    assert_eq!(
+        refused(&texts[1].2),
+        (
+            429,
+            Some("10".into()),
+            Some("readers".into()),
+            "Live text has as many readers as the server allows\n".into()
+        )
+    );
+    // The first text's readers go when it ends, leaving their places.
+    let (put, done, ended_url) = texts.remove(0);
     put.write_shared(b"x").unwrap();
     put.close();
     answer(&done);
-    one.ended();
-    two.ended();
-    // Reads over a text's life, reconnects included.
+    for reader in &first {
+        reader.ended();
+    }
+    assert_eq!(
+        refused(&ended_url),
+        (
+            404,
+            None,
+            Some("ended".into()),
+            "This live text has ended, or never existed\n".into()
+        )
+    );
+    let again = Reader::open(&texts[0].2);
+    assert_eq!(again.status, 200, "a place left by an ended text");
+    let (put, done, _) = texts.remove(0);
+    put.write_shared(b"x").unwrap();
+    put.close();
+    answer(&done);
+    second.ended();
+    again.ended();
+
+    // Readers from one address across every text, that address's own
+    // limit, which is not marked.
     let mut config = live_config();
-    config.live.reads_per_text = 2;
+    config.live.readers_per_address = 2;
     let server = new_test_server(config);
     let mut writer = dial_test_client(&server);
     writer.drain();
@@ -998,12 +1040,13 @@ fn test_start_and_reader_limits() {
         readers.iter().map(|r| r.status).collect::<Vec<_>>(),
         [200, 200]
     );
-    let (status, _, body) = http_do("GET", &url, None, "");
     assert_eq!(
-        (status, String::from_utf8_lossy(&body).into_owned()),
+        refused(&url),
         (
-            403,
-            "This live text has been read as often as it may be\n".into()
+            429,
+            Some("10".into()),
+            None,
+            "Too many live text readers from your address\n".into()
         )
     );
     put.write_shared(b"x").unwrap();
@@ -1258,13 +1301,13 @@ fn test_a_terminal_opened_as_a_page_goes_to_the_viewer() {
             obj! {"embed_id" => embed_id, "kind" => "terminal", "title" => "ci", "url" => url.as_str(), "og" => card("ci")}
         )])
     );
-    // The url goes in the fragment (§4.8.5), and redirects are no reads:
-    // more of them than reads_per_text leave a reader its read.
+    // The url goes in the fragment (§4.8.5), and a redirect holds no
+    // reader's place.
     let location = format!(
         "http://terminal.test/view#stream={}",
         url.replace(':', "%3A").replace('/', "%2F")
     );
-    for _ in 0..=server.app.config.live.reads_per_text {
+    for _ in 0..3 {
         let (status, header) = navigate("GET", &url);
         assert_eq!(
             (
