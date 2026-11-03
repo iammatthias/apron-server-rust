@@ -627,6 +627,9 @@ pub fn open_reader<'a>(
     }
     all.total += 1;
     b.readers += 1;
+    // The kept bytes are copied under the text's lock alone, so readers of
+    // other texts do not wait on the copy.
+    drop(all);
     let opened = (b.buffer.kept().to_vec(), b.total);
     drop(b);
     Ok((

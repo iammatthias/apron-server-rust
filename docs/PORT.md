@@ -254,7 +254,7 @@ Ported on 2026-11-02, moving the pins to apron-server-cloudflare 9ee7def
   in `src/server/messages.rs`, and adding anyone to a thread whatever
   addmember says in `join_room_locked`. The adder still joins first.
 - #79: a bot's `me` name must contain "bot", ignoring case, checked on the
-  normalized name; the old rule that let a bot resend its own name is
+  name as sent, as on Cloudflare; the old rule that let a bot resend its own name is
   gone, since Cloudflare checks every name.
 - #81: `Audience::Registered` (accounts and bots) holds `/avatar`.
 

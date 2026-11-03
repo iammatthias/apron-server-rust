@@ -336,13 +336,15 @@ fn test_guest_history_depth() {
         "general",
         obj! {"after" => logs[0].as_str(), "before" => logs[1].as_str()},
     );
-    assert!(window.contains_key("result"), "{window:?}");
+    assert_eq!(messages(&window), logs[0..2].to_vec());
     let caught_up = page(&mut guest, "general", obj! {"after" => logs[0].as_str()});
-    assert!(caught_up.contains_key("result"), "{caught_up:?}");
+    assert_eq!(messages(&caught_up), logs[0..2].to_vec());
     // Every room is measured from its own newest: a quiet thread opens
     // however busy general is.
     let quiet = page(&mut guest, &thread, obj! {"before" => logs[0].as_str()});
-    assert!(quiet.contains_key("result"), "{quiet:?}");
+    let quiet = quiet["result"].as_object().unwrap();
+    assert_eq!(log_ids(quiet, "messages"), Vec::<String>::new());
+    assert_eq!(log_ids(quiet, "rooms").len(), 1, "{quiet:?}");
 }
 
 /// A refused guest page is charged as a served one (Cloudflare's "keeps a

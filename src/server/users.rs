@@ -701,7 +701,7 @@ impl State {
             ));
         }
         // A bot names itself, so long as the name says it is one.
-        if has_name && u.bot() && !bot_name_allowed(&normalize_name(&name)) {
+        if has_name && u.bot() && !bot_name_allowed(&name) {
             return Err(RpcError::new(CODE_DENIED, BOT_NAME_RULE));
         }
         if has_status && !settable_status(&status) {

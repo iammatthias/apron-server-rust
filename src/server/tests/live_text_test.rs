@@ -1026,22 +1026,26 @@ fn test_start_and_reader_limits() {
     let mut config = live_config();
     config.live.readers_per_address = 2;
     let server = new_test_server(config);
-    let mut writer = dial_test_client(&server);
-    writer.drain();
-    let result = super::helpers::post_embeds(
-        &mut writer,
-        "again",
-        obj! {"body" => obj! {"text" => "x", "embeds" => vec![Json::from(obj! {"kind" => "terminal"})]}},
-    );
-    let (put, done) = stream_to(written(&result)["write_url"].as_str().unwrap());
-    let (_, url) = url_added(&writer, result["message_id"].as_str().unwrap());
-    let readers = [Reader::open(&url), Reader::open(&url)];
+    let mut writers = [dial_test_client(&server), dial_test_client(&server)];
+    let mut texts = Vec::new();
+    for (i, writer) in writers.iter_mut().enumerate() {
+        writer.drain();
+        let result = super::helpers::post_embeds(
+            writer,
+            &format!("again-{i}"),
+            obj! {"body" => obj! {"text" => "x", "embeds" => vec![Json::from(obj! {"kind" => "terminal"})]}},
+        );
+        let (put, done) = stream_to(written(&result)["write_url"].as_str().unwrap());
+        let (_, url) = url_added(writer, result["message_id"].as_str().unwrap());
+        texts.push((put, done, url));
+    }
+    let readers = [Reader::open(&texts[0].2), Reader::open(&texts[1].2)];
     assert_eq!(
         readers.iter().map(|r| r.status).collect::<Vec<_>>(),
         [200, 200]
     );
     assert_eq!(
-        refused(&url),
+        refused(&texts[0].2),
         (
             429,
             Some("10".into()),
@@ -1049,9 +1053,11 @@ fn test_start_and_reader_limits() {
             "Too many live text readers from your address\n".into()
         )
     );
-    put.write_shared(b"x").unwrap();
-    put.close();
-    answer(&done);
+    for (put, done, _) in texts {
+        put.write_shared(b"x").unwrap();
+        put.close();
+        answer(&done);
+    }
 }
 
 #[test]
