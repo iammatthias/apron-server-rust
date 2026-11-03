@@ -3,5 +3,5 @@
 # pin that touch the behavior contract; move a pin after reviewing them.
 #
 # <owner/repo> <commit>
-apron-chat/apron-server-cloudflare 196154b65e0598c4da1f328079126d4637ea6f16
-shazow/apron 3caa5217bb481f9fa09058e7e20b686e0fb70744
+apron-chat/apron-server-cloudflare 9ee7def78acb1a2306fefc165b0b56417bd28432
+shazow/apron 23636cc4dec5f1b8ef00c0c4768c7f383db4001e

@@ -265,7 +265,10 @@ await check("guest: posting is denied, history reads", async () => {
     if (!post.error) return "post was not denied";
     if (!/Guests can only read/.test(post.error.message)) return `message ${JSON.stringify(post.error.message)}`;
     const history = await c.call("history", { room_id: "general" });
-    return !history.error || `history ${JSON.stringify(history.error)}`;
+    if (history.error) return `history ${JSON.stringify(history.error)}`;
+    // The newest page as a client without a checkpoint asks for it, before the head.
+    const head = await c.call("history", { room_id: "general", before: history.result.latest_log_id });
+    return !head.error || `history before the head ${JSON.stringify(head.error)}`;
   } finally {
     c.close();
   }
@@ -783,7 +786,8 @@ async function liveText(acct, roomID, acctID) {
     } else if (reader.status !== 404) return `reader ${reader.status} ${JSON.stringify(reader.text)}`;
     const again = await fetch(write, { method: "PUT", body: "again" });
     if (again.status !== 409) return `write_url again ${again.status}`;
-    return same((await fetch(embed.url)).status, 404);
+    const ended = await fetch(embed.url);
+    return same(`${ended.status} ${ended.headers.get("apron-live-refused")}`, "404 ended");
   });
   // Through the edge a write ends as it arrives, so this one goes to the
   // router's published port on the host, where it stays open while a
@@ -1020,6 +1024,34 @@ async function trackC(admin, adminToken) {
     const trusted = trustedMedia(p, avatar);
     if (trusted !== true) return trusted;
     return same((await fetch(avatar)).status, 200);
+  });
+  await check("bot: renames itself only with \"bot\" in the name, and sets its avatar with /avatar", async () => {
+    const invited = await acct.call("command", { room_id: roomID, body: { text: "/invite-bot" } });
+    const token = noticeText(invited.frames).match(/```\n(apron_bot_[A-Za-z0-9_-]+)\n```/)?.[1];
+    if (!token) return `no bot token ${JSON.stringify(invited.error ?? noticeText(invited.frames))}`;
+    const bot = await connect();
+    try {
+      await bot.server();
+      const signIn = await bot.call("auth", { scheme: "token", token });
+      if (signIn.error) return `sign-in ${JSON.stringify(signIn.error)}`;
+      const refused = await bot.call("me", { name: "Livecheck" });
+      if (refused.error?.message !== 'A bot\'s name must contain "bot"') return `me Livecheck ${JSON.stringify(refused.error ?? refused.result)}`;
+      const renamed = await bot.call("me", { name: "Livecheck bot" });
+      if (renamed.result?.you?.name !== "Livecheck bot") return `me Livecheck bot ${JSON.stringify(renamed.error ?? renamed.result)}`;
+      const help = noticeText((await bot.call("command", { room_id: "general", body: { text: "/help" } })).frames);
+      if (!help.includes("`/avatar") || help.includes("`/invite-bot")) return `help ${JSON.stringify(help)}`;
+      const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
+      const started = await bot.call("command", { room_id: "general", body: { text: "/avatar", embeds: [{ kind: "upload" }] } });
+      const url = started.result?.embeds?.[0]?.write_url;
+      if (!url) return `no write_url ${JSON.stringify(started.error ?? started.result)}`;
+      const from = bot.frames.length;
+      const put = await fetch(url, { method: "PUT", headers: { "Content-Type": "image/png" }, body: png });
+      if (put.status !== 201) return `PUT ${put.status}`;
+      const you = await bot.until(() => bot.frames.slice(from).find((f) => f.method === "user" && f.params?.you?.avatar), 8000, "the bot's avatar");
+      return same((await fetch(you.params.you.avatar)).status, 200);
+    } finally {
+      bot.close();
+    }
   });
   await check("C10: an upload that is not an image or audio is 415", async () => {
     const r = await acct.call("message", { room_id: roomID, body: { text: "livecheck upload", embeds: [{ kind: "upload", title: "livecheck.txt" }] } });

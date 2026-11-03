@@ -216,6 +216,58 @@ Tests: `test_a_terminal_opened_as_a_page_goes_to_the_viewer`,
 `live_text_test.rs`; `test_terminal_viewer_url_settings` in
 `src/aprond/config_test.rs` with Cloudflare's invalid values.
 
+### Bots, live text readers and guest history (CF 11caab6 to 9ee7def)
+
+Ported on 2026-11-02, moving the pins to apron-server-cloudflare 9ee7def
+(#81) and shazow/apron 23636cc, which has nothing to review since 3caa521.
+
+- #73 and #74, live text readers: `LiveLimits` drops `reads_per_text` and
+  has `readers_per_text` 200, `readers` 400 (every text together) and
+  `readers_per_address` 16 (one `IpKey` across every text). The texts'
+  tally is `Server.live_readers`; `open_reader` in
+  `src/server/live_text.rs` checks the text, then the server, then the
+  address, under that lock and the text's, and the `ReaderSlot` it returns
+  gives the places back when the reader goes. The text's and the server's
+  429s carry `Apron-Live-Refused: readers`, an ended or unknown text's 404
+  `Apron-Live-Refused: ended`. The entry Worker's refusal cache, the
+  location share and the /48 limiter are edge mechanics, recorded in
+  DEVIATIONS.
+- #74, account upkeep: not ported, recorded in DEVIATIONS. It prunes a
+  public demo's idle accounts, frees their user_ids and expires unused
+  device tokens; a self-hosted server keeps them, and Ladle's device
+  token should not lapse.
+- #75, the edge's redirect of a browser to the web client: not ported,
+  recorded in DEVIATIONS. The WebSocket is at `/ws`, and the deployment's
+  router serves the web client at `/` on the same origin.
+- #76, guest history: `--limit.guest-history-depth` (default 200, 0 for
+  none) bounds a guest's `before`-alone page by the records past `before`
+  in the rooms it reads, counted from the in-memory logs; past it is
+  `denied` "Sign in to load older history", charged as a page. Before
+  this, guests here scrolled back without a bound. No degraded tier exists
+  to port.
+- #77: the bot instructions point at https://apron.chat/protocol; the
+  `Say hello` line stays out, as before.
+- #78 and #80: `UserState::may_move_any` is the one rule: an owner's bot
+  moves with `threader` only, anyone else persisted with `admin`, `mod` or
+  `threader` (a user made a bot by `/role` included, as on Cloudflare,
+  where its tier is `registered`). It decides `move_any`, the move check
+  in `src/server/messages.rs`, and adding anyone to a thread whatever
+  addmember says in `join_room_locked`. The adder still joins first.
+- #79: a bot's `me` name must contain "bot", ignoring case, checked on the
+  normalized name; the old rule that let a bot resend its own name is
+  gone, since Cloudflare checks every name.
+- #81: `Audience::Registered` (accounts and bots) holds `/avatar`.
+
+Tests: `test_start_and_reader_limits` in `live_text_test.rs`;
+`test_guest_history_depth` and `test_refused_guest_page_is_charged` in
+`server_history_test.rs`; `test_permissions_and_moderator_moves` and
+`test_threaders_add_anyone_to_a_thread` in `permissions_test.rs`;
+`test_bot_names_itself_only_with_bot_in_the_name` and
+`test_bot_sets_its_avatar_and_streams_live_text` in `invite_bot_test.rs`;
+`test_role_bot_makes_a_token_account_a_bot` in `admin_test.rs`. The live
+check adds a bot's rename and `/avatar`, a guest's newest page `before`
+the head, and the ended text's mark.
+
 ## Migrating a guest_<n> account
 
 Accounts registered before 2026-10-28, such as the live `guest_1` with its
