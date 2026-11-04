@@ -185,6 +185,7 @@ impl State {
                 }
             }
             Remap::Rename { from, to } => {
+                let badge_pending = self.users[from].badge_timer.is_some();
                 self.stop_timers_locked(from);
                 let mut u = self.users.remove(from).expect("renamed users exist");
                 u.id = to.to_owned();
@@ -201,6 +202,9 @@ impl State {
                 self.schedule_mute_locked(to);
                 for room_id in room_mutes {
                     self.schedule_room_mute_locked(to, &room_id);
+                }
+                if badge_pending {
+                    self.schedule_badge_locked(to);
                 }
             }
         }

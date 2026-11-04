@@ -704,3 +704,42 @@ fn test_rename_during_a_failing_request() {
         "a retry of the failed request's id: {frame:?}"
     );
 }
+
+/// A badge push waiting out badge_delay when the user is renamed still goes,
+/// to the moved registration, as Cloudflare's moveUserState keeps what was
+/// pending for the user (#83).
+#[test]
+fn test_rename_keeps_a_pending_badge_push() {
+    let relay = super::push_test::new_test_relay();
+    let server = new_test_server(account_config());
+    server.app.lock().badge_delay = rust_stdlib::time::HOUR;
+    let mut admin = admin(&server);
+    let (mut dave, _) = named_account(&server, "Dave");
+    let (mut erin, _) = named_account(&server, "Erin");
+    let from = dave.user_id.clone();
+    super::push_test::add_push(
+        &server,
+        &from,
+        super::push_test::relay_push(
+            format!("{}/dave", relay.url),
+            crate::server::push::WakeScope::BADGE,
+        ),
+    );
+    dave.drain();
+    save(&mut erin, "post", obj! {"body" => obj! {"text" => "hi"}});
+    dave.notification("message");
+    assert!(
+        server.app.lock().users[&from].badge_timer.is_some(),
+        "no badge push pending"
+    );
+    server.app.lock().badge_delay = rust_stdlib::time::Duration::from_millis(50);
+    admin.drain();
+
+    let to = "david_moved";
+    let text = private_reply(&mut admin, &format!("/rename @{from} @{to}"));
+    assert_eq!(text, format!("Renamed `{from}` to `{to}`."));
+    let got = relay.pushes(&server, &mut admin);
+    assert_eq!(got.len(), 1, "badge pushes after the rename");
+    assert_eq!(got[0].path, "/dave");
+    assert_eq!(got[0].payload()["unread"], Json::from(1i64));
+}
