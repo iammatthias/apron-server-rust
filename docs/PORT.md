@@ -541,3 +541,29 @@ Ported on 2026-11-03, moving the apron-server-cloudflare pin to 227d1f0
   member of their own top-level room, so an admin does it now.
 - #82's other half, no bot owns a bot, needed nothing. `/invite-bot` has
   the `Accounts` audience, and a bot of either kind is never an account.
+
+### State machines (CF bc7207f)
+
+Reviewed on 2026-11-04, moving the apron-server-cloudflare pin to bc7207f
+(#83) and the shazow/apron pin to 6ac69cc, whose only change is
+`tests/fixtures/wire`, which nothing here loads.
+
+- `/rename` keeps a pending badge push: the Rename arm of
+  `remap_users_locked` schedules it again under the new user_id
+  (`test_rename_keeps_a_pending_badge_push`). A pending status change was
+  already safe, since the rename's `user` notice publishes it.
+- The rest are Durable Object artifacts that cannot happen here.
+  `SettledMeta` guards values a transaction rollback would erase; this
+  server has no transactions, no storage-pressure latch and no account
+  accounting (`persist.rs` writes marked state after the lock is
+  released). The deadline registry makes every deadline reach the one
+  alarm; here each deadline is its own `time::after_func`, and read
+  cursors are written at once (`activity.rs`). The 1011 "Connection state
+  too large" close guards a serialized WebSocket attachment, which this
+  server does not have. A live text's write window timer
+  (`new_write_locked`) removes the embed at expiry, so its slots and its
+  message end together. A removal as a write starts ends the shared
+  `LiveText`, which `wait_writer` sees. The claim, retention's floor move
+  and deletion, and a passkey ceremony's begin each run in one lock hold,
+  so there is no stale copy to write back. Toggles live in `State`, not
+  in a store read per connection.
